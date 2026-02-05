@@ -1,22 +1,36 @@
-# SmartCheck Mobile App - Scanning & Auto-Grading System
+# SmartCheck Mobile App - Zipgrade Scanner & Generator
 
-A React Native mobile application built with Expo for scanning and automatically grading student answer sheets.
+A React Native mobile application built with Expo for generating and scanning Zipgrade-compatible answer sheets with automatic grading.
 
 ## Features
 
-### 🔍 Scanning & Auto-Grading Subsystem
+### 🔍 Zipgrade Scanner
 
-- **Mobile Camera Integration**: Capture answer sheets using device camera
-- **Student ID Recognition**: Automatically read student ID bubbles
+- **Mobile Camera Integration**: Capture Zipgrade answer sheets using device camera
+- **Student ID Recognition**: Automatically read 8-digit student ID bubbles
 - **Answer Detection**: Scan and interpret bubble answers (A, B, C, D)
 - **Auto-Grading**: Compare answers with answer key and compute scores
 - **Instant Results**: Show success toast with Student ID and score
 - **Detailed Results**: View question-by-question breakdown
 
+### 📄 Answer Sheet Generator
+
+- **Zipgrade Templates**: Generate standard 20, 50, or 100 question sheets
+- **Blank Sheets**: Create empty answer sheets for exams
+- **Pre-filled Test Sheets**: Generate sheets with random answers for testing
+- **Print-Ready Format**: SVG output compatible with standard printers
+- **Multiple Configurations**: Support for different exam IDs and versions
+
+### 🎮 Interactive Demo
+
+- **Complete Workflow**: Test generation → scanning → grading
+- **Simulated Processing**: See how the scanner works with generated sheets
+- **Real-time Results**: View actual grading output and statistics
+
 ### 📱 User Interface
 
-- **Scanner Tab**: Dedicated tab for scanning functionality
-- **Camera View**: Real-time camera with alignment guides
+- **Four Dedicated Tabs**: Scanner, Generator, Demo, and Home
+- **Camera View**: Real-time camera with Zipgrade alignment guides
 - **Results Display**: Comprehensive score and answer details
 - **Toast Notifications**: Success/error feedback
 - **Responsive Design**: Optimized for mobile devices
@@ -27,6 +41,7 @@ A React Native mobile application built with Expo for scanning and automatically
 - **TypeScript** for type safety
 - **Expo Camera** for image capture
 - **React Native Toast Message** for notifications
+- **React Native SVG** for answer sheet preview
 - **Expo Router** for navigation
 
 ## Project Structure

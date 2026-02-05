@@ -1,8 +1,8 @@
+import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { ScanningService } from "../../services/scanningService";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
@@ -56,24 +56,33 @@ export default function CameraScanner({
         return;
       }
 
-      // Validate scan quality first
-      const qualityCheck = await ScanningService.validateScanQuality(photo.uri);
+      // Validate Zipgrade sheet quality first
+      const qualityCheck = await ZipgradeScanner.validateZipgradeSheet(
+        photo.uri,
+      );
 
       if (!qualityCheck.isValid) {
         Alert.alert(
-          "Scan Quality Issues",
+          "Zipgrade Sheet Quality Issues",
           `Please retake the photo:\n${qualityCheck.issues.join("\n")}`,
           [{ text: "OK" }],
         );
         return;
       }
 
-      // Process the answer sheet
-      const scanResult = await ScanningService.processAnswerSheet(photo.uri);
+      // Process the Zipgrade answer sheet
+      const templateName = qualityCheck.detectedTemplate || "standard20";
+      const scanResult = await ZipgradeScanner.processZipgradeSheet(
+        photo.uri,
+        templateName,
+      );
       onScanComplete(scanResult);
     } catch (error) {
       console.error("Error taking picture:", error);
-      Alert.alert("Error", "Failed to process answer sheet. Please try again.");
+      Alert.alert(
+        "Error",
+        "Failed to process Zipgrade answer sheet. Please try again.",
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -82,11 +91,14 @@ export default function CameraScanner({
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing={facing}>
-        {/* Overlay for answer sheet alignment */}
+        {/* Overlay for Zipgrade answer sheet alignment */}
         <View style={styles.overlay}>
           <View style={styles.scanFrame} />
           <Text style={styles.instructionText}>
-            Align answer sheet within the frame
+            Align Zipgrade answer sheet within the frame
+          </Text>
+          <Text style={styles.tipText}>
+            Ensure all bubbles and student ID are visible
           </Text>
         </View>
 
@@ -157,6 +169,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     backgroundColor: "rgba(0,0,0,0.5)",
     padding: 10,
+    borderRadius: 5,
+  },
+  tipText: {
+    color: "white",
+    fontSize: 14,
+    marginTop: 10,
+    textAlign: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    padding: 8,
     borderRadius: 5,
   },
   controls: {

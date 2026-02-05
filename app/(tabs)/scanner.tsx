@@ -21,9 +21,9 @@ export default function ScannerTab() {
       <View style={styles.content}>
         <View style={styles.header}>
           <Ionicons name="scan" size={64} color="#007AFF" />
-          <Text style={styles.title}>Answer Sheet Scanner</Text>
+          <Text style={styles.title}>Zipgrade Scanner</Text>
           <Text style={styles.subtitle}>
-            Scan and automatically grade student answer sheets
+            Scan and automatically grade Zipgrade-compatible answer sheets
           </Text>
         </View>
 
@@ -44,8 +44,8 @@ export default function ScannerTab() {
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="analytics" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Instant results</Text>
+            <Ionicons name="document-text" size={24} color="#4CAF50" />
+            <Text style={styles.featureText}>Zipgrade format compatible</Text>
           </View>
         </View>
 
@@ -60,15 +60,17 @@ export default function ScannerTab() {
         <View style={styles.instructions}>
           <Text style={styles.instructionsTitle}>Instructions:</Text>
           <Text style={styles.instructionText}>
-            1. Ensure good lighting conditions
+            1. Generate answer sheet using Generator tab
           </Text>
           <Text style={styles.instructionText}>
-            2. Place answer sheet flat on surface
+            2. Ensure good lighting conditions
           </Text>
           <Text style={styles.instructionText}>
-            3. Align sheet within camera frame
+            3. Align Zipgrade sheet within camera frame
           </Text>
-          <Text style={styles.instructionText}>4. Tap capture when ready</Text>
+          <Text style={styles.instructionText}>
+            4. Tap capture when all bubbles are visible
+          </Text>
         </View>
       </View>
     </SafeAreaView>
