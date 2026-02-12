@@ -1,8 +1,15 @@
-# SmartCheck Mobile App - Zipgrade Scanner & Generator
+# GC SmartCheck Mobile App - Zipgrade Scanner & Generator
 
-A React Native mobile application built with Expo for generating and scanning Zipgrade-compatible answer sheets with automatic grading.
+A React Native mobile application built with Expo for Gordon College faculty to generate and scan Zipgrade-compatible answer sheets with automatic grading.
 
 ## Features
+
+### 🔐 Authentication
+
+- **Faculty Sign-In**: Secure login for Gordon College faculty and staff
+- **Email Validation**: Enforces @gordoncollege.edu.ph email format
+- **Test Accounts**: Built-in dummy accounts for development and testing
+- **Protected Routes**: Authentication required before accessing app features
 
 ### 🔍 Zipgrade Scanner
 
@@ -49,20 +56,30 @@ A React Native mobile application built with Expo for generating and scanning Zi
 ```
 ├── app/
 │   ├── (tabs)/
-│   │   └── scanner.tsx          # Scanner tab screen
-│   └── _layout.tsx              # Root layout with Toast provider
+│   │   ├── scanner.tsx          # Scanner tab screen
+│   │   ├── generator.tsx        # Generator tab screen
+│   │   ├── demo.tsx             # Demo tab screen
+│   │   └── index.tsx            # Home tab screen
+│   ├── sign-in.tsx              # Authentication screen
+│   ├── index.tsx                # App entry point with auth redirect
+│   └── _layout.tsx              # Root layout with navigation
 ├── components/
 │   ├── scanner/
 │   │   ├── CameraScanner.tsx    # Camera interface
 │   │   ├── ScanResults.tsx      # Results display
 │   │   └── ScannerScreen.tsx    # Main scanner screen
+│   ├── generator/               # Answer sheet generator components
+│   ├── demo/                    # Demo workflow components
 │   └── ui/
 │       └── ToastConfig.tsx      # Toast configuration
 ├── services/
+│   ├── authService.ts           # Authentication logic
 │   ├── scanningService.ts       # Image processing & OCR
-│   └── gradingService.ts        # Answer grading logic
+│   ├── gradingService.ts        # Answer grading logic
+│   └── zipgradeGenerator.ts     # Answer sheet generation
 ├── types/
-│   └── scanning.ts              # TypeScript interfaces
+│   ├── scanning.ts              # Scanning interfaces
+│   └── zipgrade.ts              # Zipgrade interfaces
 ├── hooks/
 │   └── useAnswerKey.ts          # Answer key management
 └── utils/
@@ -92,14 +109,27 @@ npm run ios      # For iOS
 
 ## Usage
 
+### Authentication
+
+When you first open the app, you'll be presented with the sign-in screen.
+
+**Test Accounts for Development:**
+
+- Email: `faculty@gordoncollege.edu.ph` | Password: `password123`
+- Email: `admin@gordoncollege.edu.ph` | Password: `admin123`
+- Email: `teacher@gordoncollege.edu.ph` | Password: `teacher123`
+
+Tap the "🔑 View Test Accounts" button on the sign-in screen to see these credentials.
+
 ### For Instructors/Scanners
 
-1. **Open Scanner Tab**: Navigate to the Scanner tab in the app
-2. **Start Scanning**: Tap "Start Scanning" button
-3. **Align Answer Sheet**: Position the answer sheet within the camera frame
-4. **Capture**: Tap the capture button to scan the sheet
-5. **View Results**: Review the grading results and student score
-6. **Continue**: Scan additional sheets or close the scanner
+1. **Sign In**: Enter your Gordon College email and password
+2. **Open Scanner Tab**: Navigate to the Scanner tab in the app
+3. **Start Scanning**: Tap "Start Scanning" button
+4. **Align Answer Sheet**: Position the answer sheet within the camera frame
+5. **Capture**: Tap the capture button to scan the sheet
+6. **View Results**: Review the grading results and student score
+7. **Continue**: Scan additional sheets or close the scanner
 
 ### Key Components
 
@@ -126,6 +156,15 @@ npm run ios      # For iOS
 
 ## Configuration
 
+### Authentication Setup
+
+The app currently uses dummy accounts for testing. For production:
+
+- Replace `authService.ts` with actual API integration
+- Implement secure token storage (AsyncStorage, SecureStore)
+- Add session management and auto-logout
+- Connect to Gordon College authentication system
+
 ### Answer Key Setup
 
 The app uses a default answer key for demonstration. In production:
@@ -148,6 +187,7 @@ Current implementation uses mock processing. For production:
 
 The current version includes mock implementations for:
 
+- Authentication (dummy accounts in `authService.ts`)
 - Image processing and OCR
 - Bubble detection
 - Student ID extraction
@@ -156,29 +196,42 @@ The current version includes mock implementations for:
 
 For production deployment:
 
-1. **Computer Vision**: Integrate real image processing libraries
-2. **Cloud Services**: Use OCR APIs for better accuracy
-3. **Data Storage**: Implement proper data persistence
-4. **Security**: Add authentication and data encryption
-5. **Performance**: Optimize for various device capabilities
+1. **Authentication**:
+   - Integrate with Gordon College authentication system
+   - Implement JWT or OAuth tokens
+   - Add secure credential storage
+   - Enable password reset functionality
+
+2. **Computer Vision**: Integrate real image processing libraries
+3. **Cloud Services**: Use OCR APIs for better accuracy
+4. **Data Storage**: Implement proper data persistence
+5. **Security**: Add data encryption and secure API communication
+6. **Performance**: Optimize for various device capabilities
 
 ## API Integration Points
 
 The app is designed with clear integration points for:
 
+- **Authentication API**: Replace `authService.signIn()` with actual API calls
 - **OCR Services**: Google Vision API, AWS Textract
 - **Image Processing**: OpenCV, custom algorithms
 - **Data Storage**: Firebase, REST APIs
-- **Authentication**: User management systems
+- **User Management**: Gordon College authentication system
 
 ## Testing
 
 Run the app in development mode to test:
 
+- Authentication flow with dummy accounts
+- Protected route navigation
 - Camera functionality
 - Mock scanning and grading
 - UI interactions
 - Toast notifications
+
+### Test Credentials
+
+Use the built-in test accounts to access the app during development. These accounts validate the Gordon College email format and provide a realistic authentication experience.
 
 ## Contributing
 
