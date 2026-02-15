@@ -1,21 +1,24 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    Alert,
-    Image,
-    ImageBackground,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
+import { auth, db } from "@/config/firebase";
 import { authService } from "@/services/authService";
 
 export default function SignInScreen() {
@@ -24,8 +27,9 @@ export default function SignInScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [useFirebase, setUseFirebase] = useState(true);
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     if (!email || !password) {
       Alert.alert("Error", "Please enter email and password");
       return;
@@ -33,37 +37,79 @@ export default function SignInScreen() {
 
     setIsLoading(true);
 
-    // Simulate network delay
-    setTimeout(() => {
-      const result = authService.signIn(email, password);
+    try {
+      if (useFirebase) {
+        // Firebase Authentication
+        const userCredential = await signInWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        );
 
-      if (result.success) {
-        Alert.alert("Success", `Welcome ${result.user?.name}!`, [
-          {
-            text: "OK",
-            onPress: () => router.replace("/(tabs)"),
-          },
-        ]);
+        // Get user data from Firestore
+        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
+
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          Alert.alert("Success", `Welcome back, ${userData.fullName}!`, [
+            {
+              text: "OK",
+              onPress: () => router.replace("/(tabs)"),
+            },
+          ]);
+        } else {
+          router.replace("/(tabs)");
+        }
       } else {
-        Alert.alert("Sign In Failed", result.message || "Invalid credentials");
+        // Fallback to dummy accounts for testing
+        const result = authService.signIn(email, password);
+
+        if (result.success) {
+          Alert.alert("Success", `Welcome ${result.user?.name}!`, [
+            {
+              text: "OK",
+              onPress: () => router.replace("/(tabs)"),
+            },
+          ]);
+        } else {
+          Alert.alert(
+            "Sign In Failed",
+            result.message || "Invalid credentials",
+          );
+        }
+      }
+    } catch (error: any) {
+      console.error("Sign in error:", error);
+
+      let errorMessage = "Failed to sign in. Please try again.";
+
+      if (error.code === "auth/user-not-found") {
+        errorMessage = "No account found with this email.";
+      } else if (error.code === "auth/wrong-password") {
+        errorMessage = "Incorrect password.";
+      } else if (error.code === "auth/invalid-email") {
+        errorMessage = "Invalid email address.";
+      } else if (error.code === "auth/user-disabled") {
+        errorMessage = "This account has been disabled.";
+      } else if (error.code === "auth/invalid-credential") {
+        errorMessage = "Invalid email or password.";
       }
 
+      Alert.alert("Sign In Failed", errorMessage);
+    } finally {
       setIsLoading(false);
-    }, 500);
+    }
   };
 
   const showDummyAccounts = () => {
-    console.log("showDummyAccounts called");
     const accounts = authService.getDummyAccounts();
-    console.log("Accounts:", accounts);
-
     const accountList = accounts
       .map((acc) => `Email: ${acc.email}\nPassword: ${acc.password}`)
       .join("\n\n");
 
     Alert.alert(
-      "Test Accounts",
-      `Use these accounts for testing:\n\n${accountList}`,
+      "Test Accounts (Offline Mode)",
+      `Use these accounts for testing:\n\n${accountList}\n\nNote: These are dummy accounts. Use Sign Up to create a real account.`,
       [{ text: "OK" }],
     );
   };
@@ -197,7 +243,7 @@ export default function SignInScreen() {
               {/* Sign Up Link */}
               <View style={styles.signUpContainer}>
                 <Text style={styles.signUpText}>Don't have an account? </Text>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={() => router.push("/sign-up")}>
                   <Text style={styles.signUpLink}>Sign Up</Text>
                 </TouchableOpacity>
               </View>
