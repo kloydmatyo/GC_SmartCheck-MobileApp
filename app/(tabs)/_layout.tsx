@@ -1,65 +1,120 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
 
 import { HapticTab } from "@/components/haptic-tab";
-import { IconSymbol } from "@/components/ui/icon-symbol";
-import { Colors } from "@/constants/theme";
-import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
+        tabBarActiveTintColor: "#00a550",
+        tabBarInactiveTintColor: "#666",
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarStyle: {
+          backgroundColor: "#f5f5f5",
+          borderTopWidth: 1,
+          borderTopColor: "#e0e0e0",
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: "500",
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "home" : "home-outline"}
+              size={24}
+              color={color}
+            />
           ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="classes"
         options={{
-          title: "Explore",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+          title: "Classes",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "school" : "school-outline"}
+              size={24}
+              color={color}
+            />
           ),
         }}
       />
+      <Tabs.Screen
+        name="quizzes"
+        options={{
+          title: "Quizzes",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "book" : "book-outline"}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="students"
+        options={{
+          title: "Students",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "people" : "people-outline"}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons
+              name={focused ? "settings" : "settings-outline"}
+              size={24}
+              color={color}
+            />
+          ),
+        }}
+      />
+
+      {/* Hidden tabs - accessible via navigation but not shown in tab bar */}
       <Tabs.Screen
         name="scanner"
         options={{
-          title: "Scanner",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="camera.fill" color={color} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
         name="generator"
         options={{
-          title: "Generator",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="doc.text.fill" color={color} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen
         name="demo"
         options={{
-          title: "Demo",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="play.circle.fill" color={color} />
-          ),
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="explore"
+        options={{
+          href: null,
         }}
       />
     </Tabs>
