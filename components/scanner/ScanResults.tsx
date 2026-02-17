@@ -1,11 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import {
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { GradingResult } from "../../types/scanning";
 
@@ -20,6 +20,14 @@ export default function ScanResults({
   onClose,
   onScanAnother,
 }: ScanResultsProps) {
+  // Ensure result and its properties exist
+  const details = result?.details || [];
+  const totalQuestions = result?.totalQuestions || 0;
+  const correctAnswers = result?.correctAnswers || 0;
+  const score = result?.score || 0;
+  const totalPoints = result?.totalPoints || 0;
+  const percentage = result?.percentage || 0;
+
   const getScoreColor = (percentage: number) => {
     if (percentage >= 90) return "#4CAF50"; // Green
     if (percentage >= 80) return "#FF9800"; // Orange
@@ -47,66 +55,71 @@ export default function ScanResults({
       <ScrollView style={styles.content}>
         {/* Student Info */}
         <View style={styles.studentCard}>
-          <Text style={styles.studentId}>Student ID: {result.studentId}</Text>
+          <Text style={styles.studentId}>
+            Student ID: {result?.studentId || "N/A"}
+          </Text>
           <View style={styles.scoreContainer}>
             <Text
-              style={[
-                styles.scoreText,
-                { color: getScoreColor(result.percentage) },
-              ]}
+              style={[styles.scoreText, { color: getScoreColor(percentage) }]}
             >
-              {result.score}/{result.totalPoints}
+              {score}/{totalPoints}
             </Text>
             <Text
               style={[
                 styles.percentageText,
-                { color: getScoreColor(result.percentage) },
+                { color: getScoreColor(percentage) },
               ]}
             >
-              {result.percentage}%
+              {percentage}%
             </Text>
             <Text
-              style={[
-                styles.gradeText,
-                { color: getScoreColor(result.percentage) },
-              ]}
+              style={[styles.gradeText, { color: getScoreColor(percentage) }]}
             >
-              {getGradeLetter(result.percentage)}
+              {getGradeLetter(percentage)}
             </Text>
           </View>
           <Text style={styles.correctAnswers}>
-            Correct: {result.correctAnswers}/{result.totalQuestions}
+            Correct: {correctAnswers}/{totalQuestions}
           </Text>
         </View>
 
         {/* Answer Details */}
         <View style={styles.detailsCard}>
           <Text style={styles.detailsTitle}>Answer Details</Text>
-          <View style={styles.detailsGrid}>
-            {result.details.map((detail, index) => (
-              <View
-                key={detail.questionNumber}
-                style={[
-                  styles.answerItem,
-                  detail.isCorrect
-                    ? styles.correctAnswer
-                    : styles.incorrectAnswer,
-                ]}
-              >
-                <Text style={styles.questionNumber}>
-                  Q{detail.questionNumber}
-                </Text>
-                <Text style={styles.answerText}>
-                  {detail.studentAnswer || "—"} / {detail.correctAnswer}
-                </Text>
-                <Ionicons
-                  name={detail.isCorrect ? "checkmark-circle" : "close-circle"}
-                  size={16}
-                  color={detail.isCorrect ? "#4CAF50" : "#F44336"}
-                />
-              </View>
-            ))}
-          </View>
+          {details.length > 0 ? (
+            <View style={styles.detailsGrid}>
+              {details.map((detail, index) => (
+                <View
+                  key={detail?.questionNumber || index}
+                  style={[
+                    styles.answerItem,
+                    detail?.isCorrect
+                      ? styles.correctAnswer
+                      : styles.incorrectAnswer,
+                  ]}
+                >
+                  <Text style={styles.questionNumber}>
+                    Q{detail?.questionNumber || index + 1}
+                  </Text>
+                  <Text style={styles.answerText}>
+                    {detail?.studentAnswer || "—"} /{" "}
+                    {detail?.correctAnswer || "—"}
+                  </Text>
+                  <Ionicons
+                    name={
+                      detail?.isCorrect ? "checkmark-circle" : "close-circle"
+                    }
+                    size={16}
+                    color={detail?.isCorrect ? "#4CAF50" : "#F44336"}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.noDetailsText}>
+              No answer details available
+            </Text>
+          )}
         </View>
       </ScrollView>
 
@@ -249,6 +262,12 @@ const styles = StyleSheet.create({
     color: "#666",
     flex: 1,
     textAlign: "center",
+  },
+  noDetailsText: {
+    textAlign: "center",
+    color: "#999",
+    fontSize: 16,
+    padding: 20,
   },
   actions: {
     flexDirection: "row",
