@@ -76,7 +76,10 @@ export default function QuizzesScreen() {
   };
 
   const renderQuizCard = ({ item }: { item: Quiz }) => (
-    <TouchableOpacity style={styles.quizCard}>
+    <TouchableOpacity
+      style={styles.quizCard}
+      onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
+    >
       <View style={styles.quizHeader}>
         <Text style={styles.quizTitle}>{item.title}</Text>
         <View
@@ -100,6 +103,7 @@ export default function QuizzesScreen() {
             {item.papers ? `${item.papers} Papers` : "-- Papers"}
           </Text>
         </View>
+        <Ionicons name="chevron-forward-outline" size={16} color="#999" />
       </View>
     </TouchableOpacity>
   );
