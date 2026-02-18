@@ -1,101 +1,90 @@
+import { auth, db } from "@/config/firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { ExamPreviewData } from "../types/exam";
 
 export class ExamService {
   /**
-   * Fetch exam configuration by ID
-   * TODO: Replace with actual Firebase API call
+   * Fetch exam configuration by ID from Firebase
    */
   static async getExamById(examId: string): Promise<ExamPreviewData | null> {
     try {
-      // Simulate API delay
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Fetch exam metadata
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
 
-      // Mock data based on provided Firebase structure
-      const mockExam: ExamPreviewData = {
+      if (!examSnap.exists()) {
+        return null;
+      }
+
+      const examData = examSnap.data();
+
+      // Fetch answer key
+      const answerKeyId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
+      const answerKeyRef = doc(db, "answer_keys", answerKeyId);
+      const answerKeySnap = await getDoc(answerKeyRef);
+
+      let answerKeyData = null;
+      if (answerKeySnap.exists()) {
+        answerKeyData = answerKeySnap.data();
+      }
+
+      // Determine choice format
+      const choiceFormat = examData.choice_per_items === 5 ? "A-E" : "A-D";
+      const totalQuestions =
+        answerKeyData?.answers?.length || examData.num_items || 20;
+
+      // Transform to ExamPreviewData format
+      return {
         metadata: {
-          examId: "013RTQdjH3OVpTDO6L3m",
-          title: "MALBO SI FRANZ",
-          subject: "Computer",
-          section: "whyci",
-          date: "2026-02-19",
-          examCode: "4CP",
-          status: "Draft",
-          createdAt: new Date("2026-02-17T00:29:02.000Z"),
-          updatedAt: new Date("2026-02-17T00:29:02.000Z"),
-          createdBy: "BiAzr8e3k4ZkAWur0jQzhAcPg2X2",
-          version: 1,
+          examId: examSnap.id,
+          title: examData.title || "Untitled Exam",
+          subject: examData.course_subject,
+          section: examData.section_block,
+          date: examData.created_at,
+          examCode: examData.room || examData.exam_code || "N/A",
+          status: examData.status || "Draft",
+          createdAt: examData.createdAt?.toDate() || new Date(),
+          updatedAt: examData.updatedAt?.toDate() || new Date(),
+          createdBy: examData.createdBy || "",
+          version: examData.version || 1,
         },
-        answerKey: {
-          id: "ak_013RTQdjH3OVpTDO6L3m_1771288141307",
-          examId: "013RTQdjH3OVpTDO6L3m",
-          answers: [
-            "E",
-            "D",
-            "D",
-            "E",
-            "E",
-            "D",
-            "E",
-            "D",
-            "C",
-            "C",
-            "D",
-            "E",
-            "D",
-            "D",
-            "D",
-            "E",
-            "D",
-            "C",
-            "D",
-            "D",
-          ],
-          questionSettings: Array.from({ length: 20 }, (_, i) => ({
-            questionNumber: i + 1,
-            correctAnswer: [
-              "E",
-              "D",
-              "D",
-              "E",
-              "E",
-              "D",
-              "E",
-              "D",
-              "C",
-              "C",
-              "D",
-              "E",
-              "D",
-              "D",
-              "D",
-              "E",
-              "D",
-              "C",
-              "D",
-              "D",
-            ][i],
-            points: 1,
-            choiceLabels: {},
-          })),
-          locked: false,
-          createdAt: new Date("2026-02-17T00:29:02.000Z"),
-          updatedAt: new Date("2026-02-17T00:29:02.000Z"),
-          createdBy: "BiAzr8e3k4ZkAWur0jQzhAcPg2X2",
-          version: 1,
-        },
+        answerKey: answerKeyData
+          ? {
+              id: answerKeySnap.id,
+              examId: examData.examId || examSnap.id,
+              answers: answerKeyData.answers || [],
+              questionSettings: answerKeyData.questionSettings || [],
+              locked: answerKeyData.locked || false,
+              createdAt: answerKeyData.createdAt?.toDate() || new Date(),
+              updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
+              createdBy: answerKeyData.createdBy || "",
+              version: answerKeyData.version || 1,
+            }
+          : {
+              id: "",
+              examId: examSnap.id,
+              answers: [],
+              questionSettings: [],
+              locked: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              createdBy: "",
+              version: 1,
+            },
         templateLayout: {
           name: "Standard Template",
-          totalQuestions: 20,
-          choiceFormat: "A-E",
+          totalQuestions: totalQuestions,
+          choiceFormat: choiceFormat,
           columns: 2,
-          questionsPerColumn: 10,
+          questionsPerColumn: Math.ceil(totalQuestions / 2),
         },
-        totalQuestions: 20,
-        choiceFormat: "A-E",
-        lastModified: new Date("2026-02-17T00:29:02.000Z"),
+        totalQuestions: totalQuestions,
+        choiceFormat: choiceFormat,
+        lastModified:
+          examData.updatedAt?.toDate() ||
+          examData.createdAt?.toDate() ||
+          new Date(),
       };
-
-      return mockExam;
     } catch (error) {
       console.error("Error fetching exam:", error);
       return null;
@@ -104,11 +93,27 @@ export class ExamService {
 
   /**
    * Check if user is authorized to view exam
-   * TODO: Implement actual authorization logic
    */
   static async isAuthorized(userId: string, examId: string): Promise<boolean> {
-    // Mock authorization - always return true for now
-    return true;
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        return false;
+      }
+
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
+
+      if (!examSnap.exists()) {
+        return false;
+      }
+
+      const examData = examSnap.data();
+      return examData.createdBy === currentUser.uid;
+    } catch (error) {
+      console.error("Error checking authorization:", error);
+      return false;
+    }
   }
 
   /**

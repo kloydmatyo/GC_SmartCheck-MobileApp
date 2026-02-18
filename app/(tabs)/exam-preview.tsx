@@ -2,15 +2,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Clipboard,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Clipboard,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { auth } from "../../config/firebase";
 import { ExamService } from "../../services/examService";
 import { ExamPreviewData } from "../../types/exam";
 
@@ -32,9 +33,15 @@ export default function ExamPreviewScreen() {
       setLoading(true);
       setError(null);
 
-      // Check authorization (mock for now)
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        setError("You must be logged in to view exams.");
+        return;
+      }
+
+      // Check authorization
       const authorized = await ExamService.isAuthorized(
-        "currentUserId",
+        currentUser.uid,
         examId,
       );
       if (!authorized) {
