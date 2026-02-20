@@ -160,7 +160,7 @@ export default function QuizzesScreen() {
         <Text style={styles.headerTitle}>Quizzes</Text>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => router.push("/(tabs)/generator")}
+          onPress={() => router.push("/(tabs)/create-quiz")}
         >
           <Ionicons name="add-circle" size={28} color="#00a550" />
         </TouchableOpacity>
