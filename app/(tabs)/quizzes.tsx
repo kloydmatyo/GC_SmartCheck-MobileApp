@@ -1,7 +1,10 @@
+import { auth, db } from "@/config/firebase";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
 import {
+    ActivityIndicator,
     FlatList,
     StyleSheet,
     Text,
@@ -15,49 +18,69 @@ interface Quiz {
   class: string;
   date: string;
   papers: number | null;
-  status: "Active" | "Completed" | "Upcoming";
+  status: "Draft" | "Scheduled" | "Active" | "Completed";
 }
 
 export default function QuizzesScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState<
-    "All" | "Active" | "Completed" | "Upcoming"
+    "All" | "Draft" | "Scheduled" | "Active" | "Completed"
   >("All");
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const quizzes: Quiz[] = [
-    {
-      id: "1",
-      title: "Midterm - BS1T3B",
-      class: "Systems Integration and Architecture 1",
-      date: "Feb 4, 2026",
-      papers: 23,
-      status: "Active",
-    },
-    {
-      id: "2",
-      title: "Quiz 3 - BS1T3B",
-      class: "Systems Integration and Architecture 1",
-      date: "Feb 4, 2026",
-      papers: 32,
-      status: "Completed",
-    },
-    {
-      id: "3",
-      title: "Quiz 4 - BS1T3B",
-      class: "Systems Integration and Architecture 1",
-      date: "Feb 6, 2026",
-      papers: null,
-      status: "Upcoming",
-    },
-    {
-      id: "4",
-      title: "Final Exam - BS2T1A",
-      class: "Database Management Systems",
-      date: "Feb 10, 2026",
-      papers: null,
-      status: "Upcoming",
-    },
-  ];
+  // Fetch quizzes from Firebase
+  const loadQuizzes = async () => {
+    try {
+      setLoading(true);
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        console.log("No user logged in");
+        setQuizzes([]);
+        return;
+      }
+
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", currentUser.uid),
+      );
+
+      const querySnapshot = await getDocs(q);
+      const examsList: Quiz[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        examsList.push({
+          id: doc.id,
+          title: data.title || "Untitled Exam",
+          class: data.course_subject || "No Subject",
+          date: data.created_at
+            ? new Date(data.created_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : "No Date",
+          papers: data.scanned_papers || null,
+          status: data.status || "Draft",
+        });
+      });
+
+      setQuizzes(examsList);
+    } catch (error) {
+      console.error("Error fetching quizzes:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reload quizzes when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadQuizzes();
+    }, []),
+  );
 
   const filteredQuizzes =
     filter === "All" ? quizzes : quizzes.filter((q) => q.status === filter);
@@ -68,15 +91,20 @@ export default function QuizzesScreen() {
         return "#00a550";
       case "Completed":
         return "#4a90e2";
-      case "Upcoming":
-        return "#e74c3c";
+      case "Scheduled":
+        return "#ff9800";
+      case "Draft":
+        return "#9e9e9e";
       default:
         return "#666";
     }
   };
 
   const renderQuizCard = ({ item }: { item: Quiz }) => (
-    <TouchableOpacity style={styles.quizCard}>
+    <TouchableOpacity
+      style={styles.quizCard}
+      onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
+    >
       <View style={styles.quizHeader}>
         <Text style={styles.quizTitle}>{item.title}</Text>
         <View
@@ -100,9 +128,30 @@ export default function QuizzesScreen() {
             {item.papers ? `${item.papers} Papers` : "-- Papers"}
           </Text>
         </View>
+        <Ionicons name="chevron-forward-outline" size={16} color="#999" />
       </View>
     </TouchableOpacity>
   );
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Quizzes</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => router.push("/(tabs)/generator")}
+          >
+            <Ionicons name="add-circle" size={28} color="#00a550" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#00a550" />
+          <Text style={styles.loadingText}>Loading exams...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -111,7 +160,7 @@ export default function QuizzesScreen() {
         <Text style={styles.headerTitle}>Quizzes</Text>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => router.push("/(tabs)/generator")}
+          onPress={() => router.push("/(tabs)/create-quiz")}
         >
           <Ionicons name="add-circle" size={28} color="#00a550" />
         </TouchableOpacity>
@@ -119,25 +168,27 @@ export default function QuizzesScreen() {
 
       {/* Filter Tabs */}
       <View style={styles.filterContainer}>
-        {(["All", "Active", "Completed", "Upcoming"] as const).map((status) => (
-          <TouchableOpacity
-            key={status}
-            style={[
-              styles.filterTab,
-              filter === status && styles.filterTabActive,
-            ]}
-            onPress={() => setFilter(status)}
-          >
-            <Text
+        {(["All", "Draft", "Scheduled", "Active", "Completed"] as const).map(
+          (status) => (
+            <TouchableOpacity
+              key={status}
               style={[
-                styles.filterText,
-                filter === status && styles.filterTextActive,
+                styles.filterTab,
+                filter === status && styles.filterTabActive,
               ]}
+              onPress={() => setFilter(status)}
             >
-              {status}
-            </Text>
-          </TouchableOpacity>
-        ))}
+              <Text
+                style={[
+                  styles.filterText,
+                  filter === status && styles.filterTextActive,
+                ]}
+              >
+                {status}
+              </Text>
+            </TouchableOpacity>
+          ),
+        )}
       </View>
 
       {/* Quizzes List */}
@@ -150,7 +201,10 @@ export default function QuizzesScreen() {
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="book-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No quizzes found</Text>
+            <Text style={styles.emptyText}>No exams found</Text>
+            <Text style={styles.emptySubtext}>
+              Create your first exam to get started
+            </Text>
           </View>
         }
       />
@@ -249,6 +303,7 @@ const styles = StyleSheet.create({
   quizFooter: {
     flexDirection: "row",
     gap: 16,
+    alignItems: "center",
   },
   quizInfo: {
     flexDirection: "row",
@@ -257,6 +312,16 @@ const styles = StyleSheet.create({
   },
   quizInfoText: {
     fontSize: 12,
+    color: "#666",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
     color: "#666",
   },
   emptyContainer: {
@@ -268,5 +333,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#999",
     marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: "#ccc",
+    marginTop: 4,
   },
 });
