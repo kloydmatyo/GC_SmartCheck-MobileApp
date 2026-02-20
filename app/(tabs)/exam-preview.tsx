@@ -2,13 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Clipboard,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Clipboard,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth } from "../../config/firebase";
@@ -312,6 +312,28 @@ export default function ExamPreviewScreen() {
         </View>
       </ScrollView>
 
+      {/* Action Buttons */}
+      <View style={styles.actionButtons}>
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() =>
+            router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
+          }
+        >
+          <Ionicons name="create-outline" size={20} color="#fff" />
+          <Text style={styles.editButtonText}>Edit Answer Key</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.printButton}
+          onPress={() =>
+            router.push(`/(tabs)/print-answer-sheet?examId=${examId}`)
+          }
+        >
+          <Ionicons name="print-outline" size={20} color="#fff" />
+          <Text style={styles.printButtonText}>Print Sheets</Text>
+        </TouchableOpacity>
+      </View>
+
       <Toast />
     </View>
   );
@@ -560,5 +582,43 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: "#666",
     fontSize: 16,
+  },
+  actionButtons: {
+    flexDirection: "row",
+    padding: 16,
+    gap: 12,
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#e0e0e0",
+  },
+  editButton: {
+    flex: 1,
+    backgroundColor: "#2d7a5f",
+    borderRadius: 8,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  editButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  printButton: {
+    flex: 1,
+    backgroundColor: "#00a550",
+    borderRadius: 8,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  printButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

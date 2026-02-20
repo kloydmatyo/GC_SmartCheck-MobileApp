@@ -20,7 +20,7 @@ export class ExamService {
 
       // Fetch answer key
       const answerKeyId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
-      const answerKeyRef = doc(db, "answer_keys", answerKeyId);
+      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
       const answerKeySnap = await getDoc(answerKeyRef);
 
       let answerKeyData = null;
