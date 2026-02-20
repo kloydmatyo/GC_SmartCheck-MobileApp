@@ -107,6 +107,12 @@ npm run android  # For Android
 npm run ios      # For iOS
 ```
 
+### Install Expo Go (mobile)
+
+- **Android**: Install the "Expo Go" app from Google Play. Open the app and scan the QR code shown after `npm start` to load the project on your device.
+- **iOS**: Install the "Expo Go" app from the App Store. Use the in-app QR scanner or the iOS camera to open the development URL shown by `npm start`.
+- **Tips**: If your computer and device are not on the same network, use the Tunnel connection in the Expo dev server (press `t` or select Tunnel) to open the project. Make sure your Expo SDK version is compatible with the installed Expo Go app.
+
 ## Usage
 
 ### Authentication
