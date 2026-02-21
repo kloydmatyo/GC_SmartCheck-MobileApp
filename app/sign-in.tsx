@@ -114,6 +114,11 @@ export default function SignInScreen() {
     );
   };
 
+  // Debug function to go directly to camera test
+  const goToCameraTest = () => {
+    router.push("/camera-test");
+  };
+
   return (
     <ImageBackground
       source={require("../assets/images/gordon-college-bg.png")}
@@ -240,6 +245,21 @@ export default function SignInScreen() {
                 <Text style={styles.testAccountsText}>View Test Accounts</Text>
               </TouchableOpacity>
 
+              {/* DEBUG BUTTON - Camera Test (Always Visible) */}
+              <TouchableOpacity
+                style={styles.debugButton}
+                onPress={goToCameraTest}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name="camera"
+                  size={18}
+                  color="#fff"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.debugButtonText}>Debug: Camera Test</Text>
+              </TouchableOpacity>
+
               {/* Sign Up Link */}
               <View style={styles.signUpContainer}>
                 <Text style={styles.signUpText}>Don`t have an account? </Text>
@@ -362,12 +382,29 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: "center",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.3)",
   },
   testAccountsText: {
     color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  // New debug button style
+  debugButton: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255, 193, 7, 0.2)",
+    borderRadius: 8,
+    height: 40,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#ffc107",
+  },
+  debugButtonText: {
+    color: "#ffc107",
     fontSize: 14,
     fontWeight: "500",
   },

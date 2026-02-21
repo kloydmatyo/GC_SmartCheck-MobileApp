@@ -8,30 +8,30 @@ export class GradingService {
     scanResult: ScanResult,
     answerKey: AnswerKey[],
   ): GradingResult {
-    const details = scanResult.answers.map((studentAnswer) => {
-      const correctAnswer = answerKey.find(
-        (key) => key.questionNumber === studentAnswer.questionNumber,
+    const details = answerKey.map((key) => {
+      const studentAnswer = scanResult.answers.find(
+        (ans) => ans.questionNumber === key.questionNumber,
       );
 
-      if (!correctAnswer) {
+      if (!studentAnswer || !studentAnswer.selectedAnswer) {
         return {
-          questionNumber: studentAnswer.questionNumber,
-          studentAnswer: studentAnswer.selectedAnswer,
-          correctAnswer: "N/A",
+          questionNumber: key.questionNumber,
+          studentAnswer: "----",
+          correctAnswer: key.correctAnswer,
           isCorrect: false,
           points: 0,
         };
       }
 
       const isCorrect =
-        studentAnswer.selectedAnswer === correctAnswer.correctAnswer;
+        studentAnswer.selectedAnswer === key.correctAnswer;
 
       return {
-        questionNumber: studentAnswer.questionNumber,
+        questionNumber: key.questionNumber,
         studentAnswer: studentAnswer.selectedAnswer,
-        correctAnswer: correctAnswer.correctAnswer,
+        correctAnswer: key.correctAnswer,
         isCorrect,
-        points: isCorrect ? correctAnswer.points : 0,
+        points: isCorrect ? key.points : 0,
       };
     });
 
@@ -56,7 +56,7 @@ export class GradingService {
    * Get default answer key for testing
    */
   static getDefaultAnswerKey(): AnswerKey[] {
-    const answers = ["A", "B", "C", "D"];
+    const answers = ["A", "B", "C", "D", "E"];
     return Array.from({ length: 20 }, (_, index) => ({
       questionNumber: index + 1,
       correctAnswer: answers[Math.floor(Math.random() * answers.length)],

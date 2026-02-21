@@ -17,8 +17,11 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
     null,
   );
+  const [scannedImage, setScannedImage] = useState<string | undefined>(
+    undefined,
+  );
 
-  const handleScanComplete = async (scanResult: ScanResult) => {
+  const handleScanComplete = async (scanResult: ScanResult, imageUri: string) => {
     try {
       // Get answer key (in production, this would come from the exam setup)
       const answerKey = GradingService.getDefaultAnswerKey();
@@ -35,6 +38,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       });
 
       setGradingResult(result);
+      setScannedImage(imageUri);
       setCurrentState("results");
     } catch (error) {
       console.error("Error grading answers:", error);
@@ -44,11 +48,13 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
   const handleScanAnother = () => {
     setGradingResult(null);
+    setScannedImage(undefined);
     setCurrentState("camera");
   };
 
   const handleClose = () => {
     setGradingResult(null);
+    setScannedImage(undefined);
     setCurrentState("camera");
     onClose();
   };
@@ -65,6 +71,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       {currentState === "results" && gradingResult && (
         <ScanResults
           result={gradingResult}
+          imageUri={scannedImage}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
         />
