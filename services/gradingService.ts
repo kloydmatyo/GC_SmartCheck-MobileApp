@@ -156,13 +156,28 @@ export class GradingService {
 
     return {
       studentId: scanResult.studentId,
+      examId: "", // filled by gradeStorageService / exam selector
       score,
       totalPoints,
       percentage,
+      gradeEquivalent: GradingService.computeGradeEquivalent(percentage),
       correctAnswers,
       totalQuestions: scanResult.answers.length,
+      dateScanned: new Date().toISOString(),
+      status: "pending" as const,
       details,
     };
+  }
+
+  /**
+   * Compute letter grade from percentage
+   */
+  static computeGradeEquivalent(percentage: number): string {
+    if (percentage >= 90) return "A";
+    if (percentage >= 80) return "B";
+    if (percentage >= 70) return "C";
+    if (percentage >= 60) return "D";
+    return "F";
   }
 
   /**

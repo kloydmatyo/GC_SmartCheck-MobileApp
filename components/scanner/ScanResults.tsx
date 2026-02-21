@@ -7,21 +7,63 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { SaveResult } from "../../services/gradeStorageService";
 import { GradingResult } from "../../types/scanning";
 import { GradingResultExtended } from "../../types/student";
 import { StudentValidationResult } from "../student/StudentValidationResult";
 
 interface ScanResultsProps {
   result: GradingResultExtended;
+  saveStatus: SaveResult | null;
   onClose: () => void;
   onScanAnother: () => void;
+  onRetrySave?: () => void;
 }
 
 export default function ScanResults({
   result,
+  saveStatus,
   onClose,
   onScanAnother,
+  onRetrySave,
 }: ScanResultsProps) {
+  // Save status banner config 
+  const getBanner = () => {
+    if (!saveStatus) return null;
+    switch (saveStatus.status) {
+      case "saved":
+        return {
+          icon: "checkmark-circle" as const,
+          color: "#4CAF50",
+          bg: "#f0fff4",
+          text: "Result saved to database",
+        };
+      case "duplicate":
+        return {
+          icon: "warning" as const,
+          color: "#FF9800",
+          bg: "#fff8e1",
+          text: "Duplicate — already recorded for this exam",
+        };
+      case "pending":
+        return {
+          icon: "cloud-upload" as const,
+          color: "#2196F3",
+          bg: "#e3f2fd",
+          text: "Saved offline — queued for sync",
+        };
+      case "error":
+        return {
+          icon: "close-circle" as const,
+          color: "#F44336",
+          bg: "#fff0f0",
+          text: saveStatus.message,
+        };
+      default:
+        return null;
+    }
+  };
+  const banner = getBanner();
   const getScoreColor = (percentage: number) => {
     if (percentage >= 90) return "#4CAF50"; // Green
     if (percentage >= 80) return "#FF9800"; // Orange
@@ -50,21 +92,46 @@ export default function ScanResults({
       </View>
 
       <ScrollView style={styles.content}>
-        {/* REQ 7: Validation Status Display */}
-        {isNullGrade && (
-          <View style={styles.validationCard}>
-            <Ionicons name="alert-circle" size={48} color="#e74c3c" />
-            <Text style={styles.nullGradeTitle}>Invalid Student ID</Text>
-            <Text style={styles.nullGradeMessage}>
-              {result.gradeStatus === 'NULL_INVALID_ID' && 'Student ID not found in database'}
-              {result.gradeStatus === 'NULL_INACTIVE' && 'Student account is inactive'}
-              {result.gradeStatus === 'NULL_NOT_IN_SECTION' && 'Student not enrolled in this section'}
-            </Text>
-            <Text style={styles.nullGradeNote}>
-              This entry has been flagged for instructor review.
-            </Text>
-          </View>
-        )}
+          {/* REQ 7: Validation Status Display */}
+          {isNullGrade && (
+            <View style={styles.validationCard}>
+              <Ionicons name="alert-circle" size={48} color="#e74c3c" />
+              <Text style={styles.nullGradeTitle}>Invalid Student ID</Text>
+              <Text style={styles.nullGradeMessage}>
+                {result.gradeStatus === 'NULL_INVALID_ID' && 'Student ID not found in database'}
+                {result.gradeStatus === 'NULL_INACTIVE' && 'Student account is inactive'}
+                {result.gradeStatus === 'NULL_NOT_IN_SECTION' && 'Student not enrolled in this section'}
+              </Text>
+              <Text style={styles.nullGradeNote}>
+                This entry has been flagged for instructor review.
+              </Text>
+            </View>
+          )}
+
+          {/* Save Status Banner */}
+          {banner && (
+            <View
+              style={[
+                styles.statusBanner,
+                { backgroundColor: banner.bg, borderColor: banner.color },
+              ]}
+            >
+              <Ionicons name={banner.icon} size={20} color={banner.color} />
+              <Text style={[styles.statusBannerText, { color: banner.color }]}>
+                {banner.text}
+              </Text>
+              {saveStatus?.status === "error" && onRetrySave && (
+                <TouchableOpacity
+                  onPress={onRetrySave}
+                  style={[styles.retryButton, { borderColor: banner.color }]}
+                >
+                  <Text style={[styles.retryButtonText, { color: banner.color }]}>
+                    Retry
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
         {/* Student Info */}
         <View style={styles.studentCard}>
@@ -220,6 +287,31 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 20,
+  },
+  // Save Status Banner 
+  statusBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    gap: 10,
+  },
+  statusBannerText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  retryButton: {
+    borderWidth: 1.5,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  retryButtonText: {
+    fontSize: 13,
+    fontWeight: "bold",
   },
   studentCard: {
     backgroundColor: "white",
