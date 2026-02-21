@@ -1,119 +1,78 @@
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import CameraScanner from "../components/scanner/CameraScanner";
-import ScanResults from "../components/scanner/ScanResults"; // Import the ScanResults component
-import { GradingResult } from "../types/scanning"; // Use GradingResult instead of ScanResult
+import ScanResults from "../components/scanner/ScanResults";
+import { GradingResult } from "../types/scanning";
 
 export default function CameraTest() {
   const [showCamera, setShowCamera] = useState(false);
-  const [gradingResult, setGradingResult] = useState<GradingResult | null>(
-    null,
-  );
+  const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleScanComplete = (result: GradingResult) => {
+  const handleScanComplete = useCallback((result: GradingResult) => {
     setShowCamera(false);
     setGradingResult(result);
-  };
+  }, []);
 
-  const handleCancel = () => {
-    setShowCamera(false);
-  };
+  const handleCancel = () => setShowCamera(false);
+  const resetTest = () => setGradingResult(null);
 
-  const resetTest = () => {
-    setGradingResult(null);
-  };
-
-  // Mock test that matches GradingResult structure
   const runMockTest = async () => {
     setIsLoading(true);
-
-    // Simulate processing delay
+    // Simulate network/processing latency
     setTimeout(() => {
       const mockResult: GradingResult = {
         studentId: "2024001",
         testVersion: "A",
-        totalQuestions: 50,
-        correctAnswers: 42,
-        score: 42,
-        totalPoints: 50,
-        percentage: 84,
+        totalQuestions: 5,
+        correctAnswers: 4,
+        score: 4,
+        totalPoints: 5,
+        percentage: 80,
         details: [
-          {
-            questionNumber: 1,
-            studentAnswer: "B",
-            correctAnswer: "B",
-            isCorrect: true,
-            points: 1,
-          },
-          {
-            questionNumber: 2,
-            studentAnswer: "C",
-            correctAnswer: "C",
-            isCorrect: true,
-            points: 1,
-          },
-          {
-            questionNumber: 3,
-            studentAnswer: "A",
-            correctAnswer: "A",
-            isCorrect: true,
-            points: 1,
-          },
-          {
-            questionNumber: 4,
-            studentAnswer: "D",
-            correctAnswer: "C",
-            isCorrect: false,
-            points: 0,
-          },
-          {
-            questionNumber: 5,
-            studentAnswer: "B",
-            correctAnswer: "B",
-            isCorrect: true,
-            points: 1,
-          },
+          { questionNumber: 1, studentAnswer: "B", correctAnswer: "B", isCorrect: true, points: 1 },
+          { questionNumber: 2, studentAnswer: "C", correctAnswer: "C", isCorrect: true, points: 1 },
+          { questionNumber: 3, studentAnswer: "A", correctAnswer: "A", isCorrect: true, points: 1 },
+          { questionNumber: 4, studentAnswer: "D", correctAnswer: "C", isCorrect: false, points: 0 },
+          { questionNumber: 5, studentAnswer: "B", correctAnswer: "B", isCorrect: true, points: 1 },
         ],
         metadata: {
-          confidence: 0.95,
-          processingTimeMs: 850,
-          templateUsed: "standard20",
-          imageQuality: 0.92,
+          confidence: 0.98,
+          processingTimeMs: 450,
+          templateUsed: "standard5",
+          imageQuality: 0.95,
         },
       };
-
       setGradingResult(mockResult);
       setIsLoading(false);
-    }, 1500);
+    }, 1200);
   };
 
+  // 1. Camera Overlay
   if (showCamera) {
     return (
-      <View style={styles.container}>
+      <View style={styles.fullscreen}>
         <StatusBar style="light" />
-        <CameraScanner
-          onScanComplete={handleScanComplete}
-          onCancel={handleCancel}
-        />
+        <CameraScanner onScanComplete={handleScanComplete} onCancel={handleCancel} />
       </View>
     );
   }
 
-  // If we have a grading result, show the ScanResults component
+  // 2. Results View (Detailed Breakdown)
   if (gradingResult) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
         <ScanResults
           result={gradingResult}
           onClose={resetTest}
@@ -122,213 +81,88 @@ export default function CameraTest() {
             setShowCamera(true);
           }}
         />
-      </View>
+        {/* The Question-by-Question breakdown is usually handled inside ScanResults, 
+            but here is how you should structure that component's internal list: */}
+      </SafeAreaView>
     );
   }
 
-  // Main menu when no camera and no results
+  // 3. Landing / Dashboard
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar style="auto" />
-
-      {/* Header */}
+      <StatusBar style="dark" />
       <View style={styles.header}>
-        <Text style={styles.title}>📱 Zipgrade Scanner Test</Text>
-        <Text style={styles.subtitle}>Camera Test Page</Text>
+        <Text style={styles.title}>Grading Assistant</Text>
+        <Text style={styles.subtitle}>Ready to scan student bubble sheets</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Main Content */}
         {isLoading ? (
-          <View style={styles.loadingContainer}>
+          <View style={styles.loadingCard}>
             <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Processing test...</Text>
+            <Text style={styles.loadingText}>Analyzing bubbles...</Text>
           </View>
         ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Test Scanner</Text>
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => setShowCamera(true)}
-              >
-                <Text style={styles.primaryButtonText}>
-                  📸 Open Camera Scanner
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={runMockTest}
-              >
-                <Text style={styles.secondaryButtonText}>🔄 Run Mock Test</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.infoBox}>
-              <Text style={styles.infoTitle}>📋 Instructions:</Text>
-              <Text style={styles.infoText}>
-                1. Place Zipgrade sheet on flat surface
+          <>
+            <View style={styles.mainCard}>
+              <View style={styles.iconCircle}>
+                <Text style={{ fontSize: 32 }}>📄</Text>
+              </View>
+              <Text style={styles.cardTitle}>New Grading Session</Text>
+              <Text style={styles.cardDescription}>
+                Point your camera at the completed Zipgrade sheet to automatically grade the test.
               </Text>
-              <Text style={styles.infoText}>2. Ensure good lighting</Text>
-              <Text style={styles.infoText}>3. Align sheet in the frame</Text>
-              <Text style={styles.infoText}>4. Hold steady and capture</Text>
+
+              <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCamera(true)}>
+                <Text style={styles.primaryButtonText}>Start Camera Scanner</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.ghostButton} onPress={runMockTest}>
+                <Text style={styles.ghostButtonText}>Try with Mock Data</Text>
+              </TouchableOpacity>
             </View>
-          </View>
+
+            <View style={styles.instructionCard}>
+              <Text style={styles.instructionHeader}>Best Practices</Text>
+              <View style={styles.step}><Text>✅</Text><Text style={styles.stepText}>Ensure corners are visible</Text></View>
+              <View style={styles.step}><Text>✅</Text><Text style={styles.stepText}>Avoid harsh shadows</Text></View>
+              <View style={styles.step}><Text>✅</Text><Text style={styles.stepText}>Keep the sheet flat</Text></View>
+            </View>
+          </>
         )}
-
-        {/* Quick Test Buttons */}
-        <View style={styles.debugCard}>
-          <Text style={styles.debugTitle}>🔧 Quick Tests</Text>
-
-          <TouchableOpacity
-            style={styles.debugButton}
-            onPress={() => {
-              Alert.alert("Test", "Navigation is working!");
-            }}
-          >
-            <Text style={styles.debugButtonText}>Test Alert</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.debugButton}
-            onPress={() => {
-              console.log("Current app state:", {
-                showCamera,
-                hasResult: !!gradingResult,
-                isLoading,
-              });
-              Alert.alert("State", "Check console for details");
-            }}
-          >
-            <Text style={styles.debugButtonText}>Log State to Console</Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  header: {
-    padding: 20,
+  container: { flex: 1, backgroundColor: "#F8F9FB" },
+  fullscreen: { flex: 1, backgroundColor: "black" },
+  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 10 },
+  title: { fontSize: 28, fontWeight: "800", color: "#1A1A1A" },
+  subtitle: { fontSize: 16, color: "#666", marginTop: 4 },
+  scrollContent: { padding: 20 },
+  mainCard: {
     backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  subtitle: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 4,
-  },
-  scrollContent: {
-    padding: 16,
-  },
-  card: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    marginBottom: 16,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 20,
-    color: "#333",
-  },
-  buttonContainer: {
-    gap: 12,
-    marginBottom: 20,
-  },
-  primaryButton: {
-    backgroundColor: "#007AFF",
-    padding: 16,
-    borderRadius: 8,
+    borderRadius: 20,
+    padding: 24,
     alignItems: "center",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 },
+      android: { elevation: 5 },
+    }),
   },
-  primaryButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  secondaryButton: {
-    backgroundColor: "#34C759",
-    padding: 16,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  secondaryButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  infoBox: {
-    backgroundColor: "#f8f9fa",
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e9ecef",
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 8,
-    color: "#495057",
-  },
-  infoText: {
-    fontSize: 14,
-    color: "#6c757d",
-    marginBottom: 4,
-  },
-  loadingContainer: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 40,
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#666",
-  },
-  debugCard: {
-    backgroundColor: "#f8f9fa",
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#dee2e6",
-  },
-  debugTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#6c757d",
-    marginBottom: 12,
-  },
-  debugButton: {
-    backgroundColor: "#6c757d",
-    padding: 12,
-    borderRadius: 6,
-    marginBottom: 8,
-  },
-  debugButtonText: {
-    color: "white",
-    fontSize: 14,
-    textAlign: "center",
-  },
+  iconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: "#F0F7FF", justifyContent: "center", alignItems: "center", marginBottom: 16 },
+  cardTitle: { fontSize: 20, fontWeight: "700", color: "#333", marginBottom: 8 },
+  cardDescription: { fontSize: 14, color: "#777", textAlign: "center", marginBottom: 24, lineHeight: 20 },
+  primaryButton: { backgroundColor: "#007AFF", width: "100%", paddingVertical: 16, borderRadius: 12, alignItems: "center" },
+  primaryButtonText: { color: "white", fontSize: 17, fontWeight: "600" },
+  ghostButton: { marginTop: 12, paddingVertical: 12 },
+  ghostButtonText: { color: "#007AFF", fontSize: 15, fontWeight: "500" },
+  loadingCard: { padding: 50, alignItems: "center" },
+  loadingText: { marginTop: 15, fontSize: 16, color: "#444", fontWeight: "500" },
+  instructionCard: { marginTop: 24, padding: 20, backgroundColor: "#FFF", borderRadius: 16, borderLeftWidth: 4, borderLeftColor: "#34C759" },
+  instructionHeader: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
+  step: { flexDirection: "row", marginBottom: 8, alignItems: "center" },
+  stepText: { marginLeft: 10, color: "#555", fontSize: 14 },
 });

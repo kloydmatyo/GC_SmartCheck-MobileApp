@@ -1,12 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { GradingResult } from "../../types/scanning";
 
 interface ScanResultsProps {
@@ -15,130 +9,71 @@ interface ScanResultsProps {
   onScanAnother: () => void;
 }
 
-export default function ScanResults({
-  result,
-  onClose,
-  onScanAnother,
-}: ScanResultsProps) {
-  // Ensure result and its properties exist
+export default function ScanResults({ result, onClose, onScanAnother }: ScanResultsProps) {
   const details = result?.details || [];
-  const totalQuestions = result?.totalQuestions || 0;
-  const correctAnswers = result?.correctAnswers || 0;
-  const score = result?.score || 0;
-  const totalPoints = result?.totalPoints || 0;
-  const percentage = result?.percentage || 0;
-
-  const getScoreColor = (percentage: number) => {
-    if (percentage >= 90) return "#4CAF50"; // Green
-    if (percentage >= 80) return "#FF9800"; // Orange
-    if (percentage >= 70) return "#FFC107"; // Yellow
-    return "#F44336"; // Red
-  };
-
-  const getGradeLetter = (percentage: number) => {
-    if (percentage >= 90) return "A";
-    if (percentage >= 80) return "B";
-    if (percentage >= 70) return "C";
-    if (percentage >= 60) return "D";
-    return "F";
-  };
-
+  
   return (
     <View style={styles.container}>
+      {/* Institution Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Scan Results</Text>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Ionicons name="close" size={24} color="#666" />
-        </TouchableOpacity>
+        <View>
+          <Text style={styles.institution}>GORDON COLLEGE</Text>
+          <Text style={styles.location}>OLONGAPO CITY</Text>
+        </View>
+        <View style={styles.scoreBadge}>
+          <Text style={styles.scoreText}>{result.score}/{result.totalPoints}</Text>
+        </View>
       </View>
 
       <ScrollView style={styles.content}>
-        {/* Student Info */}
-        <View style={styles.studentCard}>
-          <Text style={styles.studentId}>
-            Student ID: {result?.studentId || "N/A"}
-          </Text>
-          <View style={styles.scoreContainer}>
-            <Text
-              style={[styles.scoreText, { color: getScoreColor(percentage) }]}
-            >
-              {score}/{totalPoints}
-            </Text>
-            <Text
-              style={[
-                styles.percentageText,
-                { color: getScoreColor(percentage) },
-              ]}
-            >
-              {percentage}%
-            </Text>
-            <Text
-              style={[styles.gradeText, { color: getScoreColor(percentage) }]}
-            >
-              {getGradeLetter(percentage)}
-            </Text>
-          </View>
-          <Text style={styles.correctAnswers}>
-            Correct: {correctAnswers}/{totalQuestions}
-          </Text>
-        </View>
+        {/* Scanned Items Breakdown */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Scanned 20-Question Sheet</Text>
+          
+          {details.map((item) => (
+            <View key={item.questionNumber} style={styles.row}>
+              {/* Question Label */}
+              <View style={styles.qBox}>
+                <Text style={styles.qLabel}>{item.questionNumber}</Text>
+              </View>
 
-        {/* Answer Details */}
-        <View style={styles.detailsCard}>
-          <Text style={styles.detailsTitle}>Answer Details</Text>
-          {details.length > 0 ? (
-            <View style={styles.detailsGrid}>
-              {details.map((detail, index) => (
-                <View
-                  key={detail?.questionNumber || index}
-                  style={[
-                    styles.answerItem,
-                    detail?.isCorrect
-                      ? styles.correctAnswer
-                      : styles.incorrectAnswer,
-                  ]}
-                >
-                  <Text style={styles.questionNumber}>
-                    Q{detail?.questionNumber || index + 1}
+              {/* Scanned Bubble vs Key */}
+              <View style={styles.comparisonContainer}>
+                <View style={styles.scanGroup}>
+                  <Text style={styles.miniLabel}>SCANNED</Text>
+                  <Text style={[
+                    styles.bubbleValue, 
+                    item.isCorrect ? styles.correctColor : styles.errorColor
+                  ]}>
+                    {item.studentAnswer || "EMPTY"}
                   </Text>
-                  <Text style={styles.answerText}>
-                    {detail?.studentAnswer || "—"} /{" "}
-                    {detail?.correctAnswer || "—"}
-                  </Text>
-                  <Ionicons
-                    name={
-                      detail?.isCorrect ? "checkmark-circle" : "close-circle"
-                    }
-                    size={16}
-                    color={detail?.isCorrect ? "#4CAF50" : "#F44336"}
-                  />
                 </View>
-              ))}
+
+                <Ionicons name="chevron-forward" size={14} color="#DDD" />
+
+                <View style={styles.scanGroup}>
+                  <Text style={styles.miniLabel}>KEY</Text>
+                  <Text style={styles.bubbleValue}>{item.correctAnswer}</Text>
+                </View>
+              </View>
+
+              {/* Status Icon */}
+              <Ionicons 
+                name={item.isCorrect ? "checkmark-circle" : "close-circle"} 
+                size={22} 
+                color={item.isCorrect ? "#4CAF50" : "#F44336"} 
+              />
             </View>
-          ) : (
-            <Text style={styles.noDetailsText}>
-              No answer details available
-            </Text>
-          )}
+          ))}
         </View>
       </ScrollView>
 
-      {/* Action Buttons */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.scanAnotherButton]}
-          onPress={onScanAnother}
-        >
-          <Ionicons name="camera" size={20} color="white" />
-          <Text style={styles.actionButtonText}>Scan Another</Text>
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.btnSecondary} onPress={onClose}>
+          <Text style={styles.btnTextSecondary}>Discard</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, styles.doneButton]}
-          onPress={onClose}
-        >
-          <Ionicons name="checkmark" size={20} color="white" />
-          <Text style={styles.actionButtonText}>Done</Text>
+        <TouchableOpacity style={styles.btnPrimary} onPress={onScanAnother}>
+          <Text style={styles.btnTextPrimary}>Next Scan</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -146,152 +81,39 @@ export default function ScanResults({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  header: {
-    flexDirection: "row",
+  container: { flex: 1, backgroundColor: "#F2F4F7" },
+  header: { 
+    padding: 20, 
+    backgroundColor: "#1A237E", // Gordon College Primary Blue
+    flexDirection: "row", 
     justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    alignItems: "center" 
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
+  institution: { color: "white", fontSize: 18, fontWeight: "800" },
+  location: { color: "#BBDEFB", fontSize: 12 },
+  scoreBadge: { backgroundColor: "white", padding: 8, borderRadius: 8 },
+  scoreText: { fontWeight: "bold", fontSize: 18, color: "#1A237E" },
+  content: { flex: 1, padding: 15 },
+  section: { backgroundColor: "white", borderRadius: 15, padding: 15, elevation: 2 },
+  sectionTitle: { fontSize: 14, fontWeight: "700", color: "#666", marginBottom: 15 },
+  row: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    paddingVertical: 12, 
+    borderBottomWidth: 1, 
+    borderBottomColor: "#F0F0F0" 
   },
-  closeButton: {
-    padding: 5,
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  studentCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  studentId: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 15,
-  },
-  scoreContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  scoreText: {
-    fontSize: 32,
-    fontWeight: "bold",
-    marginRight: 15,
-  },
-  percentageText: {
-    fontSize: 28,
-    fontWeight: "bold",
-    marginRight: 15,
-  },
-  gradeText: {
-    fontSize: 36,
-    fontWeight: "bold",
-  },
-  correctAnswers: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-  },
-  detailsCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  detailsTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 15,
-  },
-  detailsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  answerItem: {
-    width: "48%",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 10,
-    marginBottom: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  correctAnswer: {
-    backgroundColor: "#E8F5E8",
-    borderColor: "#4CAF50",
-  },
-  incorrectAnswer: {
-    backgroundColor: "#FFEBEE",
-    borderColor: "#F44336",
-  },
-  questionNumber: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-  },
-  answerText: {
-    fontSize: 14,
-    color: "#666",
-    flex: 1,
-    textAlign: "center",
-  },
-  noDetailsText: {
-    textAlign: "center",
-    color: "#999",
-    fontSize: 16,
-    padding: 20,
-  },
-  actions: {
-    flexDirection: "row",
-    padding: 20,
-    gap: 10,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 15,
-    borderRadius: 8,
-    gap: 8,
-  },
-  scanAnotherButton: {
-    backgroundColor: "#007AFF",
-  },
-  doneButton: {
-    backgroundColor: "#4CAF50",
-  },
-  actionButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-  },
+  qBox: { width: 35 },
+  qLabel: { fontWeight: "bold", color: "#333" },
+  comparisonContainer: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-evenly" },
+  scanGroup: { alignItems: "center" },
+  miniLabel: { fontSize: 8, color: "#AAA", fontWeight: "bold" },
+  bubbleValue: { fontSize: 18, fontWeight: "700" },
+  correctColor: { color: "#4CAF50" },
+  errorColor: { color: "#F44336" },
+  footer: { padding: 20, flexDirection: "row", gap: 10, backgroundColor: "white" },
+  btnPrimary: { flex: 2, backgroundColor: "#1A237E", padding: 16, borderRadius: 10, alignItems: "center" },
+  btnSecondary: { flex: 1, backgroundColor: "#EEE", padding: 16, borderRadius: 10, alignItems: "center" },
+  btnTextPrimary: { color: "white", fontWeight: "bold" },
+  btnTextSecondary: { color: "#666" }
 });
