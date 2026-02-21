@@ -1,8 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { initializeApp } from "firebase/app";
-import { initializeAuth, inMemoryPersistence } from "firebase/auth";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { Platform } from "react-native";
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -18,36 +16,8 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Custom AsyncStorage persistence for Firebase Auth (compatible with Firebase v12)
-const asyncStoragePersistence = {
-  type: "LOCAL" as const,
-  async _isAvailable() {
-    try {
-      await AsyncStorage.setItem("__test__", "1");
-      await AsyncStorage.removeItem("__test__");
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  async _set(key: string, value: string) {
-    await AsyncStorage.setItem(key, value);
-  },
-  async _get(key: string) {
-    return AsyncStorage.getItem(key);
-  },
-  async _remove(key: string) {
-    await AsyncStorage.removeItem(key);
-  },
-  _addListener(_key: string, _listener: unknown) {},
-  _removeListener(_key: string, _listener: unknown) {},
-};
-
-// Initialize Firebase Auth with AsyncStorage persistence
-export const auth = initializeAuth(app, {
-  persistence:
-    Platform.OS === "web" ? inMemoryPersistence : asyncStoragePersistence,
-});
+// Initialize Firebase Auth - using getAuth for React Native compatibility
+export const auth = getAuth(app);
 
 // Initialize Firestore
 export const db = getFirestore(app);
