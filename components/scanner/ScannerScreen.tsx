@@ -15,7 +15,8 @@ import {
   SaveResult,
 } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
-import { GradingResult, ScanResult } from "../../types/scanning";
+import { ScanResult } from "../../types/scanning";
+import { GradingResultExtended } from "../../types/student";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
 
@@ -23,6 +24,7 @@ type ScannerState = "exam-select" | "camera" | "results";
 
 interface ScannerScreenProps {
   onClose: () => void;
+  sectionId?: string; // Section context for validation
 }
 
 export default function ScannerScreen({ onClose }: ScannerScreenProps) {
