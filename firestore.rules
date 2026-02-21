@@ -1,0 +1,94 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Users collection - users can read/write their own document
+    match /users/{userId} {
+      // Any authenticated user can read user data (needed for validation and lookups)
+      allow read: if isSignedIn();
+      // Users can only write (create/update) their own document
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+    
+    // Instructors collection - allow authenticated users to read/write
+    match /instructors/{instructorId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+    
+    // Metadata collection (for counters) - allow authenticated users
+    match /metadata/{document} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    
+    
+    // Exams collection - users can only access their own exams
+    match /exams/{examId} {
+      allow read: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.instructorId == request.resource.data.instructorId
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+    
+    // Classes collection - users can only access their own classes
+    match /classes/{classId} {
+      allow read: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.instructorId == request.resource.data.instructorId
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+    
+    // Answer Keys collection - instructors can access their own answer keys
+    match /answerKeys/{answerKeyId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+    
+    // Templates collection - instructors can create and manage answer sheet templates
+    match /templates/{templateId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+    
+    // Students collection - allow authenticated users
+    match /students/{studentId} {
+      allow read, write: if isSignedIn();
+    }
+    
+    // Audit logs - read only for owners
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+    
+    // Validation logs - authenticated users can create, read
+    match /validation_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+    
+    // Invalid grading logs - authenticated users can create, read
+    match /invalid_grading_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+  }
+}
