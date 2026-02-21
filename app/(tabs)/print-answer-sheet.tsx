@@ -14,7 +14,6 @@ import * as Sharing from 'expo-sharing';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -28,6 +27,7 @@ import {
 import { WebView } from 'react-native-webview';
 
 import { COLORS, RADIUS } from '../../constants/theme';
+import StatusModal from '@/components/common/StatusModal';
 import { getSession } from '../../services/sessionService';
 
 const TEMPLATES = [
@@ -160,6 +160,7 @@ async function fetchBackendPdf(input: {
 
 export default function PrintAnswerSheetScreen() {
   const router = useRouter();
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
 
   const [templateKey, setTemplateKey] = useState<TemplateKey>('standard50');
   const [examName, setExamName] = useState('');
@@ -168,6 +169,17 @@ export default function PrintAnswerSheetScreen() {
   const [pdfUri, setPdfUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: 'success' | 'error' | 'info';
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: 'info',
+    title: '',
+    message: '',
+  });
 
   const selected = useMemo(() => TEMPLATES.find((t) => t.key === templateKey)!, [templateKey]);
 
@@ -199,10 +211,20 @@ export default function PrintAnswerSheetScreen() {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(pdfUri, { mimeType: 'application/pdf', dialogTitle: 'Download / Share PDF' });
       } else {
-        Alert.alert('Saved', `PDF saved to:\n${pdfUri}`);
+        setStatusModal({
+          visible: true,
+          type: 'success',
+          title: 'Saved',
+          message: `PDF saved to:\n${pdfUri}`,
+        });
       }
     } catch (error: any) {
-      Alert.alert('Download Failed', error?.message ?? 'Unable to download PDF.');
+      setStatusModal({
+        visible: true,
+        type: 'error',
+        title: 'Download Failed',
+        message: error?.message ?? 'Unable to download PDF.',
+      });
     }
   }
 
@@ -211,7 +233,7 @@ export default function PrintAnswerSheetScreen() {
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} translucent={false} />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
+        <TouchableOpacity onPress={goToQuizzes} style={styles.headerBack}>
           <Ionicons name="chevron-back" size={rs(24)} color={COLORS.textDark} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>OMR PDF Preview</Text>
@@ -259,7 +281,7 @@ export default function PrintAnswerSheetScreen() {
           </TouchableOpacity>
 
           <Text style={styles.infoText}>Expected load: within 5 seconds (normal connection).</Text>
-          <Text style={styles.infoText}>Questions: {selected.totalQuestions} • Includes exam code + ID bubble grid + logo</Text>
+          <Text style={styles.infoText}>Questions: {selected.totalQuestions} â€¢ Includes exam code + ID bubble grid + logo</Text>
         </View>
 
         {errorText ? (
@@ -297,6 +319,21 @@ export default function PrintAnswerSheetScreen() {
 
         <View style={{ height: rp(20) }} />
       </ScrollView>
+
+      <StatusModal
+        visible={statusModal.visible}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() =>
+          setStatusModal({
+            visible: false,
+            type: 'info',
+            title: '',
+            message: '',
+          })
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -429,3 +466,4 @@ const styles = StyleSheet.create({
   downloadText: { color: COLORS.white, fontSize: rf(12), fontWeight: '700' },
   webview: { height: rp(480), backgroundColor: '#efefef' },
 });
+

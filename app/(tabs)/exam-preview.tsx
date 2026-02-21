@@ -19,6 +19,7 @@ export default function ExamPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
 
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -133,7 +134,7 @@ export default function ExamPreviewScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={goToQuizzes}
         >
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
@@ -145,8 +146,8 @@ export default function ExamPreviewScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
+        <TouchableOpacity style={styles.backIcon} onPress={goToQuizzes}>
+          <Ionicons name="arrow-back" size={24} color="#eef7f0" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Exam Preview</Text>
         <View style={styles.placeholder} />
@@ -174,7 +175,7 @@ export default function ExamPreviewScreen() {
           <Text style={styles.sectionTitle}>Exam Information</Text>
 
           <View style={styles.infoRow}>
-            <Ionicons name="document-text-outline" size={20} color="#666" />
+            <Ionicons name="document-text-outline" size={20} color="#3d5a3d" />
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Title</Text>
               <Text style={styles.infoValue}>{exam.metadata.title}</Text>
@@ -183,7 +184,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.subject && (
             <View style={styles.infoRow}>
-              <Ionicons name="book-outline" size={20} color="#666" />
+              <Ionicons name="book-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Subject</Text>
                 <Text style={styles.infoValue}>{exam.metadata.subject}</Text>
@@ -193,7 +194,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.section && (
             <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={20} color="#666" />
+              <Ionicons name="people-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Section</Text>
                 <Text style={styles.infoValue}>{exam.metadata.section}</Text>
@@ -203,7 +204,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.date && (
             <View style={styles.infoRow}>
-              <Ionicons name="calendar-outline" size={20} color="#666" />
+              <Ionicons name="calendar-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Date</Text>
                 <Text style={styles.infoValue}>
@@ -214,7 +215,7 @@ export default function ExamPreviewScreen() {
           )}
 
           <View style={styles.infoRow}>
-            <Ionicons name="code-outline" size={20} color="#666" />
+            <Ionicons name="code-outline" size={20} color="#3d5a3d" />
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Exam Code</Text>
               <View style={styles.codeContainer}>
@@ -224,7 +225,7 @@ export default function ExamPreviewScreen() {
                     copyToClipboard(exam.metadata.examCode, "Exam code")
                   }
                 >
-                  <Ionicons name="copy-outline" size={18} color="#00a550" />
+                  <Ionicons name="copy-outline" size={18} color="#2d7a5f" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -263,7 +264,7 @@ export default function ExamPreviewScreen() {
                 </View>
               </View>
               <View style={styles.templateInfo}>
-                <Ionicons name="grid-outline" size={16} color="#666" />
+                <Ionicons name="grid-outline" size={16} color="#4f6b5a" />
                 <Text style={styles.templateText}>
                   Template: {exam.templateLayout.name}
                 </Text>
@@ -342,13 +343,13 @@ export default function ExamPreviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#edf3ee",
   },
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#edf3ee",
     padding: 20,
   },
   header: {
@@ -356,11 +357,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 56,
     paddingBottom: 16,
-    backgroundColor: "#fff",
+    backgroundColor: "#3d5a3d",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#2f4a38",
   },
   backIcon: {
     padding: 4,
@@ -368,7 +369,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#eef7f0",
   },
   placeholder: {
     width: 32,
@@ -393,12 +394,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   section: {
-    backgroundColor: "#fff",
+    backgroundColor: "#f3f7f4",
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "#cad9cf",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -409,12 +410,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#2b4337",
     marginBottom: 12,
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: "#999",
+    color: "#5f7668",
     marginBottom: 12,
     fontStyle: "italic",
   },
@@ -443,12 +444,12 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 12,
-    color: "#999",
+    color: "#607a69",
     marginBottom: 4,
   },
   infoValue: {
     fontSize: 16,
-    color: "#333",
+    color: "#2d4639",
     fontWeight: "500",
   },
   codeContainer: {
@@ -458,7 +459,7 @@ const styles = StyleSheet.create({
   },
   examCode: {
     fontSize: 20,
-    color: "#00a550",
+    color: "#2d7a5f",
     fontWeight: "bold",
     fontFamily: "monospace",
   },
@@ -469,19 +470,19 @@ const styles = StyleSheet.create({
   },
   configItem: {
     flex: 1,
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "#e6efe8",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
   },
   configLabel: {
     fontSize: 12,
-    color: "#666",
+    color: "#527060",
     marginBottom: 4,
   },
   configValue: {
     fontSize: 18,
-    color: "#333",
+    color: "#234033",
     fontWeight: "bold",
   },
   templateInfo: {
@@ -490,11 +491,11 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "#cad9cf",
   },
   templateText: {
     fontSize: 13,
-    color: "#666",
+    color: "#4f6b5a",
   },
   answerKeyGrid: {
     gap: 8,
@@ -507,14 +508,14 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "#e6efe8",
     padding: 10,
     borderRadius: 8,
     gap: 8,
   },
   questionNumber: {
     fontSize: 14,
-    color: "#666",
+    color: "#4f6b5a",
     fontWeight: "600",
     minWidth: 24,
   },
@@ -522,7 +523,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#00a550",
+    backgroundColor: "#2d7a5f",
     justifyContent: "center",
     alignItems: "center",
   },
@@ -540,21 +541,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: "#d7e4db",
   },
   versionLabel: {
     fontSize: 14,
-    color: "#666",
+    color: "#4f6b5a",
   },
   versionValue: {
     fontSize: 14,
-    color: "#333",
+    color: "#2b4337",
     fontWeight: "500",
   },
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: "#666",
+    color: "#4f6b5a",
   },
   errorText: {
     marginTop: 12,
@@ -564,7 +565,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: "#00a550",
+    backgroundColor: "#2d7a5f",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -580,16 +581,16 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   backButtonText: {
-    color: "#666",
+    color: "#3d5a3d",
     fontSize: 16,
   },
   actionButtons: {
     flexDirection: "row",
     padding: 16,
     gap: 12,
-    backgroundColor: "#fff",
+    backgroundColor: "#e5efe8",
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "#cad9cf",
   },
   editButton: {
     flex: 1,
@@ -608,7 +609,7 @@ const styles = StyleSheet.create({
   },
   printButton: {
     flex: 1,
-    backgroundColor: "#00a550",
+    backgroundColor: "#2f6d58",
     borderRadius: 8,
     padding: 14,
     flexDirection: "row",
@@ -622,3 +623,4 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
+

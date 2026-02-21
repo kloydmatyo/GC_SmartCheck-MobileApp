@@ -121,6 +121,7 @@ export default function TabLayout() {
         name="create-quiz"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen

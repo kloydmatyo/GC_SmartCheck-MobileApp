@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 56,
     paddingBottom: 16,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
@@ -312,3 +312,4 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
 });
+

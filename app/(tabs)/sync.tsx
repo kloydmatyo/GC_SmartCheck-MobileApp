@@ -6,11 +6,11 @@ import {
   rp,
   rs,
 } from '@/utils/responsive';
+import StatusModal from '@/components/common/StatusModal';
 import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   SafeAreaView,
   ScrollView,
@@ -77,6 +77,7 @@ export default function SyncScreen() {
   const [progress, setProgress] = useState(0);
   const [exams, setExams] = useState<PendingExam[]>(INITIAL_PENDING);
   const [autoSync, setAutoSync] = useState(true);
+  const [offlineModalVisible, setOfflineModalVisible] = useState(false);
 
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -100,7 +101,7 @@ export default function SyncScreen() {
 
   function handleSyncNow() {
     if (!isConnected && view === 'data') {
-      Alert.alert('Offline', 'Waiting for internet connection.');
+      setOfflineModalVisible(true);
       return;
     }
 
@@ -248,6 +249,14 @@ export default function SyncScreen() {
           <Text style={styles.syncBtnText}>{isSyncing ? 'Syncing' : 'Sync Now'}</Text>
         </TouchableOpacity>
       </View>
+
+      <StatusModal
+        visible={offlineModalVisible}
+        type="info"
+        title="Offline"
+        message="Waiting for internet connection."
+        onClose={() => setOfflineModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }

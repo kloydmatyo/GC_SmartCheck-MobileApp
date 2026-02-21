@@ -1,11 +1,12 @@
 import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import StatusModal from "@/components/common/StatusModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     StyleSheet,
     Text,
@@ -20,16 +21,42 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const { examId } = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
   const [choicesPerItem, setChoicesPerItem] = useState(4);
   const [answerKeyId, setAnswerKeyId] = useState("");
+  const [incompleteConfirmVisible, setIncompleteConfirmVisible] =
+    useState(false);
+  const [incompleteCount, setIncompleteCount] = useState(0);
+  const pendingSaveResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+    onClose?: () => void;
+  }>({
+    visible: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
 
   useEffect(() => {
     loadAnswerKey();
   }, [examId]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingSaveResolveRef.current) {
+        pendingSaveResolveRef.current(false);
+        pendingSaveResolveRef.current = null;
+      }
+    };
+  }, []);
 
   const loadAnswerKey = async () => {
     try {
@@ -40,8 +67,13 @@ export default function EditAnswerKeyScreen() {
       const examSnap = await getDoc(examRef);
 
       if (!examSnap.exists()) {
-        Alert.alert("Error", "Exam not found");
-        router.back();
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Error",
+          message: "Exam not found",
+          onClose: goToQuizzes,
+        });
         return;
       }
 
@@ -78,7 +110,12 @@ export default function EditAnswerKeyScreen() {
       setAnswers(initialAnswers);
     } catch (error) {
       console.error("Error loading answer key:", error);
-      Alert.alert("Error", "Failed to load answer key");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to load answer key",
+      });
     } finally {
       setLoading(false);
     }
@@ -100,18 +137,9 @@ export default function EditAnswerKeyScreen() {
       const emptyAnswers = answers.filter((a) => !a.answer);
       if (emptyAnswers.length > 0) {
         const shouldContinue = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            "Incomplete Answer Key",
-            `${emptyAnswers.length} question(s) don't have answers yet. Save anyway?`,
-            [
-              {
-                text: "Cancel",
-                style: "cancel",
-                onPress: () => resolve(false),
-              },
-              { text: "Save Anyway", onPress: () => resolve(true) },
-            ],
-          );
+          setIncompleteCount(emptyAnswers.length);
+          pendingSaveResolveRef.current = resolve;
+          setIncompleteConfirmVisible(true);
         });
 
         if (!shouldContinue) {
@@ -146,15 +174,21 @@ export default function EditAnswerKeyScreen() {
       const answerKeyRef = doc(db, "answerKeys", answerKeyId);
       await setDoc(answerKeyRef, answerKeyData, { merge: true });
 
-      Alert.alert("Success", "Answer key saved successfully!", [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]);
+      setStatusModal({
+        visible: true,
+        type: "success",
+        title: "Success",
+        message: "Answer key saved successfully!",
+        onClose: goToQuizzes,
+      });
     } catch (error) {
       console.error("Error saving answer key:", error);
-      Alert.alert("Error", "Failed to save answer key");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to save answer key",
+      });
     } finally {
       setSaving(false);
     }
@@ -208,7 +242,7 @@ export default function EditAnswerKeyScreen() {
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={goToQuizzes}
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -229,7 +263,7 @@ export default function EditAnswerKeyScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={goToQuizzes}
         >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -267,6 +301,41 @@ export default function EditAnswerKeyScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <ConfirmationModal
+        visible={incompleteConfirmVisible}
+        title="Incomplete Answer Key"
+        message={`${incompleteCount} question(s) don't have answers yet. Save anyway?`}
+        cancelText="Cancel"
+        confirmText="Save Anyway"
+        onCancel={() => {
+          setIncompleteConfirmVisible(false);
+          pendingSaveResolveRef.current?.(false);
+          pendingSaveResolveRef.current = null;
+        }}
+        onConfirm={() => {
+          setIncompleteConfirmVisible(false);
+          pendingSaveResolveRef.current?.(true);
+          pendingSaveResolveRef.current = null;
+        }}
+      />
+
+      <StatusModal
+        visible={statusModal.visible}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() => {
+          const onClose = statusModal.onClose;
+          setStatusModal({
+            visible: false,
+            type: "info",
+            title: "",
+            message: "",
+          });
+          if (onClose) onClose();
+        }}
+      />
     </View>
   );
 }
@@ -281,7 +350,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#3d5a3d",
-    paddingTop: 50,
+    paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },
@@ -327,13 +396,15 @@ const styles = StyleSheet.create({
   choicesContainer: {
     flexDirection: "row",
     gap: 8,
+    flexWrap: "wrap",
   },
   choiceButton: {
-    flex: 1,
+    width: 44,
+    height: 44,
     backgroundColor: "#f5f5f5",
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 22,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 2,
     borderColor: "#e0e0e0",
   },
@@ -377,3 +448,4 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 });
+

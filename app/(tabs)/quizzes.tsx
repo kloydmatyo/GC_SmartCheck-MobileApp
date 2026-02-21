@@ -6,6 +6,7 @@ import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
+    TextInput,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -26,6 +27,8 @@ export default function QuizzesScreen() {
   const [filter, setFilter] = useState<
     "All" | "Draft" | "Scheduled" | "Active" | "Completed"
   >("All");
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -82,23 +85,15 @@ export default function QuizzesScreen() {
     }, []),
   );
 
-  const filteredQuizzes =
-    filter === "All" ? quizzes : quizzes.filter((q) => q.status === filter);
+  const filteredQuizzes = quizzes.filter((q) => {
+    const matchesFilter = filter === "All" ? true : q.status === filter;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Active":
-        return "#00a550";
-      case "Completed":
-        return "#4a90e2";
-      case "Scheduled":
-        return "#ff9800";
-      case "Draft":
-        return "#9e9e9e";
-      default:
-        return "#666";
-    }
-  };
+    const matchesSearch =
+      q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      q.class.toLowerCase().includes(searchQuery.toLowerCase());
+
+    return matchesFilter && matchesSearch;
+  });
 
   const renderQuizCard = ({ item }: { item: Quiz }) => (
     <TouchableOpacity
@@ -107,28 +102,34 @@ export default function QuizzesScreen() {
     >
       <View style={styles.quizHeader}>
         <Text style={styles.quizTitle}>{item.title}</Text>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(item.status) },
-          ]}
-        >
-          <Text style={styles.statusText}>{item.status}</Text>
+        <View style={styles.scanBadge}>
+          <Text style={styles.scanText}>SCAN</Text>
+          <Ionicons name="scan-outline" size={30} color="#e5f4ea" />
         </View>
       </View>
       <Text style={styles.quizClass}>{item.class}</Text>
-      <View style={styles.quizFooter}>
+      <View style={styles.quizMeta}>
         <View style={styles.quizInfo}>
-          <Ionicons name="calendar-outline" size={14} color="#666" />
-          <Text style={styles.quizInfoText}>{item.date}</Text>
+          <Ionicons name="calendar-outline" size={12} color="#cde2d8" />
+          <Text style={styles.quizMetaText}>{item.date}</Text>
         </View>
-        <View style={styles.quizInfo}>
-          <Ionicons name="document-outline" size={14} color="#666" />
-          <Text style={styles.quizInfoText}>
-            {item.papers ? `${item.papers} Papers` : "-- Papers"}
+      </View>
+      <View style={styles.quizFooter}>
+        <View style={styles.countBadge}>
+          <Text style={styles.countBadgeText}>
+            {item.papers ? `${item.papers}` : "--"} PAPERS
           </Text>
         </View>
-        <Ionicons name="chevron-forward-outline" size={16} color="#999" />
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.actionButton}>
+            <Ionicons name="share-social-outline" size={12} color="#fff" />
+            <Text style={styles.actionText}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton}>
+            <Ionicons name="download-outline" size={12} color="#fff" />
+            <Text style={styles.actionText}>Export</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -138,12 +139,6 @@ export default function QuizzesScreen() {
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Quizzes</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => router.push("/(tabs)/generator")}
-          >
-            <Ionicons name="add-circle" size={28} color="#00a550" />
-          </TouchableOpacity>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#00a550" />
@@ -158,36 +153,58 @@ export default function QuizzesScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Quizzes</Text>
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={() => router.push("/(tabs)/create-quiz")}
-        >
-          <Ionicons name="add-circle" size={28} color="#00a550" />
-        </TouchableOpacity>
       </View>
 
-      {/* Filter Tabs */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={16} color="#d6e9de" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search Quizzes"
+          placeholderTextColor="#b8d4c4"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
       <View style={styles.filterContainer}>
-        {(["All", "Draft", "Scheduled", "Active", "Completed"] as const).map(
-          (status) => (
-            <TouchableOpacity
-              key={status}
-              style={[
-                styles.filterTab,
-                filter === status && styles.filterTabActive,
-              ]}
-              onPress={() => setFilter(status)}
-            >
-              <Text
+        <TouchableOpacity
+          style={styles.filterTrigger}
+          onPress={() => setShowFilterMenu((prev) => !prev)}
+        >
+          <Text style={styles.filterTriggerText}>Filter: {filter}</Text>
+          <Ionicons
+            name={showFilterMenu ? "chevron-up" : "chevron-down"}
+            size={16}
+            color="#d7e9df"
+          />
+        </TouchableOpacity>
+        {showFilterMenu && (
+          <View style={styles.filterMenu}>
+            {(
+              ["All", "Draft", "Scheduled", "Active", "Completed"] as const
+            ).map((status) => (
+              <TouchableOpacity
+                key={status}
                 style={[
-                  styles.filterText,
-                  filter === status && styles.filterTextActive,
+                  styles.filterMenuItem,
+                  filter === status && styles.filterMenuItemActive,
                 ]}
+                onPress={() => {
+                  setFilter(status);
+                  setShowFilterMenu(false);
+                }}
               >
-                {status}
-              </Text>
-            </TouchableOpacity>
-          ),
+                <Text
+                  style={[
+                    styles.filterMenuText,
+                    filter === status && styles.filterMenuTextActive,
+                  ]}
+                >
+                  {status}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         )}
       </View>
 
@@ -208,6 +225,14 @@ export default function QuizzesScreen() {
           </View>
         }
       />
+
+      <TouchableOpacity
+        style={styles.newQuizButton}
+        onPress={() => router.push("/(tabs)/create-quiz")}
+      >
+        <Ionicons name="add-circle-outline" size={18} color="#fff" />
+        <Text style={styles.newQuizText}>New Quiz</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -215,104 +240,174 @@ export default function QuizzesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#f0f2f0",
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 16,
+    paddingHorizontal: 14,
+    paddingTop: 56,
+    paddingBottom: 10,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#d8dfda",
   },
   headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#24362f",
   },
-  addButton: {
-    padding: 4,
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#3f6b54",
+    marginHorizontal: 8,
+    marginTop: 8,
+    marginBottom: 8,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 40,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    color: "#eaf6ef",
+    fontSize: 14,
   },
   filterContainer: {
+    position: "relative",
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+    zIndex: 10,
+  },
+  filterTrigger: {
     flexDirection: "row",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 8,
-    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#3f6b54",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 38,
   },
-  filterTab: {
-    paddingHorizontal: 16,
+  filterTriggerText: {
+    color: "#eaf6ef",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  filterMenu: {
+    marginTop: 6,
+    backgroundColor: "#2f5a45",
+    borderRadius: 10,
+    padding: 6,
+    borderWidth: 1,
+    borderColor: "#355b49",
+  },
+  filterMenuItem: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#f5f5f5",
   },
-  filterTabActive: {
-    backgroundColor: "#00a550",
+  filterMenuItemActive: {
+    backgroundColor: "#2f8a74",
   },
-  filterText: {
-    fontSize: 14,
-    color: "#666",
-    fontWeight: "500",
+  filterMenuText: {
+    color: "#d7e9df",
+    fontSize: 13,
+    fontWeight: "600",
   },
-  filterTextActive: {
+  filterMenuTextActive: {
     color: "#fff",
   },
   listContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 20,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 90,
   },
   quizCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: "#3f6b54",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "#355b49",
   },
   quizHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
+    alignItems: "flex-start",
+    marginBottom: 4,
   },
   quizTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: 27,
+    fontWeight: "800",
+    color: "#ecf7f1",
     flex: 1,
   },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+  scanBadge: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+    minWidth: 44,
+    minHeight: 44,
+    paddingHorizontal: 6,
   },
-  statusText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
+  scanText: {
+    color: "#d1e6db",
+    fontSize: 9,
+    fontWeight: "700",
   },
   quizClass: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 12,
+    fontSize: 13,
+    color: "#cce2d7",
+    marginBottom: 6,
+  },
+  quizMeta: {
+    marginBottom: 10,
   },
   quizFooter: {
     flexDirection: "row",
-    gap: 16,
     alignItems: "center",
+    justifyContent: "space-between",
   },
   quizInfo: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
   },
-  quizInfoText: {
+  quizMetaText: {
     fontSize: 12,
-    color: "#666",
+    color: "#d5e9de",
+  },
+  countBadge: {
+    backgroundColor: "#2d4f3e",
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  countBadgeText: {
+    color: "#d8ebdf",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  actionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#1f3449",
+    borderRadius: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  actionText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
   },
   loadingContainer: {
     flex: 1,
@@ -339,4 +434,23 @@ const styles = StyleSheet.create({
     color: "#ccc",
     marginTop: 4,
   },
+  newQuizButton: {
+    position: "absolute",
+    right: 10,
+    bottom: 14,
+    backgroundColor: "#2f8a74",
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    elevation: 3,
+  },
+  newQuizText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "700",
+  },
 });
+
