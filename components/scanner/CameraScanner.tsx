@@ -6,7 +6,7 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
-  onScanComplete: (result: ScanResult) => void;
+  onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
 }
 
@@ -15,6 +15,7 @@ export default function CameraScanner({
   onCancel,
 }: CameraScannerProps) {
   const [facing, setFacing] = useState<CameraType>("back");
+  const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
@@ -76,7 +77,7 @@ export default function CameraScanner({
         photo.uri,
         templateName,
       );
-      onScanComplete(scanResult);
+      onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
       Alert.alert(
@@ -90,7 +91,7 @@ export default function CameraScanner({
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={styles.camera} facing={facing}>
+      <CameraView ref={cameraRef} style={styles.camera} facing={facing} enableTorch={torch}>
         {/* Overlay for Zipgrade answer sheet alignment */}
         <View style={styles.overlay}>
           <View style={styles.scanFrame} />
@@ -106,6 +107,10 @@ export default function CameraScanner({
         <View style={styles.controls}>
           <TouchableOpacity style={styles.controlButton} onPress={onCancel}>
             <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.controlButton} onPress={() => setTorch(!torch)}>
+            <Ionicons name={torch ? "flash" : "flash-off"} size={24} color="white" />
           </TouchableOpacity>
 
           <TouchableOpacity

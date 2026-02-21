@@ -17,7 +17,8 @@
         "foregroundImage": "./assets/images/gordon-college-logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.GC_SmartCheckMobileApp"
     },
     "web": {
       "output": "static",

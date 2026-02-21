@@ -13,6 +13,7 @@ export interface ScanResult {
   studentId: string;
   answers: StudentAnswer[];
   confidence: number; // 0-1 scale
+  processedImageUri?: string;
 }
 
 export interface GradingResult {
