@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+    ScrollView,
     SafeAreaView,
     StyleSheet,
     Text,
@@ -10,6 +12,7 @@ import {
 import AnswerSheetGenerator from "../../components/generator/AnswerSheetGenerator";
 
 export default function GeneratorTab() {
+  const router = useRouter();
   const [showGenerator, setShowGenerator] = useState(false);
 
   if (showGenerator) {
@@ -18,9 +21,20 @@ export default function GeneratorTab() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.topBar}>
+          <View />
+          <TouchableOpacity style={styles.closeButton} onPress={() => router.back()}>
+            <Ionicons name="close" size={20} color="#2b4337" />
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.header}>
-          <Ionicons name="document-text" size={64} color="#007AFF" />
+          <Ionicons name="document-text" size={50} color="#007AFF" />
           <Text style={styles.title}>Answer Sheet Generator</Text>
           <Text style={styles.subtitle}>
             Create Zipgrade-compatible answer sheets for testing
@@ -97,7 +111,7 @@ export default function GeneratorTab() {
             4. Print and use with the scanner
           </Text>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -109,25 +123,42 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    padding: 20,
+  },
+  contentContainer: {
+    padding: 16,
+    paddingBottom: 28,
+  },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#e4eee8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   header: {
     alignItems: "center",
-    marginBottom: 30,
+    marginBottom: 18,
   },
   title: {
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: "bold",
     color: "#333",
-    marginTop: 20,
-    marginBottom: 10,
+    marginTop: 12,
+    marginBottom: 8,
     textAlign: "center",
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: "#666",
     textAlign: "center",
-    lineHeight: 22,
+    lineHeight: 20,
   },
   features: {
     backgroundColor: "white",

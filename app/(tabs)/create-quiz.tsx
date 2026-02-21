@@ -1,4 +1,6 @@
 import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import StatusModal from "@/components/common/StatusModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
@@ -11,7 +13,6 @@ import {
 import React, { useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -24,6 +25,7 @@ import {
 
 export default function CreateQuizScreen() {
   const router = useRouter();
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const [loading, setLoading] = useState(false);
 
   // Form state
@@ -32,17 +34,40 @@ export default function CreateQuizScreen() {
   const [subject, setSubject] = useState("");
   const [examType, setExamType] = useState("Diagnostic Test");
   const [choicesPerItem, setChoicesPerItem] = useState(4);
+  const [postSaveConfirmVisible, setPostSaveConfirmVisible] = useState(false);
+  const [createdExamId, setCreatedExamId] = useState("");
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
 
   const handleSave = async () => {
     // Validation
     if (!quizName.trim()) {
-      Alert.alert("Error", "Please enter a quiz name");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please enter a quiz name",
+      });
       return;
     }
 
     const questionsCount = parseInt(numQuestions);
     if (!numQuestions || isNaN(questionsCount) || questionsCount <= 0) {
-      Alert.alert("Error", "Please enter a valid number of questions");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please enter a valid number of questions",
+      });
       return;
     }
 
@@ -56,7 +81,12 @@ export default function CreateQuizScreen() {
       console.log("User email:", currentUser?.email);
 
       if (!currentUser) {
-        Alert.alert("Error", "You must be logged in to create a quiz");
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Error",
+          message: "You must be logged in to create a quiz",
+        });
         return;
       }
 
@@ -119,43 +149,37 @@ export default function CreateQuizScreen() {
       console.log("Answer key created successfully");
       console.log("=== Quiz Creation Complete ===");
 
-      Alert.alert(
-        "Success",
-        "Quiz created successfully! Would you like to edit the answer key now?",
-        [
-          {
-            text: "Later",
-            style: "cancel",
-            onPress: () => router.back(),
-          },
-          {
-            text: "Edit Answer Key",
-            onPress: () => {
-              router.replace(`/(tabs)/edit-answer-key?examId=${examRef.id}`);
-            },
-          },
-        ],
-      );
+      setCreatedExamId(examRef.id);
+      setPostSaveConfirmVisible(true);
     } catch (error) {
       console.error("Error creating quiz:", error);
-      Alert.alert("Error", "Failed to create quiz. Please try again.");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to create quiz. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleEditAnswerKey = () => {
-    Alert.alert(
-      "Save First",
-      "Please save the quiz first before editing the answer key",
-    );
+    setStatusModal({
+      visible: true,
+      type: "info",
+      title: "Save First",
+      message: "Please save the quiz first before editing the answer key",
+    });
   };
 
   const handleScanAnswerKey = () => {
-    Alert.alert(
-      "Save First",
-      "Please save the quiz first before scanning the answer key",
-    );
+    setStatusModal({
+      visible: true,
+      type: "info",
+      title: "Save First",
+      message: "Please save the quiz first before scanning the answer key",
+    });
   };
 
   return (
@@ -167,7 +191,7 @@ export default function CreateQuizScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={goToQuizzes}
         >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -316,6 +340,40 @@ export default function CreateQuizScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <ConfirmationModal
+        visible={postSaveConfirmVisible}
+        title="Quiz Created"
+        message="Quiz created successfully. Would you like to edit the answer key now?"
+        cancelText="Later"
+        confirmText="Edit Answer Key"
+        onCancel={() => {
+          setPostSaveConfirmVisible(false);
+          setCreatedExamId("");
+          goToQuizzes();
+        }}
+        onConfirm={() => {
+          if (!createdExamId) return;
+          setPostSaveConfirmVisible(false);
+          router.replace(`/(tabs)/edit-answer-key?examId=${createdExamId}`);
+          setCreatedExamId("");
+        }}
+      />
+
+      <StatusModal
+        visible={statusModal.visible}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() =>
+          setStatusModal({
+            visible: false,
+            type: "info",
+            title: "",
+            message: "",
+          })
+        }
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -330,7 +388,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#3d5a3d",
-    paddingTop: 50,
+    paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },

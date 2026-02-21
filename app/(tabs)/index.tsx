@@ -63,7 +63,6 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Image
@@ -75,35 +74,32 @@ export default function HomeScreen() {
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={24} color="#333" />
+            <Ionicons name="notifications-outline" size={18} color="#24362f" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="person-circle-outline" size={24} color="#333" />
+            <Ionicons name="person-circle-outline" size={18} color="#24362f" />
           </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Welcome Section */}
         <View style={styles.welcomeSection}>
           <Text style={styles.welcomeText}>Welcome back, {userName}.</Text>
           <Text style={styles.subtitleText}>Ready to grade some papers?</Text>
         </View>
 
-        {/* Start Scanning Button */}
         <TouchableOpacity
           style={styles.scanButton}
           onPress={() => router.push("/(tabs)/scanner")}
         >
-          <Ionicons name="document-text" size={24} color="#fff" />
+          <Ionicons name="document-text-outline" size={20} color="#fff" />
           <Text style={styles.scanButtonText}>Start Scanning Papers</Text>
         </TouchableOpacity>
 
-        {/* Stats Cards */}
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
-              <Ionicons name="checkmark-circle" size={28} color="#00a550" />
+              <Ionicons name="checkmark-circle-outline" size={18} color="#3d5a3d" />
             </View>
             <Text style={styles.statValue}>{stats.scannedToday}</Text>
             <Text style={styles.statLabel}>Scanned Today</Text>
@@ -111,7 +107,7 @@ export default function HomeScreen() {
 
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
-              <Ionicons name="people" size={28} color="#00a550" />
+              <Ionicons name="people-outline" size={18} color="#3d5a3d" />
             </View>
             <Text style={styles.statValue}>{stats.totalStudents}</Text>
             <Text style={styles.statLabel}>Total Students</Text>
@@ -119,14 +115,13 @@ export default function HomeScreen() {
 
           <View style={styles.statCard}>
             <View style={styles.statIconContainer}>
-              <Ionicons name="stats-chart" size={28} color="#00a550" />
+              <Ionicons name="bar-chart-outline" size={18} color="#3d5a3d" />
             </View>
             <Text style={styles.statValue}>{stats.avgScore}%</Text>
             <Text style={styles.statLabel}>Avg Score</Text>
           </View>
         </View>
 
-        {/* Recent Exams Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Exams</Text>
           <TouchableOpacity>
@@ -134,7 +129,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Exam Cards */}
         <View style={styles.examsContainer}>
           {recentExams.map((exam) => (
             <TouchableOpacity key={exam.id} style={styles.examCard}>
@@ -162,11 +156,11 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               </View>
+              <View style={styles.examBottomAccent} />
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* New Quiz Button */}
         <TouchableOpacity
           style={styles.newQuizButton}
           onPress={() => router.push("/(tabs)/generator")}
@@ -184,17 +178,19 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingTop: 56,
+    paddingBottom: 10,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#d8dfda",
+    elevation: 2,
   },
   headerLeft: {
     flexDirection: "row",
@@ -202,110 +198,120 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logo: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
+    fontWeight: "800",
+    color: "#24362f",
   },
   headerRight: {
     flexDirection: "row",
     gap: 12,
   },
   iconButton: {
-    padding: 4,
+    padding: 6,
   },
   content: {
     flex: 1,
   },
   welcomeSection: {
-    padding: 20,
-    paddingBottom: 16,
+    paddingHorizontal: 12,
+    paddingTop: 14,
+    paddingBottom: 10,
   },
   welcomeText: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: 26,
+    fontWeight: "800",
+    color: "#2a3b33",
     marginBottom: 4,
   },
   subtitleText: {
-    fontSize: 14,
-    color: "#666",
+    fontSize: 15,
+    color: "#6c7d74",
   },
   scanButton: {
     flexDirection: "row",
-    backgroundColor: "#00a550",
-    marginHorizontal: 20,
-    paddingVertical: 16,
+    backgroundColor: "#3d5a3d",
+    marginHorizontal: 10,
+    paddingVertical: 14,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
-    marginBottom: 20,
+    marginBottom: 14,
+    elevation: 3,
   },
   scanButtonText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
   },
   statsContainer: {
     flexDirection: "row",
-    paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 24,
+    paddingHorizontal: 10,
+    gap: 8,
+    marginBottom: 16,
   },
   statCard: {
     flex: 1,
     backgroundColor: "#f0ead6",
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
+    borderWidth: 1,
+    borderColor: "#8cb09a",
+    elevation: 2,
   },
   statIconContainer: {
-    marginBottom: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#dbe7df",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
   },
   statValue: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 4,
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#2f6a50",
+    marginBottom: 2,
   },
   statLabel: {
     fontSize: 12,
-    color: "#666",
+    color: "#435950",
     textAlign: "center",
   },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: 10,
+    marginBottom: 10,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#24362f",
   },
   viewAllText: {
-    fontSize: 14,
-    color: "#00a550",
-    fontWeight: "500",
+    fontSize: 15,
+    color: "#24362f",
+    fontWeight: "700",
   },
   examsContainer: {
-    paddingHorizontal: 20,
-    gap: 12,
+    paddingHorizontal: 10,
+    gap: 8,
   },
   examCard: {
     backgroundColor: "#f0ead6",
     borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#5d6c62",
+    overflow: "hidden",
   },
   examHeader: {
     flexDirection: "row",
@@ -314,8 +320,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   examTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 17,
+    fontWeight: "800",
     color: "#333",
     flex: 1,
   },
@@ -326,13 +332,13 @@ const styles = StyleSheet.create({
   },
   statusText: {
     color: "#fff",
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 11,
+    fontWeight: "700",
   },
   examSubject: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 12,
+    fontSize: 13,
+    color: "#4e6057",
+    marginBottom: 8,
   },
   examFooter: {
     flexDirection: "row",
@@ -347,20 +353,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#666",
   },
+  examBottomAccent: {
+    height: 4,
+    backgroundColor: "#2f8a74",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   newQuizButton: {
     flexDirection: "row",
-    backgroundColor: "#00a550",
-    marginHorizontal: 20,
-    marginTop: 20,
+    backgroundColor: "#2f8a74",
+    alignSelf: "flex-end",
+    marginRight: 10,
+    marginTop: 18,
+    paddingHorizontal: 18,
     paddingVertical: 14,
     borderRadius: 12,
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
+    elevation: 3,
   },
   newQuizButtonText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
   },
 });

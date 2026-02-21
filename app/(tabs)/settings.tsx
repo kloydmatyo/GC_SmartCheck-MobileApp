@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React from "react";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import StatusModal from "@/components/common/StatusModal";
 import {
-    Alert,
     Image,
     ScrollView,
     StyleSheet,
@@ -16,16 +17,19 @@ export default function SettingsScreen() {
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = React.useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = React.useState(false);
+  const [statusModal, setStatusModal] = React.useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    title: "",
+    message: "",
+  });
 
   const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: () => router.replace("/sign-in"),
-      },
-    ]);
+    setLogoutConfirmVisible(true);
   };
 
   const SettingItem = ({
@@ -135,7 +139,13 @@ export default function SettingsScreen() {
             icon="language"
             title="Language"
             subtitle="English"
-            onPress={() => Alert.alert("Language", "Language settings")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Language",
+                message: "Language settings",
+              })
+            }
           />
         </View>
       </View>
@@ -148,19 +158,37 @@ export default function SettingsScreen() {
             icon="camera"
             title="Camera Settings"
             subtitle="Adjust camera quality"
-            onPress={() => Alert.alert("Camera", "Camera settings")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Camera",
+                message: "Camera settings",
+              })
+            }
           />
           <SettingItem
             icon="document-text"
             title="Answer Key Management"
             subtitle="Manage answer keys"
-            onPress={() => Alert.alert("Answer Keys", "Answer key management")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Answer Keys",
+                message: "Answer key management",
+              })
+            }
           />
           <SettingItem
             icon="download"
             title="Export Data"
             subtitle="Export scanned results"
-            onPress={() => Alert.alert("Export", "Export data")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Export",
+                message: "Export data",
+              })
+            }
           />
         </View>
       </View>
@@ -172,12 +200,24 @@ export default function SettingsScreen() {
           <SettingItem
             icon="lock-closed"
             title="Change Password"
-            onPress={() => Alert.alert("Password", "Change password")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Password",
+                message: "Change password",
+              })
+            }
           />
           <SettingItem
             icon="shield-checkmark"
             title="Privacy & Security"
-            onPress={() => Alert.alert("Privacy", "Privacy settings")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Privacy",
+                message: "Privacy settings",
+              })
+            }
           />
         </View>
       </View>
@@ -190,17 +230,35 @@ export default function SettingsScreen() {
             icon="information-circle"
             title="About App"
             subtitle="Version 1.0.0"
-            onPress={() => Alert.alert("About", "GC SmartCheck v1.0.0")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "About",
+                message: "GC SmartCheck v1.0.0",
+              })
+            }
           />
           <SettingItem
             icon="help-circle"
             title="Help & Support"
-            onPress={() => Alert.alert("Help", "Help & Support")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Help",
+                message: "Help & Support",
+              })
+            }
           />
           <SettingItem
             icon="document"
             title="Terms & Conditions"
-            onPress={() => Alert.alert("Terms", "Terms & Conditions")}
+            onPress={() =>
+              setStatusModal({
+                visible: true,
+                title: "Terms",
+                message: "Terms & Conditions",
+              })
+            }
           />
         </View>
       </View>
@@ -212,6 +270,34 @@ export default function SettingsScreen() {
       </TouchableOpacity>
 
       <View style={{ height: 40 }} />
+
+      <ConfirmationModal
+        visible={logoutConfirmVisible}
+        title="Logout"
+        message="Are you sure you want to logout?"
+        cancelText="Cancel"
+        confirmText="Logout"
+        destructive
+        onCancel={() => setLogoutConfirmVisible(false)}
+        onConfirm={() => {
+          setLogoutConfirmVisible(false);
+          router.replace("/sign-in");
+        }}
+      />
+
+      <StatusModal
+        visible={statusModal.visible}
+        type="info"
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() =>
+          setStatusModal({
+            visible: false,
+            title: "",
+            message: "",
+          })
+        }
+      />
     </ScrollView>
   );
 }
@@ -223,7 +309,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 56,
     paddingBottom: 16,
     backgroundColor: "#fff",
     borderBottomWidth: 1,
@@ -335,3 +421,4 @@ const styles = StyleSheet.create({
     color: "#e74c3c",
   },
 });
+
