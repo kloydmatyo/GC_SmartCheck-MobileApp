@@ -9,7 +9,7 @@ export class StorageService {
     /**
      * Save a grading result to local storage and move the image to the app's document directory
      */
-    static async saveScanResult(result: GradingResult, imageUri: string): Promise<void> {
+    static async saveScanResult(result: GradingResult, imageUri: string): Promise<GradingResult> {
         try {
             // 1. Move image to permanent storage so it persists
             const filename = `scan_${Date.now()}.jpg`;
@@ -47,8 +47,39 @@ export class StorageService {
             history.unshift(scanWithMeta); // Add to the top
 
             await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+
+            return scanWithMeta;
         } catch (error) {
             console.error('Failed to save scan result:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update the student ID of a specific scan in history
+     */
+    static async updateStudentId(timestamp: number, newStudentId: string): Promise<void> {
+        try {
+            const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
+            if (!historyStr) return;
+
+            let history: GradingResult[] = JSON.parse(historyStr);
+            let found = false;
+
+            history = history.map(item => {
+                if (item.metadata?.timestamp === timestamp) {
+                    found = true;
+                    return { ...item, studentId: newStudentId };
+                }
+                return item;
+            });
+
+            if (found) {
+                await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+                console.log(`[StorageService] Updated student ID to ${newStudentId} for scan at ${timestamp}`);
+            }
+        } catch (error) {
+            console.error('Failed to update student ID in history:', error);
             throw error;
         }
     }

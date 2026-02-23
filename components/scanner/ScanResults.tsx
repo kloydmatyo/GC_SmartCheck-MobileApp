@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { StorageService } from "../../services/storageService";
 import { GradingResult } from "../../types/scanning";
 
 interface ScanResultsProps {
@@ -38,10 +39,18 @@ export default function ScanResults({
     questionCount ??
     (details.length > 0 ? details.length : result?.totalPoints ?? 20);
 
-  const handleSaveId = () => {
+  const handleSaveId = async () => {
     setIsEditingId(false);
-    // You can add logic here to save to storage if needed
-    // e.g., await StorageService.updateStudentId(result.id, editedStudentId);
+
+    try {
+      if (result.metadata?.timestamp) {
+        await StorageService.updateStudentId(result.metadata.timestamp, editedStudentId);
+        // We also want to update the local result object so the UI reflects it immediately
+        result.studentId = editedStudentId;
+      }
+    } catch (error) {
+      console.error("Failed to update student ID:", error);
+    }
   };
 
   const handleCancelEdit = () => {

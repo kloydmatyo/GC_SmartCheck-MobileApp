@@ -72,7 +72,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
 
       // Store result and image
-      await StorageService.saveScanResult(result, imageUri);
+      const savedResult = await StorageService.saveScanResult(result, imageUri);
 
       // Show success toast
       Toast.show({
@@ -82,7 +82,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         visibilityTime: 4000,
       });
 
-      setGradingResult(result);
+      setGradingResult(savedResult);
       setScannedImage(imageUri);
       setCurrentState("results");
     } catch (error) {

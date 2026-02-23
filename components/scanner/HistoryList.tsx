@@ -62,8 +62,14 @@ export default function HistoryList({ onClose }: HistoryListProps) {
                 result={selectedResult}
                 imageUri={selectedResult.metadata?.imageUri}
                 questionCount={selectedResult.totalQuestions}
-                onClose={() => setSelectedResult(null)}
-                onScanAnother={() => setSelectedResult(null)}
+                onClose={() => {
+                    setSelectedResult(null);
+                    loadHistory();
+                }}
+                onScanAnother={() => {
+                    setSelectedResult(null);
+                    loadHistory();
+                }}
             />
         );
     }
