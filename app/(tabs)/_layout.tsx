@@ -154,6 +154,12 @@ export default function TabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="edit-exam"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

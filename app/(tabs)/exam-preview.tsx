@@ -1,3 +1,4 @@
+import StatusManager from "@/components/exam/StatusManager";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -132,10 +133,7 @@ export default function ExamPreviewScreen() {
         <TouchableOpacity style={styles.retryButton} onPress={loadExamData}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={goToQuizzes}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -288,6 +286,13 @@ export default function ExamPreviewScreen() {
           {renderAnswerKeyGrid()}
         </View>
 
+        {/* Status Management Section */}
+        <StatusManager
+          examId={examId}
+          currentStatus={exam.metadata.status}
+          onStatusChanged={loadExamData}
+        />
+
         {/* Version Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Version Information</Text>
@@ -315,6 +320,15 @@ export default function ExamPreviewScreen() {
 
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
+        {exam.metadata.status === "Draft" && (
+          <TouchableOpacity
+            style={styles.editExamButton}
+            onPress={() => router.push(`/(tabs)/edit-exam?examId=${examId}`)}
+          >
+            <Ionicons name="pencil-outline" size={20} color="#fff" />
+            <Text style={styles.editExamButtonText}>Edit Exam</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.editButton}
           onPress={() =>
@@ -591,9 +605,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#e5efe8",
     borderTopWidth: 1,
     borderTopColor: "#cad9cf",
+    flexWrap: "wrap",
+  },
+  editExamButton: {
+    flex: 1,
+    minWidth: "45%",
+    backgroundColor: "#ff9800",
+    borderRadius: 8,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  editExamButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
   },
   editButton: {
     flex: 1,
+    minWidth: "45%",
     backgroundColor: "#2d7a5f",
     borderRadius: 8,
     padding: 14,
@@ -609,6 +641,7 @@ const styles = StyleSheet.create({
   },
   printButton: {
     flex: 1,
+    minWidth: "45%",
     backgroundColor: "#2f6d58",
     borderRadius: 8,
     padding: 14,
@@ -623,4 +656,3 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
-

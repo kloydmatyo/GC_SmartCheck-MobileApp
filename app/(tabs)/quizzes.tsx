@@ -6,9 +6,9 @@ import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     FlatList,
-    TextInput,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
@@ -54,19 +54,48 @@ export default function QuizzesScreen() {
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
+
+        // Map status to proper case
+        let status: "Draft" | "Scheduled" | "Active" | "Completed" = "Draft";
+        if (data.status) {
+          const statusLower = data.status.toLowerCase();
+          switch (statusLower) {
+            case "draft":
+              status = "Draft";
+              break;
+            case "scheduled":
+              status = "Scheduled";
+              break;
+            case "active":
+              status = "Active";
+              break;
+            case "completed":
+              status = "Completed";
+              break;
+            default:
+              status = "Draft";
+          }
+        }
+
         examsList.push({
           id: doc.id,
           title: data.title || "Untitled Exam",
-          class: data.course_subject || "No Subject",
+          class: data.subject || data.className || "No Subject",
           date: data.created_at
-            ? new Date(data.created_at).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })
+            ? typeof data.created_at === "string"
+              ? new Date(data.created_at).toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })
+              : data.createdAt?.toDate?.()?.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                }) || "No Date"
             : "No Date",
           papers: data.scanned_papers || null,
-          status: data.status || "Draft",
+          status: status,
         });
       });
 
@@ -101,7 +130,17 @@ export default function QuizzesScreen() {
       onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
     >
       <View style={styles.quizHeader}>
-        <Text style={styles.quizTitle}>{item.title}</Text>
+        <View style={styles.titleContainer}>
+          <Text style={styles.quizTitle}>{item.title}</Text>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getStatusColor(item.status) },
+            ]}
+          >
+            <Text style={styles.statusText}>{item.status}</Text>
+          </View>
+        </View>
         <View style={styles.scanBadge}>
           <Text style={styles.scanText}>SCAN</Text>
           <Ionicons name="scan-outline" size={30} color="#e5f4ea" />
@@ -133,6 +172,21 @@ export default function QuizzesScreen() {
       </View>
     </TouchableOpacity>
   );
+
+  const getStatusColor = (status: string): string => {
+    switch (status) {
+      case "Draft":
+        return "#9e9e9e";
+      case "Scheduled":
+        return "#ff9800";
+      case "Active":
+        return "#00a550";
+      case "Completed":
+        return "#4a90e2";
+      default:
+        return "#666";
+    }
+  };
 
   if (loading) {
     return (
@@ -338,11 +392,26 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 4,
   },
+  titleContainer: {
+    flex: 1,
+    marginRight: 8,
+  },
   quizTitle: {
     fontSize: 27,
     fontWeight: "800",
     color: "#ecf7f1",
-    flex: 1,
+    marginBottom: 6,
+  },
+  statusBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "600",
   },
   scanBadge: {
     alignItems: "center",
@@ -453,4 +522,3 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-

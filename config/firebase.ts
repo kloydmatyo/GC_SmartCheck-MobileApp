@@ -16,7 +16,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Auth - using getAuth for React Native compatibility
+// Initialize Firebase Auth (simplified - no persistence for now)
 export const auth = getAuth(app);
 
 // Initialize Firestore
