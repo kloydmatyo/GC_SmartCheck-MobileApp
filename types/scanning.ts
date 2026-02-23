@@ -35,6 +35,7 @@ export interface GradingResult {
     deviceId: string;
     isBlurred?: boolean;
     imageUri?: string;
+    isValidId?: boolean;
   };
 }
 

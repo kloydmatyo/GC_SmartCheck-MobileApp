@@ -92,9 +92,16 @@ export default function HistoryList({ onClose }: HistoryListProps) {
                 )}
 
                 <View style={styles.cardContent}>
-                    <Text style={styles.cardTitle}>
-                        Student ID: {item.studentId === "00000000" ? "Unknown" : item.studentId}
-                    </Text>
+                    <View style={styles.titleRow}>
+                        <Text style={styles.cardTitle}>
+                            Student ID: {item.studentId === "00000000" ? "Unknown" : item.studentId}
+                        </Text>
+                        {item.metadata?.isValidId ? (
+                            <Ionicons name="checkmark-circle" size={16} color="#00a550" style={{ marginLeft: 6 }} />
+                        ) : (
+                            <Ionicons name="alert-circle" size={16} color="#e74c3c" style={{ marginLeft: 6 }} />
+                        )}
+                    </View>
                     <Text style={styles.cardSubtitle}>{date}</Text>
 
                     <View style={styles.scoreRow}>
@@ -213,11 +220,15 @@ const styles = StyleSheet.create({
     cardContent: {
         flex: 1,
     },
+    titleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 4,
+    },
     cardTitle: {
         fontSize: 16,
         fontWeight: "bold",
         color: "#333",
-        marginBottom: 4,
     },
     cardSubtitle: {
         fontSize: 12,

@@ -34,6 +34,7 @@ export class StorageService {
             const scanWithMeta: GradingResult = {
                 ...result,
                 metadata: {
+                    ...result.metadata,
                     timestamp: Date.now(),
                     deviceId,
                     imageUri: newPath,
