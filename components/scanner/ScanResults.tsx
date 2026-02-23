@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -14,7 +15,7 @@ import { GradingResult } from "../../types/scanning";
 interface ScanResultsProps {
   result: GradingResult;
   imageUri?: string;
-  questionCount?: number; // ← NEW: pass this from the parent screen
+  questionCount?: number;
   onClose: () => void;
   onScanAnother: () => void;
 }
@@ -22,17 +23,31 @@ interface ScanResultsProps {
 export default function ScanResults({
   result,
   imageUri,
-  questionCount, // ← received from parent
+  questionCount,
   onClose,
   onScanAnother,
 }: ScanResultsProps) {
   const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [isEditingId, setIsEditingId] = useState(false);
+  const [editedStudentId, setEditedStudentId] = useState(
+    result.studentId || ""
+  );
   const details = result?.details || [];
 
-  // Derive actual question count from results if prop not provided
   const totalQuestions =
     questionCount ??
     (details.length > 0 ? details.length : result?.totalPoints ?? 20);
+
+  const handleSaveId = () => {
+    setIsEditingId(false);
+    // You can add logic here to save to storage if needed
+    // e.g., await StorageService.updateStudentId(result.id, editedStudentId);
+  };
+
+  const handleCancelEdit = () => {
+    setEditedStudentId(result.studentId || "");
+    setIsEditingId(false);
+  };
 
   return (
     <View style={styles.container}>
@@ -71,17 +86,59 @@ export default function ScanResults({
           </View>
         )}
 
-        {/* Student ID */}
+        {/* Student ID - Editable Section */}
         {result.studentId && result.studentId !== "00000000" && (
-          <View style={styles.studentIdSection}>
-            <Text style={styles.studentIdLabel}>Student ZipGrade ID</Text>
-            <Text style={styles.studentIdValue}>{result.studentId}</Text>
+          <View
+            style={[
+              styles.studentIdSection,
+              isEditingId && styles.studentIdSectionEditing,
+            ]}
+          >
+            <View style={styles.studentIdLeft}>
+              <Text style={styles.studentIdLabel}>Student ZipGrade ID</Text>
+              {isEditingId ? (
+                <TextInput
+                  style={styles.studentIdInput}
+                  value={editedStudentId}
+                  onChangeText={setEditedStudentId}
+                  placeholder="Enter Student ID"
+                  placeholderTextColor="#999"
+                  maxLength={20}
+                  autoFocus
+                />
+              ) : (
+                <Text style={styles.studentIdValue}>{editedStudentId}</Text>
+              )}
+            </View>
+
+            {isEditingId ? (
+              <View style={styles.editButtonsContainer}>
+                <TouchableOpacity
+                  style={styles.iconButtonCancel}
+                  onPress={handleCancelEdit}
+                >
+                  <Ionicons name="close" size={18} color="#F44336" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconButtonSave}
+                  onPress={handleSaveId}
+                >
+                  <Ionicons name="checkmark" size={18} color="#4CAF50" />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => setIsEditingId(true)}
+              >
+                <Ionicons name="pencil" size={18} color="#5C6BC0" />
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
         {/* Scanned Items Breakdown */}
         <View style={styles.section}>
-          {/* ← Dynamic title now */}
           <Text style={styles.sectionTitle}>
             Scanned {totalQuestions}-Question Sheet
           </Text>
@@ -203,8 +260,52 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  studentIdSectionEditing: {
+    backgroundColor: "#F3E5F5",
+    borderWidth: 2,
+    borderColor: "#5C6BC0",
+  },
+  studentIdLeft: {
+    flex: 1,
+  },
   studentIdLabel: { fontSize: 12, color: "#5C6BC0", fontWeight: "700" },
-  studentIdValue: { fontSize: 16, fontWeight: "800", color: "#1A237E", letterSpacing: 2 },
+  studentIdValue: { fontSize: 16, fontWeight: "800", color: "#1A237E", letterSpacing: 2, marginTop: 4 },
+  studentIdInput: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1A237E",
+    letterSpacing: 2,
+    marginTop: 4,
+    borderBottomWidth: 2,
+    borderBottomColor: "#5C6BC0",
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+  },
+  editButton: {
+    padding: 8,
+    marginLeft: 10,
+  },
+  editButtonsContainer: {
+    flexDirection: "row",
+    gap: 8,
+    marginLeft: 10,
+  },
+  iconButtonSave: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#E8F5E9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  iconButtonCancel: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FFEBEE",
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
   // Modal
   modalBackground: {
