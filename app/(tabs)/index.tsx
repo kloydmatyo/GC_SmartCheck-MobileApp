@@ -9,10 +9,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import HistoryList from "../../components/scanner/HistoryList";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function HomeScreen() {
   const [showScanner, setShowScanner] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
   const router = useRouter();
 
   // Mock data - replace with actual data from API/state management
@@ -67,6 +70,9 @@ export default function HomeScreen() {
     return <ScannerScreen onClose={() => setShowScanner(false)} />;
   }
 
+  if (showHistory) {
+    return <HistoryList onClose={() => setShowHistory(false)} />;
+  }
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -171,6 +177,15 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* New History Button */}
+        <TouchableOpacity
+          style={styles.newQuizButton}
+          onPress={() => setShowHistory(true)}
+        >
+          <Ionicons name="add-circle" size={24} color="#fff" />
+          <Text style={styles.newQuizButtonText}>History</Text>
+        </TouchableOpacity>
 
         {/* New Quiz Button */}
         <TouchableOpacity
