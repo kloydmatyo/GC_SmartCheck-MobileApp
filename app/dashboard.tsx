@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,7 +28,6 @@ const FRAME_TOP = SCREEN_H * 0.18;
 
 export default function ScannerScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ from?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -60,10 +59,6 @@ export default function ScannerScreen() {
       setLoading(false);
     }
   };
-
-  if (params.from !== "home") {
-    return <Redirect href="/(tabs)" />;
-  }
 
   if (!permission) {
     return (

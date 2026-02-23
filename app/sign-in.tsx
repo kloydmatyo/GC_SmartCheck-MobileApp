@@ -116,7 +116,7 @@ export default function SignInScreen() {
 
   // Debug function to go directly to camera test
   const goToCameraTest = () => {
-    router.push("/camera-test");
+    router.push("/dashboard");
   };
 
   return (
