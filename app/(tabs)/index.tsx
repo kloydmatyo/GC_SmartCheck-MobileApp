@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
   Image,
   ScrollView,
@@ -9,8 +9,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function HomeScreen() {
+  const [showScanner, setShowScanner] = useState(false);
   const router = useRouter();
 
   // Mock data - replace with actual data from API/state management
@@ -61,6 +63,10 @@ export default function HomeScreen() {
     }
   };
 
+  if (showScanner) {
+    return <ScannerScreen onClose={() => setShowScanner(false)} />;
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -93,7 +99,7 @@ export default function HomeScreen() {
         {/* Start Scanning Button */}
         <TouchableOpacity
           style={styles.scanButton}
-          onPress={() => router.push("/(tabs)/scanner")}
+          onPress={() => setShowScanner(true)}
         >
           <Ionicons name="document-text" size={24} color="#fff" />
           <Text style={styles.scanButtonText}>Start Scanning Papers</Text>

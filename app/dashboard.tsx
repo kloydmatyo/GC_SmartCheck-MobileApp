@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -28,6 +28,7 @@ const FRAME_TOP = SCREEN_H * 0.18;
 
 export default function ScannerScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ from?: string }>();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
@@ -59,6 +60,10 @@ export default function ScannerScreen() {
       setLoading(false);
     }
   };
+
+  if (params.from !== "home") {
+    return <Redirect href="/(tabs)" />;
+  }
 
   if (!permission) {
     return (
@@ -251,7 +256,8 @@ export default function ScannerScreen() {
         />
         <View style={styles.dropdownPanel}>
           {quizzes.map((q, index) => {
-            const selected = q.metadata?.timestamp === selectedQuiz.metadata?.timestamp;
+            const selected =
+              q.metadata?.timestamp === selectedQuiz.metadata?.timestamp;
             return (
               <TouchableOpacity
                 key={index}
