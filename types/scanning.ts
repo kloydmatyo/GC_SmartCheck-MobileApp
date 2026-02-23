@@ -30,6 +30,12 @@ export interface GradingResult {
     isCorrect: boolean;
     points: number;
   }[];
+  metadata?: {
+    timestamp: number;
+    deviceId: string;
+    isBlurred?: boolean;
+    imageUri?: string;
+  };
 }
 
 export interface BubbleDetection {

@@ -75,6 +75,7 @@ export default function CameraScanner({
       const templateName = qualityCheck.detectedTemplate || "standard20";
       const scanResult = await ZipgradeScanner.processZipgradeSheet(
         photo.uri,
+        20,
         templateName,
       );
       onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);

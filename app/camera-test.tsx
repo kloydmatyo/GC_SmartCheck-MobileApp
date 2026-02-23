@@ -11,22 +11,33 @@ import {
   View
 } from "react-native";
 import CameraScanner from "../components/scanner/CameraScanner";
+import HistoryList from "../components/scanner/HistoryList";
 import ScanResults from "../components/scanner/ScanResults";
 import { GradingService } from "../services/gradingService";
+import { StorageService } from "../services/storageService";
 import { GradingResult, ScanResult } from "../types/scanning";
 
 export default function CameraTest() {
   const [showCamera, setShowCamera] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
   const [scannedImage, setScannedImage] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
 
   // Updated to receive both the data result and the image file path
-  const handleScanComplete = useCallback((scanResult: ScanResult, imageUri: string) => {
+  const handleScanComplete = useCallback(async (scanResult: ScanResult, imageUri: string) => {
     // Get answer key (in production, this would come from the exam setup)
-    const answerKey = GradingService.getDefaultAnswerKey();
+    const rawCount = scanResult.answers?.length || 20;
+    const answerKey = GradingService.getDefaultAnswerKey(rawCount);
     // Grade the answers
     const gradedInfo = GradingService.gradeAnswers(scanResult, answerKey);
+
+    // Store result and image
+    try {
+      await StorageService.saveScanResult(gradedInfo, imageUri);
+    } catch (err) {
+      console.error("Storage failed:", err);
+    }
 
     setScannedImage(imageUri);
     setGradingResult(gradedInfo);
@@ -68,6 +79,15 @@ export default function CameraTest() {
       <View style={styles.fullscreen}>
         <StatusBar style="light" />
         <CameraScanner onScanComplete={handleScanComplete} onCancel={handleCancel} />
+      </View>
+    );
+  }
+
+  if (showHistory) {
+    return (
+      <View style={styles.fullscreen}>
+        <StatusBar style="light" />
+        <HistoryList onClose={() => setShowHistory(false)} />
       </View>
     );
   }
@@ -121,6 +141,10 @@ export default function CameraTest() {
               <TouchableOpacity style={styles.ghostButton} onPress={runMockTest}>
                 <Text style={styles.ghostButtonText}>Run Diagnostic Mock</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity style={styles.historyButton} onPress={() => setShowHistory(true)}>
+                <Text style={styles.historyButtonText}>View History</Text>
+              </TouchableOpacity>
             </View>
           </>
         )}
@@ -153,6 +177,8 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: "white", fontSize: 17, fontWeight: "600" },
   ghostButton: { marginTop: 12, paddingVertical: 12 },
   ghostButtonText: { color: "#1A237E", fontSize: 15, fontWeight: "500" },
+  historyButton: { marginTop: 12, paddingVertical: 12, borderWidth: 1, borderColor: "#1A237E", borderRadius: 8, paddingHorizontal: 20 },
+  historyButtonText: { color: "#1A237E", fontSize: 15, fontWeight: "500" },
   loadingCard: { padding: 50, alignItems: "center" },
   loadingText: { marginTop: 15, fontSize: 16, color: "#444" },
 });

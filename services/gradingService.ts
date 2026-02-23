@@ -55,9 +55,9 @@ export class GradingService {
   /**
    * Get default answer key for testing
    */
-  static getDefaultAnswerKey(): AnswerKey[] {
+  static getDefaultAnswerKey(length: number = 20): AnswerKey[] {
     const answers = ["A", "B", "C", "D", "E"];
-    return Array.from({ length: 20 }, (_, index) => ({
+    return Array.from({ length }, (_, index) => ({
       questionNumber: index + 1,
       correctAnswer: answers[Math.floor(Math.random() * answers.length)],
       points: 1,

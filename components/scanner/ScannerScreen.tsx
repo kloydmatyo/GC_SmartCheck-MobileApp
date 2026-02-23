@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import Toast from "react-native-toast-message";
 import { GradingService } from "../../services/gradingService";
+import { StorageService } from "../../services/storageService";
 import { GradingResult, ScanResult } from "../../types/scanning";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
@@ -24,16 +25,23 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   const handleScanComplete = async (scanResult: ScanResult, imageUri: string) => {
     try {
       // Get answer key (in production, this would come from the exam setup)
-      const answerKey = GradingService.getDefaultAnswerKey();
+      const rawCount = scanResult.answers?.length || 20;
+      const answerKey = GradingService.getDefaultAnswerKey(rawCount);
 
       // Grade the answers
       const result = GradingService.gradeAnswers(scanResult, answerKey);
 
+      console.log(`[ScannerScreen] Scanned student ID: ${result.studentId}`);
+      console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
+
+      // Store result and image
+      await StorageService.saveScanResult(result, imageUri);
+
       // Show success toast
       Toast.show({
         type: "success",
-        text1: "Scan Complete!",
-        text2: `Student ${result.studentId}: ${result.score}/${result.totalPoints} (${result.percentage}%)`,
+        text1: `Sheet Scanned: ${rawCount} Questions`,
+        text2: `Student ${result.studentId || "00000000"}: ${result.score}/${result.totalPoints}`,
         visibilityTime: 4000,
       });
 
@@ -72,6 +80,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         <ScanResults
           result={gradingResult}
           imageUri={scannedImage}
+          questionCount={gradingResult.totalQuestions}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
         />
