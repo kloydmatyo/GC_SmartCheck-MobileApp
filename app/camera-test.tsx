@@ -1,184 +1,504 @@
-import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
+  Modal,
   Platform,
   SafeAreaView,
-  ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
-import CameraScanner from "../components/scanner/CameraScanner";
-import HistoryList from "../components/scanner/HistoryList";
-import ScanResults from "../components/scanner/ScanResults";
-import { GradingService } from "../services/gradingService";
 import { StorageService } from "../services/storageService";
-import { GradingResult, ScanResult } from "../types/scanning";
+import { GradingResult } from "../types/scanning";
 
-export default function CameraTest() {
-  const [showCamera, setShowCamera] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [gradingResult, setGradingResult] = useState<GradingResult | null>(null);
-  const [scannedImage, setScannedImage] = useState<string | undefined>(undefined);
-  const [isLoading, setIsLoading] = useState(false);
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-  // Updated to receive both the data result and the image file path
-  const handleScanComplete = useCallback(async (scanResult: ScanResult, imageUri: string) => {
-    // Get answer key (in production, this would come from the exam setup)
-    const rawCount = scanResult.answers?.length || 20;
-    const answerKey = GradingService.getDefaultAnswerKey(rawCount);
-    // Grade the answers
-    const gradedInfo = GradingService.gradeAnswers(scanResult, answerKey);
+type ScanState = "idle" | "scanning" | "success" | "failed";
 
-    // Store result and image
-    try {
-      await StorageService.saveScanResult(gradedInfo, imageUri);
-    } catch (err) {
-      console.error("Storage failed:", err);
-    }
+const FRAME_W = SCREEN_W * 0.82;
+const FRAME_H = SCREEN_H * 0.54;
+const FRAME_TOP = SCREEN_H * 0.18;
 
-    setScannedImage(imageUri);
-    setGradingResult(gradedInfo);
-    setShowCamera(false);
+export default function ScannerScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ from?: string }>();
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+
+  const [quizzes, setQuizzes] = useState<GradingResult[]>([]);
+  const [selectedQuiz, setSelectedQuiz] = useState<GradingResult | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [scanState, setScanState] = useState<ScanState>("idle");
+  const [lastResult, setLastResult] = useState<{
+    studentId: string;
+    score: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadQuizzes();
   }, []);
 
-  const handleCancel = () => setShowCamera(false);
-
-  const resetTest = () => {
-    setGradingResult(null);
-    setScannedImage(undefined);
+  const loadQuizzes = async () => {
+    try {
+      setLoading(true);
+      const data = await StorageService.getHistory();
+      setQuizzes(data);
+      if (data.length > 0) {
+        setSelectedQuiz(data[0]);
+      }
+    } catch (error) {
+      console.error("Error loading quizzes:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const runMockTest = async () => {
-    setIsLoading(true);
-    setTimeout(() => {
-      const mockResult: GradingResult = {
-        studentId: "2024001",
-        score: 18,
-        totalPoints: 20,
-        percentage: 90,
-        correctAnswers: 18,
-        totalQuestions: 20,
-        details: [
-          { questionNumber: 1, studentAnswer: "A", correctAnswer: "A", isCorrect: true, points: 1 },
-          { questionNumber: 2, studentAnswer: "B", correctAnswer: "B", isCorrect: true, points: 1 },
-          // ... mapping to your 20-question PDF structure
-        ]
-      };
-      setGradingResult(mockResult);
-      // For mock purposes, we can use a placeholder image
-      setScannedImage("https://via.placeholder.com/300x600.png?text=Mock+Gordon+College+Sheet");
-      setIsLoading(false);
-    }, 1200);
-  };
+  if (params.from !== "home") {
+    return <Redirect href="/(tabs)" />;
+  }
 
-  if (showCamera) {
+  if (!permission) {
     return (
-      <View style={styles.fullscreen}>
-        <StatusBar style="light" />
-        <CameraScanner onScanComplete={handleScanComplete} onCancel={handleCancel} />
+      <View style={styles.permWrap}>
+        <ActivityIndicator size="large" color="#2D6A4F" />
       </View>
     );
   }
 
-  if (showHistory) {
+  if (!permission.granted) {
     return (
-      <View style={styles.fullscreen}>
-        <StatusBar style="light" />
-        <HistoryList onClose={() => setShowHistory(false)} />
-      </View>
-    );
-  }
-
-  if (gradingResult) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar style="dark" />
-        <ScanResults
-          result={gradingResult}
-          imageUri={scannedImage} // Pass the image URI here
-          onClose={resetTest}
-          onScanAnother={() => {
-            resetTest();
-            setShowCamera(true);
-          }}
-        />
+      <SafeAreaView style={styles.permWrap}>
+        <TouchableOpacity style={styles.permBack} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.permTitle}>Camera permission is required.</Text>
+        <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
+          <Text style={styles.permBtnText}>Enable Camera</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
+  async function handleScan() {
+    if (scanState === "scanning") return;
+    setScanState("scanning");
+    setLastResult(null);
+
+    try {
+      await new Promise<void>((res) => setTimeout(res, 1000));
+      const success = Math.random() > 0.2;
+      if (success) {
+        const score = Math.floor(Math.random() * 20) + 30;
+        setLastResult({
+          studentId: `2023${Math.floor(Math.random() * 90000) + 10000}`,
+          score: `${score}/50`,
+        });
+        setScanState("success");
+      } else {
+        setScanState("failed");
+      }
+      setTimeout(() => setScanState("idle"), 2500);
+    } catch {
+      setScanState("failed");
+      setTimeout(() => setScanState("idle"), 2500);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.root}>
+        <ActivityIndicator size="large" color="#2D6A4F" />
+      </View>
+    );
+  }
+
+  if (quizzes.length === 0 || !selectedQuiz) {
+    return (
+      <View style={styles.root}>
+        <SafeAreaView style={styles.emptyState}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={18} color="#d8e6fa" />
+          </TouchableOpacity>
+          <Text style={styles.emptyText}>No quiz history found</Text>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
-      <View style={styles.header}>
-        <Text style={styles.title}>Grading Assistant</Text>
-        <Text style={styles.subtitle}>Gordon College - Olongapo City</Text>
+    <View style={styles.root}>
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#020913"
+        translucent
+      />
+
+      <CameraView
+        ref={cameraRef}
+        style={StyleSheet.absoluteFill}
+        facing="back"
+      />
+
+      <View style={styles.overlay} pointerEvents="box-none">
+        <SafeAreaView style={styles.topBar}>
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={18} color="#d8e6fa" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.selector}
+            onPress={() => setDropdownOpen(true)}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.selectorTop}>QUIZ</Text>
+              <Text style={styles.selectorName} numberOfLines={1}>
+                Student ID: {selectedQuiz.studentId}
+              </Text>
+            </View>
+            <Ionicons name="chevron-down" size={15} color="#9ec3ef" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="flash-outline" size={18} color="#d8e6fa" />
+          </TouchableOpacity>
+        </SafeAreaView>
+
+        {scanState === "success" && lastResult && (
+          <View style={styles.successBanner}>
+            <Ionicons name="checkmark-circle" size={24} color="#fff" />
+            <View>
+              <Text style={styles.bannerTitle}>SCAN SUCCESSFUL</Text>
+              <Text style={styles.bannerSub}>
+                ID: {lastResult.studentId} Score: {lastResult.score}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {scanState === "failed" && (
+          <View style={styles.failBanner}>
+            <Ionicons name="close-circle" size={24} color="#fff" />
+            <View>
+              <Text style={styles.bannerTitle}>SCAN FAILED</Text>
+              <Text style={styles.bannerSub}>PLEASE TRY AGAIN</Text>
+            </View>
+          </View>
+        )}
+
+        <View style={styles.frame} pointerEvents="none">
+          <LinearGradient
+            colors={[
+              "rgba(5,45,28,0.62)",
+              "rgba(12,72,44,0.48)",
+              "rgba(5,34,58,0.62)",
+            ]}
+            start={{ x: 0.1, y: 0.2 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.frameTint}
+          />
+          <View style={[styles.corner, styles.tl]} />
+          <View style={[styles.corner, styles.tr]} />
+          <View style={[styles.corner, styles.bl]} />
+          <View style={[styles.corner, styles.br]} />
+
+          <View style={styles.hintWrap}>
+            <Text style={styles.hintTitle}>Align Answer Sheet</Text>
+            <Text style={styles.hintSub}>
+              Ensure the black markers are{"\n"}within the frame
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.bottomPanel}>
+          <TouchableOpacity
+            style={[
+              styles.shutterOuter,
+              scanState === "scanning" && { opacity: 0.65 },
+            ]}
+            onPress={handleScan}
+            disabled={scanState === "scanning"}
+          >
+            {scanState === "scanning" ? (
+              <ActivityIndicator size="large" color="#2D6A4F" />
+            ) : (
+              <View style={styles.shutterInner} />
+            )}
+          </TouchableOpacity>
+
+          <Text style={styles.brandText}>Gordon College Smart Checker</Text>
+        </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {isLoading ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="large" color="#1A237E" />
-            <Text style={styles.loadingText}>Processing Sheet...</Text>
-          </View>
-        ) : (
-          <>
-            <View style={styles.mainCard}>
-              <View style={styles.iconCircle}>
-                <Text style={{ fontSize: 32 }}>🎓</Text>
-              </View>
-              <Text style={styles.cardTitle}>Start New Scan</Text>
-              <Text style={styles.cardDescription}>
-                Ready for 20-question Zipgrade answer sheets.
-              </Text>
-
-              <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCamera(true)}>
-                <Text style={styles.primaryButtonText}>Open Scanner</Text>
+      <Modal
+        visible={dropdownOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setDropdownOpen(false)}
+        />
+        <View style={styles.dropdownPanel}>
+          {quizzes.map((q, index) => {
+            const selected = q.metadata?.timestamp === selectedQuiz.metadata?.timestamp;
+            return (
+              <TouchableOpacity
+                key={index}
+                style={[
+                  styles.dropdownItem,
+                  selected && styles.dropdownSelected,
+                ]}
+                onPress={() => {
+                  setSelectedQuiz(q);
+                  setDropdownOpen(false);
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text
+                    style={[styles.dropdownName, selected && { color: "#fff" }]}
+                  >
+                    Student ID: {q.studentId}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.dropdownStatus,
+                      selected && { color: "rgba(255,255,255,0.75)" },
+                    ]}
+                  >
+                    Score: {q.score}/{q.totalPoints} ({q.percentage}%)
+                  </Text>
+                </View>
+                {selected && (
+                  <Ionicons name="checkmark" size={16} color="#fff" />
+                )}
               </TouchableOpacity>
-
-              <TouchableOpacity style={styles.ghostButton} onPress={runMockTest}>
-                <Text style={styles.ghostButtonText}>Run Diagnostic Mock</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.historyButton} onPress={() => setShowHistory(true)}>
-                <Text style={styles.historyButtonText}>View History</Text>
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+            );
+          })}
+        </View>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8F9FB" },
-  fullscreen: { flex: 1, backgroundColor: "black" },
-  header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 10 },
-  title: { fontSize: 26, fontWeight: "800", color: "#1A237E" },
-  subtitle: { fontSize: 14, color: "#666", marginTop: 4 },
-  scrollContent: { padding: 20 },
-  mainCard: {
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 30,
+  root: { flex: 1, backgroundColor: "#000" },
+  permWrap: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 },
-      android: { elevation: 5 },
-    }),
+    backgroundColor: "#fff",
   },
-  iconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: "#E8EAF6", justifyContent: "center", alignItems: "center", marginBottom: 16 },
-  cardTitle: { fontSize: 20, fontWeight: "700", color: "#333", marginBottom: 8 },
-  cardDescription: { fontSize: 14, color: "#777", textAlign: "center", marginBottom: 24 },
-  primaryButton: { backgroundColor: "#1A237E", width: "100%", paddingVertical: 16, borderRadius: 12, alignItems: "center" },
-  primaryButtonText: { color: "white", fontSize: 17, fontWeight: "600" },
-  ghostButton: { marginTop: 12, paddingVertical: 12 },
-  ghostButtonText: { color: "#1A237E", fontSize: 15, fontWeight: "500" },
-  historyButton: { marginTop: 12, paddingVertical: 12, borderWidth: 1, borderColor: "#1A237E", borderRadius: 8, paddingHorizontal: 20 },
-  historyButtonText: { color: "#1A237E", fontSize: 15, fontWeight: "500" },
-  loadingCard: { padding: 50, alignItems: "center" },
-  loadingText: { marginTop: 15, fontSize: 16, color: "#444" },
+  permBack: { position: "absolute", top: 48, left: 14, padding: 8 },
+  permTitle: { fontSize: 16, fontWeight: "700", color: "#24313d" },
+  permBtn: {
+    marginTop: 16,
+    backgroundColor: "#2D6A4F",
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  permBtnText: { color: "#fff", fontWeight: "700" },
+
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "space-between",
+  },
+
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingTop: Platform.OS === "android" ? 32 : 0,
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    backgroundColor: "rgba(3,10,18,0.82)",
+  },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0f2137",
+    borderWidth: 1,
+    borderColor: "#1f467a",
+  },
+  selector: {
+    flex: 1,
+    marginHorizontal: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#0f2137",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#1f467a",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  selectorTop: {
+    color: "#9fc1ec",
+    fontSize: 8,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  selectorName: {
+    color: "#e8f1fb",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+
+  successBanner: {
+    position: "absolute",
+    top: Platform.OS === "android" ? 84 : 74,
+    left: 8,
+    right: 8,
+    zIndex: 20,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#39e286",
+    backgroundColor: "rgba(15,170,90,0.87)",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  failBanner: {
+    position: "absolute",
+    top: Platform.OS === "android" ? 84 : 74,
+    left: 8,
+    right: 8,
+    zIndex: 20,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#ff4369",
+    backgroundColor: "rgba(178,15,45,0.90)",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bannerTitle: { color: "#f6fff8", fontSize: 10, fontWeight: "800" },
+  bannerSub: { color: "#f6fff8", fontSize: 11, fontWeight: "700" },
+
+  frame: {
+    position: "absolute",
+    top: FRAME_TOP,
+    left: (SCREEN_W - FRAME_W) / 2,
+    width: FRAME_W,
+    height: FRAME_H,
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  frameTint: { ...StyleSheet.absoluteFillObject },
+  corner: {
+    position: "absolute",
+    width: 22,
+    height: 22,
+    borderColor: "#3a7fff",
+    borderWidth: 0,
+  },
+  tl: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 },
+  tr: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 },
+  bl: { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 },
+  br: { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 },
+  hintWrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 18,
+    alignItems: "center",
+  },
+  hintTitle: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  hintSub: {
+    color: "rgba(255,255,255,0.62)",
+    fontSize: 10,
+    textAlign: "center",
+    marginTop: 4,
+    lineHeight: 14,
+  },
+
+  bottomPanel: {
+    backgroundColor: "#071a31",
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    paddingTop: 14,
+    paddingBottom: Platform.OS === "android" ? 22 : 34,
+    alignItems: "center",
+  },
+  shutterOuter: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: "#f5f5f5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shutterInner: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#f7f7f7",
+    borderWidth: 2,
+    borderColor: "#848a92",
+  },
+  brandText: { marginTop: 10, color: "rgba(255,255,255,0.35)", fontSize: 9 },
+
+  dropdownBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  dropdownPanel: {
+    position: "absolute",
+    top: 78,
+    left: 30,
+    right: 30,
+    backgroundColor: "#0a1830",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#1f467a",
+    overflow: "hidden",
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  dropdownSelected: { backgroundColor: "#1a62d8" },
+  dropdownName: { color: "#d9e8fb", fontSize: 11, fontWeight: "700" },
+  dropdownStatus: {
+    color: "#7f9fc4",
+    fontSize: 9,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  emptyText: {
+    color: "#d8e6fa",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 16,
+  },
 });

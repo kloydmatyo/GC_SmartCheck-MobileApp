@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
+    FlatList,
     Image,
     ScrollView,
     StyleSheet,
@@ -9,6 +10,8 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { StorageService } from "../../services/storageService";
+import { GradingResult } from "../../types/scanning";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -47,6 +50,23 @@ export default function HomeScreen() {
       status: "Upcoming",
     },
   ];
+
+  const [recentHistory, setRecentHistory] = useState<GradingResult[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await StorageService.getHistory();
+        if (mounted) setRecentHistory(data.slice(0, 3));
+      } catch (e) {
+        console.warn("Failed to load history", e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -164,6 +184,35 @@ export default function HomeScreen() {
               </View>
             </TouchableOpacity>
           ))}
+
+          {/* Recent Scan History (moved into Recent Exams) */}
+          <View style={{ marginTop: 12 }}>
+            <Text style={[styles.sectionTitle, { marginHorizontal: 20, marginBottom: 8 }]}>Recent Scans</Text>
+            {recentHistory.length === 0 ? (
+              <Text style={{ marginHorizontal: 20, color: "#666" }}>No recent scans</Text>
+            ) : (
+              <FlatList
+                data={recentHistory}
+                keyExtractor={(i) => i.metadata?.timestamp?.toString() || i.studentId}
+                renderItem={({ item }) => (
+                  <View style={[styles.examCard, { flexDirection: 'row', alignItems: 'center' }]}> 
+                    <View style={{ width: 44, height: 44, borderRadius: 8, backgroundColor: '#fff', borderWidth:1, borderColor:'#e6e6e6', justifyContent:'center', alignItems:'center', marginRight:12 }}>
+                      <Ionicons name="document-text" size={18} color="#666" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '700', color: '#333' }}>{item.studentId === '00000000' ? 'Unknown Student' : `ID: ${item.studentId}`}</Text>
+                      <Text style={{ color: '#666', fontSize: 12 }}>{item.metadata?.timestamp ? new Date(item.metadata.timestamp).toLocaleString() : 'Unknown date'}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ fontWeight: '800' }}>{item.score}/{item.totalPoints}</Text>
+                      <Text style={{ color: '#666', fontSize: 12 }}>{item.percentage}%</Text>
+                    </View>
+                  </View>
+                )}
+                contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
+              />
+            )}
+          </View>
         </View>
 
         {/* New Quiz Button */}

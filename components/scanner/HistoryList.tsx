@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 import {
     Alert,
     FlatList,
-    Image,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -79,17 +78,9 @@ export default function HistoryList({ onClose }: HistoryListProps) {
                 style={styles.card}
                 onPress={() => setSelectedResult(item)}
             >
-                {item.metadata?.imageUri ? (
-                    <Image
-                        source={{ uri: item.metadata.imageUri }}
-                        style={styles.thumbnail}
-                        resizeMode="cover"
-                    />
-                ) : (
-                    <View style={styles.thumbnailPlaceholder}>
-                        <Ionicons name="document-text-outline" size={24} color="#999" />
-                    </View>
-                )}
+                <View style={styles.thumbnailPlaceholderInline}>
+                    <Ionicons name="document-text-outline" size={20} color="#666" />
+                </View>
 
                 <View style={styles.cardContent}>
                     <View style={styles.titleRow}>
@@ -216,6 +207,17 @@ const styles = StyleSheet.create({
         backgroundColor: "#eee",
         justifyContent: "center",
         alignItems: "center",
+    },
+    thumbnailPlaceholderInline: {
+        width: 44,
+        height: 44,
+        borderRadius: 8,
+        marginRight: 12,
+        backgroundColor: "#fff",
+        justifyContent: "center",
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: "#e6e6e6",
     },
     cardContent: {
         flex: 1,
