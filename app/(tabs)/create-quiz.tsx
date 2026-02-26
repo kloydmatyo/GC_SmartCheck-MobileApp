@@ -3,7 +3,7 @@ import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
     addDoc,
     collection,
@@ -11,7 +11,7 @@ import {
     serverTimestamp,
     setDoc,
 } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -48,6 +48,20 @@ export default function CreateQuizScreen() {
     title: "",
     message: "",
   });
+
+  // Reset form when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Reset all form fields to initial state
+      setQuizName("");
+      setNumQuestions("");
+      setSubject("");
+      setExamType("Diagnostic Test");
+      setChoicesPerItem(4);
+      setCreatedExamId("");
+      setLoading(false);
+    }, []),
+  );
 
   const handleSave = async () => {
     // Validation
