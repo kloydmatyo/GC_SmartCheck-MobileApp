@@ -20,6 +20,7 @@ export default function ExamPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
+  const refreshKey = params.refresh as string; // Add refresh trigger
   const goToQuizzes = () => router.replace("/(tabs)/quizzes");
 
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
@@ -28,7 +29,8 @@ export default function ExamPreviewScreen() {
 
   useEffect(() => {
     loadExamData();
-  }, [examId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId, refreshKey]); // Reload when refreshKey changes
 
   const loadExamData = async () => {
     try {

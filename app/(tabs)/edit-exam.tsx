@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { doc, onSnapshot } from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -15,7 +16,7 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { auth } from "../../config/firebase";
+import { auth, db } from "../../config/firebase";
 import { AuditLogService } from "../../services/auditLogService";
 import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
@@ -30,6 +31,12 @@ export default function EditExamScreen() {
   const [originalMetadata, setOriginalMetadata] = useState<ExamMetadata | null>(
     null,
   );
+
+  // Real-time conflict detection
+  const [remoteVersion, setRemoteVersion] = useState<number>(1);
+  const [conflictDetected, setConflictDetected] = useState(false);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const isInitialLoadRef = useRef(true);
 
   // Editable fields
   const [title, setTitle] = useState("");
@@ -56,10 +63,60 @@ export default function EditExamScreen() {
 
   useEffect(() => {
     loadExamData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
+
+  // Real-time listener for concurrent edit detection
+  useEffect(() => {
+    if (!examId) return;
+
+    const examRef = doc(db, "exams", examId);
+
+    const unsubscribe = onSnapshot(
+      examRef,
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+
+        const data = snapshot.data();
+        const currentRemoteVersion = data.version || 1;
+
+        // Skip initial load
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          setRemoteVersion(currentRemoteVersion);
+          return;
+        }
+
+        // Check if version changed (someone else edited)
+        if (currentRemoteVersion > remoteVersion && !saving) {
+          setRemoteVersion(currentRemoteVersion);
+          setConflictDetected(true);
+
+          Toast.show({
+            type: "warning",
+            text1: "Exam Updated",
+            text2: "This exam was modified by another user",
+            visibilityTime: 5000,
+          });
+        }
+      },
+      (error) => {
+        console.error("Error listening to exam changes:", error);
+      },
+    );
+
+    unsubscribeRef.current = unsubscribe;
+
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+    };
+  }, [examId, remoteVersion, saving]);
 
   useEffect(() => {
     checkForChanges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, subject, section, scheduleDate]);
 
   const loadExamData = async () => {
@@ -138,6 +195,10 @@ export default function EditExamScreen() {
       setStatus(examData.metadata.status);
       setTotalQuestions(examData.totalQuestions);
       setVersion(examData.metadata.version);
+
+      // Initialize remote version tracking
+      setRemoteVersion(examData.metadata.version);
+      setConflictDetected(false);
     } catch (error) {
       console.error("Error loading exam:", error);
       Toast.show({
@@ -220,6 +281,30 @@ export default function EditExamScreen() {
       return;
     }
 
+    // Check for conflicts before showing confirmation
+    if (conflictDetected) {
+      Alert.alert(
+        "Conflict Detected",
+        "This exam was modified by another user. Your changes may overwrite theirs. Do you want to refresh and see the latest version?",
+        [
+          {
+            text: "Refresh",
+            onPress: () => {
+              loadExamData();
+              setConflictDetected(false);
+            },
+          },
+          {
+            text: "Save Anyway",
+            style: "destructive",
+            onPress: () => setShowConfirmModal(true),
+          },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+      return;
+    }
+
     setShowConfirmModal(true);
   };
 
@@ -252,25 +337,32 @@ export default function EditExamScreen() {
             new: updateData.title,
           };
         }
-        if (updateData.subject !== originalMetadata.subject) {
+        if (updateData.subject !== (originalMetadata.subject ?? null)) {
           changes.subject = {
-            old: originalMetadata.subject,
+            old: originalMetadata.subject ?? null,
             new: updateData.subject,
           };
         }
-        if (updateData.section !== originalMetadata.section) {
+        if (updateData.section !== (originalMetadata.section ?? null)) {
           changes.section = {
-            old: originalMetadata.section,
+            old: originalMetadata.section ?? null,
             new: updateData.section,
           };
         }
-        if (updateData.date !== originalMetadata.date) {
-          changes.date = { old: originalMetadata.date, new: updateData.date };
+        if (updateData.date !== (originalMetadata.date ?? null)) {
+          changes.date = {
+            old: originalMetadata.date ?? null,
+            new: updateData.date,
+          };
         }
       }
 
-      // Update exam
-      const updatedVersion = await ExamService.updateExam(examId, updateData);
+      // Update exam with version check
+      const updatedVersion = await ExamService.updateExamWithVersionCheck(
+        examId,
+        updateData,
+        version, // Current version we're editing
+      );
 
       // Log audit trail
       await AuditLogService.logExamEdit(
@@ -285,6 +377,7 @@ export default function EditExamScreen() {
 
       // Update local state
       setVersion(updatedVersion);
+      setRemoteVersion(updatedVersion);
       setOriginalMetadata({
         ...originalMetadata!,
         title: updateData.title,
@@ -295,6 +388,7 @@ export default function EditExamScreen() {
         updatedAt: new Date(),
       });
       setHasChanges(false);
+      setConflictDetected(false);
 
       Toast.show({
         type: "success",
@@ -304,25 +398,68 @@ export default function EditExamScreen() {
 
       // Navigate back after a short delay
       setTimeout(() => {
-        router.back();
+        router.replace(
+          `/(tabs)/exam-preview?examId=${examId}&refresh=${Date.now()}`,
+        );
       }, 1500);
     } catch (error: any) {
       console.error("Error saving exam:", error);
 
-      if (error.message?.includes("conflict")) {
-        Alert.alert(
-          "Sync Conflict",
-          "This exam was modified by another user. Please refresh and try again.",
-          [
-            { text: "Refresh", onPress: loadExamData },
-            { text: "Cancel", style: "cancel" },
-          ],
-        );
+      // Enhanced error handling
+      let errorTitle = "Save Failed";
+      let errorMessage = "Failed to save changes. Please try again.";
+
+      if (error.message?.includes("version conflict")) {
+        errorTitle = "Version Conflict";
+        errorMessage =
+          "This exam was modified by another user while you were editing. Please refresh and try again.";
+        Alert.alert(errorTitle, errorMessage, [
+          {
+            text: "Refresh",
+            onPress: () => {
+              loadExamData();
+              setConflictDetected(false);
+            },
+          },
+          { text: "Cancel", style: "cancel" },
+        ]);
+      } else if (error.message?.includes("conflict")) {
+        errorTitle = "Sync Conflict";
+        errorMessage =
+          "This exam was modified by another user. Please refresh and try again.";
+        Alert.alert(errorTitle, errorMessage, [
+          { text: "Refresh", onPress: loadExamData },
+          { text: "Cancel", style: "cancel" },
+        ]);
+      } else if (
+        error.message?.includes("network") ||
+        error.message?.includes("offline")
+      ) {
+        errorTitle = "Network Error";
+        errorMessage =
+          "Unable to connect to the server. Please check your internet connection and try again.";
+        Toast.show({
+          type: "error",
+          text1: errorTitle,
+          text2: errorMessage,
+          visibilityTime: 5000,
+        });
+      } else if (error.message?.includes("LoadBundleFromServerRequestError")) {
+        errorTitle = "Connection Timeout";
+        errorMessage =
+          "The request took too long. Please check your connection and try again.";
+        Toast.show({
+          type: "error",
+          text1: errorTitle,
+          text2: errorMessage,
+          visibilityTime: 5000,
+        });
       } else {
         Toast.show({
           type: "error",
-          text1: "Save Failed",
-          text2: error.message || "Failed to save changes. Please try again.",
+          text1: errorTitle,
+          text2: error.message || errorMessage,
+          visibilityTime: 4000,
         });
       }
     } finally {
@@ -362,6 +499,30 @@ export default function EditExamScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Conflict Warning Banner */}
+        {conflictDetected && (
+          <View style={styles.conflictBanner}>
+            <Ionicons name="warning" size={24} color="#ff9800" />
+            <View style={styles.conflictTextContainer}>
+              <Text style={styles.conflictTitle}>Conflict Detected</Text>
+              <Text style={styles.conflictMessage}>
+                This exam was modified by another user. Your changes may
+                overwrite theirs.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={() => {
+                loadExamData();
+                setConflictDetected(false);
+              }}
+            >
+              <Ionicons name="refresh" size={20} color="#fff" />
+              <Text style={styles.refreshButtonText}>Refresh</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Status Badge */}
         <View
           style={[
@@ -601,6 +762,44 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingBottom: 40,
+  },
+  conflictBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff3cd",
+    borderLeftWidth: 4,
+    borderLeftColor: "#ff9800",
+    padding: 16,
+    marginBottom: 16,
+    borderRadius: 8,
+    gap: 12,
+  },
+  conflictTextContainer: {
+    flex: 1,
+  },
+  conflictTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#856404",
+    marginBottom: 4,
+  },
+  conflictMessage: {
+    fontSize: 13,
+    color: "#856404",
+  },
+  refreshButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ff9800",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 4,
+  },
+  refreshButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
   },
   statusBadge: {
     alignSelf: "flex-start",

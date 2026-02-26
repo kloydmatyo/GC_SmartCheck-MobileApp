@@ -1,6 +1,6 @@
-import { auth, db } from "@/config/firebase";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { auth, db } from "@/config/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -47,6 +47,7 @@ export default function EditAnswerKeyScreen() {
 
   useEffect(() => {
     loadAnswerKey();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
 
   useEffect(() => {
@@ -78,6 +79,19 @@ export default function EditAnswerKeyScreen() {
       }
 
       const examData = examSnap.data();
+
+      // Check if exam is in Draft status
+      if (examData.status !== "Draft") {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Edit Restricted",
+          message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
+          onClose: goToQuizzes,
+        });
+        return;
+      }
+
       const numItems = examData.num_items || 20;
       const choices = examData.choices_per_item || 4;
       setChoicesPerItem(choices);
@@ -240,10 +254,7 @@ export default function EditAnswerKeyScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={goToQuizzes}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Answer Key</Text>
@@ -261,10 +272,7 @@ export default function EditAnswerKeyScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={goToQuizzes}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Answer Key</Text>
@@ -448,4 +456,3 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 });
-

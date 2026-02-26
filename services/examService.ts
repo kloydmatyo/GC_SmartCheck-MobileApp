@@ -160,7 +160,95 @@ export class ExamService {
   }
 
   /**
-   * Update exam metadata
+   * Update exam metadata with version conflict checking
+   */
+  static async updateExamWithVersionCheck(
+    examId: string,
+    updateData: {
+      title?: string;
+      subject?: string | null;
+      section?: string | null;
+      date?: string | null;
+    },
+    expectedVersion: number,
+  ): Promise<number> {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("User not authenticated");
+      }
+
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
+
+      if (!examSnap.exists()) {
+        throw new Error("Exam not found");
+      }
+
+      const examData = examSnap.data();
+
+      // Check if user is authorized
+      if (examData.createdBy !== currentUser.uid) {
+        throw new Error("Not authorized to update this exam");
+      }
+
+      // Check if exam is in Draft status
+      if (examData.status !== "Draft") {
+        throw new Error("Only Draft exams can be edited");
+      }
+
+      // Check for version conflicts (optimistic locking)
+      const currentVersion = examData.version || 1;
+
+      if (currentVersion !== expectedVersion) {
+        throw new Error(
+          `Version conflict detected: Expected version ${expectedVersion}, but current version is ${currentVersion}. The exam was modified by another user.`,
+        );
+      }
+
+      // Prepare update
+      const { updateDoc, serverTimestamp } = await import("firebase/firestore");
+      const newVersion = currentVersion + 1;
+
+      try {
+        await updateDoc(examRef, {
+          ...updateData,
+          version: newVersion,
+          updatedAt: serverTimestamp(),
+        });
+
+        return newVersion;
+      } catch (updateError: any) {
+        // Handle network errors specifically
+        if (
+          updateError.code === "unavailable" ||
+          updateError.message?.includes("network") ||
+          updateError.message?.includes("offline")
+        ) {
+          throw new Error(
+            "Network error: Unable to save changes. Please check your internet connection.",
+          );
+        }
+        throw updateError;
+      }
+    } catch (error: any) {
+      console.error("Error updating exam:", error);
+
+      // Re-throw with more context
+      if (
+        error.message?.includes("network") ||
+        error.message?.includes("offline") ||
+        error.code === "unavailable"
+      ) {
+        throw new Error("Network error: " + error.message);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Update exam metadata (legacy method - use updateExamWithVersionCheck for conflict detection)
    */
   static async updateExam(
     examId: string,
@@ -196,22 +284,46 @@ export class ExamService {
         throw new Error("Only Draft exams can be edited");
       }
 
-      // Check for version conflicts
+      // Check for version conflicts (optimistic locking)
       const currentVersion = examData.version || 1;
 
       // Prepare update
       const { updateDoc, serverTimestamp } = await import("firebase/firestore");
       const newVersion = currentVersion + 1;
 
-      await updateDoc(examRef, {
-        ...updateData,
-        version: newVersion,
-        updatedAt: serverTimestamp(),
-      });
+      try {
+        await updateDoc(examRef, {
+          ...updateData,
+          version: newVersion,
+          updatedAt: serverTimestamp(),
+        });
 
-      return newVersion;
-    } catch (error) {
+        return newVersion;
+      } catch (updateError: any) {
+        // Handle network errors specifically
+        if (
+          updateError.code === "unavailable" ||
+          updateError.message?.includes("network") ||
+          updateError.message?.includes("offline")
+        ) {
+          throw new Error(
+            "Network error: Unable to save changes. Please check your internet connection.",
+          );
+        }
+        throw updateError;
+      }
+    } catch (error: any) {
       console.error("Error updating exam:", error);
+
+      // Re-throw with more context
+      if (
+        error.message?.includes("network") ||
+        error.message?.includes("offline") ||
+        error.code === "unavailable"
+      ) {
+        throw new Error("Network error: " + error.message);
+      }
+
       throw error;
     }
   }
@@ -339,10 +451,10 @@ export class ExamService {
    */
   static getAvailableStatusTransitions(
     currentStatus: string,
-  ): Array<{ status: string; label: string; color: string }> {
+  ): { status: string; label: string; color: string }[] {
     const transitions: Record<
       string,
-      Array<{ status: string; label: string; color: string }>
+      { status: string; label: string; color: string }[]
     > = {
       Draft: [
         { status: "Scheduled", label: "Schedule Exam", color: "#ff9800" },

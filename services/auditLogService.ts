@@ -61,12 +61,21 @@ export class AuditLogService {
           currentUser.email ||
           "Unknown User";
         instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
-      } catch (profileError) {
+      } catch {
         console.warn(
           "Could not fetch user profile for audit log, using fallback",
         );
         userName =
           currentUser.displayName || currentUser.email || "Unknown User";
+      }
+
+      // Sanitize changes to handle null/undefined values
+      const sanitizedChanges: Record<string, { old: any; new: any }> = {};
+      for (const [key, value] of Object.entries(changes)) {
+        sanitizedChanges[key] = {
+          old: value.old ?? null,
+          new: value.new ?? null,
+        };
       }
 
       // Create audit log entry
@@ -76,7 +85,7 @@ export class AuditLogService {
         userName,
         instructorId,
         action: "edit",
-        changes,
+        changes: sanitizedChanges,
         version,
         timestamp: serverTimestamp(),
         deviceInfo: this.getDeviceInfo(),
@@ -118,10 +127,9 @@ export class AuditLogService {
           currentUser.email ||
           "Unknown User";
         instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
-      } catch (profileError) {
+      } catch {
         console.warn(
           "Could not fetch user profile for audit log, using fallback:",
-          profileError,
         );
         userName =
           currentUser.displayName || currentUser.email || "Unknown User";
