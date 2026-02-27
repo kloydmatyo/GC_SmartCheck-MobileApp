@@ -27,7 +27,15 @@ import {
 import { WebView } from "react-native-webview";
 
 import StatusModal from "@/components/common/StatusModal";
+import DuplicateBatchWarningModal from "@/components/exam/DuplicateBatchWarningModal";
+import VersionMismatchWarningModal from "@/components/exam/VersionMismatchWarningModal";
+import { auth } from "@/config/firebase";
 import { COLORS, RADIUS } from "../../constants/theme";
+import { BatchHistoryService } from "../../services/batchHistoryService";
+import type {
+    BatchDuplicateWarning,
+    BatchVersionMismatch,
+} from "../../types/batch";
 
 const TEMPLATES = [
   { key: "standard20", label: "20 Questions", totalQuestions: 20 },
@@ -692,12 +700,113 @@ export default function PrintAnswerSheetScreen() {
     resolution: { width: number; height: number };
   } | null>(null);
 
+  // Batch tracking state
+  const [duplicateWarning, setDuplicateWarning] =
+    useState<BatchDuplicateWarning | null>(null);
+  const [versionMismatch, setVersionMismatch] =
+    useState<BatchVersionMismatch | null>(null);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [showVersionModal, setShowVersionModal] = useState(false);
+  const [pendingGeneration, setPendingGeneration] = useState(false);
+
   const selected = useMemo(
     () => TEMPLATES.find((t) => t.key === templateKey)!,
     [templateKey],
   );
 
+  // Check for duplicate batches
+  async function checkForDuplicates() {
+    if (!examName) return null;
+
+    try {
+      const warning = await BatchHistoryService.checkDuplicateBatch(
+        examName, // Using examName as examId
+        version,
+        5, // 5-minute window
+      );
+      return warning;
+    } catch (error) {
+      console.error("Error checking duplicates:", error);
+      return null;
+    }
+  }
+
+  // Check for version mismatch
+  async function checkForVersionMismatch() {
+    if (!examName) return null;
+
+    try {
+      const mismatch = await BatchHistoryService.checkVersionMismatch(
+        examName, // Using examName as examId
+        1, // Current template version
+      );
+      return mismatch;
+    } catch (error) {
+      console.error("Error checking version:", error);
+      return null;
+    }
+  }
+
+  // Create batch record after successful generation
+  async function createBatchRecord() {
+    if (!examName || !pdfMetrics) return;
+
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        console.warn("User not authenticated, skipping batch creation");
+        return;
+      }
+
+      const examCode = `${examName.toUpperCase().replace(/\s+/g, "-")}-${version}`;
+      const batchId = await BatchHistoryService.createBatch(
+        examName, // examId
+        examName, // examTitle
+        examCode,
+        selected.label, // templateName
+        version,
+        1, // sheetsGenerated - 1 sheet per generation
+        1, // templateVersion
+        {
+          totalQuestions: selected.totalQuestions,
+          columns: selected.totalQuestions > 25 ? 2 : 1,
+          studentIdLength: 8,
+        },
+      );
+
+      console.log("✅ Batch created:", batchId);
+    } catch (error) {
+      console.error("Error creating batch:", error);
+      // Don't throw - batch creation failure shouldn't block PDF generation
+    }
+  }
+
+  // Main generation handler with duplicate/version checks
   async function handleGeneratePreview() {
+    // Check for duplicates first
+    const dupWarning = await checkForDuplicates();
+    if (dupWarning?.isDuplicate) {
+      setDuplicateWarning(dupWarning);
+      setShowDuplicateModal(true);
+      setPendingGeneration(true);
+      return;
+    }
+
+    // Check for version mismatch
+    const verMismatch = await checkForVersionMismatch();
+    if (verMismatch?.hasMismatch) {
+      setVersionMismatch(verMismatch);
+      setShowVersionModal(true);
+      setPendingGeneration(true);
+      return;
+    }
+
+    // Proceed with generation
+    await performGeneration();
+  }
+
+  // Actual PDF generation logic
+  async function performGeneration() {
     setLoading(true);
     setErrorText(null);
     setPdfMetrics(null);
@@ -728,11 +837,15 @@ export default function PrintAnswerSheetScreen() {
       }
 
       setPdfUri(local);
-      setPdfMetrics({
+      const metrics = {
         loadTime,
         fileSize,
         resolution: { width: 612, height: 792 },
-      });
+      };
+      setPdfMetrics(metrics);
+
+      // Create batch record after successful generation
+      await createBatchRecord();
 
       // Check performance
       if (loadTime > 5000) {
@@ -763,7 +876,37 @@ export default function PrintAnswerSheetScreen() {
       setErrorText(errorMessage);
     } finally {
       setLoading(false);
+      setPendingGeneration(false);
     }
+  }
+
+  // Modal handlers
+  function handleDuplicateCancel() {
+    setShowDuplicateModal(false);
+    setDuplicateWarning(null);
+    setPendingGeneration(false);
+  }
+
+  function handleDuplicateProceed() {
+    setShowDuplicateModal(false);
+    setDuplicateWarning(null);
+    performGeneration();
+  }
+
+  function handleVersionCancel() {
+    setShowVersionModal(false);
+    setVersionMismatch(null);
+    setPendingGeneration(false);
+  }
+
+  function handleVersionProceed() {
+    setShowVersionModal(false);
+    setVersionMismatch(null);
+    performGeneration();
+  }
+
+  function navigateToBatchHistory() {
+    router.push("/(tabs)/batch-history");
   }
 
   async function handleDownload() {
@@ -899,6 +1042,18 @@ export default function PrintAnswerSheetScreen() {
             Questions: {selected.totalQuestions} • Includes exam code + ID
             bubble grid + logo
           </Text>
+
+          <TouchableOpacity
+            style={styles.batchHistoryBtn}
+            onPress={navigateToBatchHistory}
+          >
+            <Ionicons
+              name="time-outline"
+              size={rs(18)}
+              color={COLORS.primaryMid}
+            />
+            <Text style={styles.batchHistoryText}>View Batch History</Text>
+          </TouchableOpacity>
         </View>
 
         {errorText ? (
@@ -1025,6 +1180,22 @@ export default function PrintAnswerSheetScreen() {
           })
         }
       />
+
+      <DuplicateBatchWarningModal
+        visible={showDuplicateModal}
+        existingBatch={duplicateWarning?.existingBatch || null}
+        onCancel={handleDuplicateCancel}
+        onProceed={handleDuplicateProceed}
+      />
+
+      <VersionMismatchWarningModal
+        visible={showVersionModal}
+        currentVersion={versionMismatch?.currentVersion || 1}
+        batchVersion={versionMismatch?.batchVersion || 1}
+        message={versionMismatch?.message || ""}
+        onClose={handleVersionCancel}
+        onProceed={handleVersionProceed}
+      />
     </SafeAreaView>
   );
 }
@@ -1133,6 +1304,24 @@ const styles = StyleSheet.create({
   },
   previewBtnText: { color: COLORS.white, fontSize: rf(13), fontWeight: "700" },
   infoText: { marginTop: rp(6), color: COLORS.textMuted, fontSize: rf(11) },
+  batchHistoryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: rp(8),
+    marginTop: rp(12),
+    paddingVertical: rp(10),
+    paddingHorizontal: rp(16),
+    borderRadius: rs(RADIUS.sm),
+    borderWidth: 1,
+    borderColor: COLORS.primaryMid,
+    backgroundColor: COLORS.white,
+  },
+  batchHistoryText: {
+    fontSize: rf(13),
+    fontWeight: "600",
+    color: COLORS.primaryMid,
+  },
 
   errorBox: {
     backgroundColor: "#fff4f3",

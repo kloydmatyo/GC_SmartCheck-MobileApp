@@ -331,6 +331,121 @@ export class AuditLogService {
   }
 
   /**
+   * Log batch creation
+   */
+  static async logBatchCreation(
+    batchId: string,
+    examId: string,
+    userId: string,
+    sheetsGenerated: number,
+  ): Promise<void> {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        console.warn("User not authenticated for audit logging");
+        return;
+      }
+
+      let userName = "Unknown User";
+      let instructorId = "INSTRUCTOR-000";
+
+      try {
+        const userProfile = await UserService.getUserProfile(userId);
+        userName =
+          userProfile?.fullName ||
+          currentUser.displayName ||
+          currentUser.email ||
+          "Unknown User";
+        instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
+      } catch {
+        console.warn(
+          "Could not fetch user profile for audit log, using fallback",
+        );
+        userName =
+          currentUser.displayName || currentUser.email || "Unknown User";
+      }
+
+      await addDoc(collection(db, "audit_logs"), {
+        examId,
+        userId,
+        userName,
+        instructorId,
+        action: "print",
+        metadata: {
+          batchId,
+          sheetsGenerated,
+          type: "batch_creation",
+        },
+        timestamp: serverTimestamp(),
+        deviceInfo: this.getDeviceInfo(),
+      });
+
+      console.log("✅ Audit log created for batch creation:", batchId);
+    } catch (error) {
+      console.error("❌ Error creating batch audit log:", error);
+    }
+  }
+
+  /**
+   * Log batch status change
+   */
+  static async logBatchStatusChange(
+    batchId: string,
+    userId: string,
+    oldStatus: string,
+    newStatus: string,
+  ): Promise<void> {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        console.warn("User not authenticated for audit logging");
+        return;
+      }
+
+      let userName = "Unknown User";
+      let instructorId = "INSTRUCTOR-000";
+
+      try {
+        const userProfile = await UserService.getUserProfile(userId);
+        userName =
+          userProfile?.fullName ||
+          currentUser.displayName ||
+          currentUser.email ||
+          "Unknown User";
+        instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
+      } catch {
+        console.warn(
+          "Could not fetch user profile for audit log, using fallback",
+        );
+        userName =
+          currentUser.displayName || currentUser.email || "Unknown User";
+      }
+
+      await addDoc(collection(db, "audit_logs"), {
+        userId,
+        userName,
+        instructorId,
+        action: "status_change",
+        metadata: {
+          batchId,
+          type: "batch_status_change",
+        },
+        changes: {
+          status: { old: oldStatus, new: newStatus },
+        },
+        timestamp: serverTimestamp(),
+        deviceInfo: this.getDeviceInfo(),
+      });
+
+      console.log(
+        `✅ Audit log created for batch status change: ${oldStatus} → ${newStatus}`,
+      );
+    } catch (error) {
+      console.error("❌ Error creating batch status audit log:", error);
+    }
+  }
+
+  /**
    * Format audit log for display
    */
   static formatAuditLog(log: AuditLog): string {
