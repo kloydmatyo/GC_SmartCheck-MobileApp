@@ -1,3 +1,6 @@
+import StatusManager from "@/components/exam/StatusManager";
+import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -19,15 +22,18 @@ export default function ExamPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
+  const refreshKey = params.refresh as string; // Add refresh trigger
   const goToQuizzes = () => router.replace("/(tabs)/quizzes");
 
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     loadExamData();
-  }, [examId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId, refreshKey]); // Reload when refreshKey changes
 
   const loadExamData = async () => {
     try {
@@ -37,6 +43,61 @@ export default function ExamPreviewScreen() {
       const currentUser = auth.currentUser;
       if (!currentUser) {
         setError("You must be logged in to view exams.");
+        return;
+      }
+
+      // Check if we're online
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
+
+      // Try to load from offline storage first
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+
+      if (offlineExam) {
+        // We have offline data - use it
+        const examData: ExamPreviewData = {
+          metadata: {
+            examCode: examId,
+            title: offlineExam.title,
+            subject: "",
+            section: "",
+            date: offlineExam.createdAt,
+            status: "Active",
+            version: offlineExam.version,
+            createdAt: offlineExam.createdAt,
+          },
+          totalQuestions: offlineExam.questions?.length || 0,
+          choiceFormat: "A-D",
+          answerKey: {
+            answers: offlineExam.answerKey?.answers || [],
+            locked: true,
+          },
+          templateLayout: null,
+          lastModified: offlineExam.updatedAt,
+        };
+
+        setExam(examData);
+
+        // If online, try to sync in background
+        if (online) {
+          try {
+            const freshData = await ExamService.getExamById(examId);
+            if (freshData) {
+              setExam(freshData);
+            }
+          } catch (err) {
+            console.log("Could not fetch fresh data, using offline version");
+          }
+        }
+
+        return;
+      }
+
+      // No offline data - must fetch from Firebase
+      if (!online) {
+        setError(
+          "This exam is not available offline. Please connect to the internet.",
+        );
         return;
       }
 
@@ -132,10 +193,7 @@ export default function ExamPreviewScreen() {
         <TouchableOpacity style={styles.retryButton} onPress={loadExamData}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={goToQuizzes}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -150,7 +208,12 @@ export default function ExamPreviewScreen() {
           <Ionicons name="arrow-back" size={24} color="#eef7f0" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Exam Preview</Text>
-        <View style={styles.placeholder} />
+        {isOffline && (
+          <View style={styles.offlineBadge}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+          </View>
+        )}
+        {!isOffline && <View style={styles.placeholder} />}
       </View>
 
       <ScrollView
@@ -288,6 +351,13 @@ export default function ExamPreviewScreen() {
           {renderAnswerKeyGrid()}
         </View>
 
+        {/* Status Management Section */}
+        <StatusManager
+          examId={examId}
+          currentStatus={exam.metadata.status}
+          onStatusChanged={loadExamData}
+        />
+
         {/* Version Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Version Information</Text>
@@ -315,6 +385,15 @@ export default function ExamPreviewScreen() {
 
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
+        {exam.metadata.status === "Draft" && (
+          <TouchableOpacity
+            style={styles.editExamButton}
+            onPress={() => router.push(`/(tabs)/edit-exam?examId=${examId}`)}
+          >
+            <Ionicons name="pencil-outline" size={20} color="#fff" />
+            <Text style={styles.editExamButtonText}>Edit Exam</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.editButton}
           onPress={() =>
@@ -373,6 +452,11 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 32,
+  },
+  offlineBadge: {
+    backgroundColor: "#ff9800",
+    borderRadius: 16,
+    padding: 6,
   },
   scrollView: {
     flex: 1,
@@ -591,9 +675,27 @@ const styles = StyleSheet.create({
     backgroundColor: "#e5efe8",
     borderTopWidth: 1,
     borderTopColor: "#cad9cf",
+    flexWrap: "wrap",
+  },
+  editExamButton: {
+    flex: 1,
+    minWidth: "45%",
+    backgroundColor: "#ff9800",
+    borderRadius: 8,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  editExamButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
   },
   editButton: {
     flex: 1,
+    minWidth: "45%",
     backgroundColor: "#2d7a5f",
     borderRadius: 8,
     padding: 14,
@@ -609,6 +711,7 @@ const styles = StyleSheet.create({
   },
   printButton: {
     flex: 1,
+    minWidth: "45%",
     backgroundColor: "#2f6d58",
     borderRadius: 8,
     padding: 14,
@@ -623,4 +726,3 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
-

@@ -1,8 +1,10 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import React from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { auth } from "@/config/firebase";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { signOut } from "firebase/auth";
+import React from "react";
 import {
     Image,
     ScrollView,
@@ -30,6 +32,21 @@ export default function SettingsScreen() {
 
   const handleLogout = () => {
     setLogoutConfirmVisible(true);
+  };
+
+  const confirmLogout = async () => {
+    try {
+      await signOut(auth);
+      setLogoutConfirmVisible(false);
+      router.replace("/sign-in");
+    } catch (error) {
+      console.error("Logout error:", error);
+      setStatusModal({
+        visible: true,
+        title: "Error",
+        message: "Failed to logout. Please try again.",
+      });
+    }
   };
 
   const SettingItem = ({
@@ -279,10 +296,7 @@ export default function SettingsScreen() {
         confirmText="Logout"
         destructive
         onCancel={() => setLogoutConfirmVisible(false)}
-        onConfirm={() => {
-          setLogoutConfirmVisible(false);
-          router.replace("/sign-in");
-        }}
+        onConfirm={confirmLogout}
       />
 
       <StatusModal
@@ -421,4 +435,3 @@ const styles = StyleSheet.create({
     color: "#e74c3c",
   },
 });
-

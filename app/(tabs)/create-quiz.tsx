@@ -1,8 +1,9 @@
-import { auth, db } from "@/config/firebase";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { auth, db } from "@/config/firebase";
+import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
     addDoc,
     collection,
@@ -10,7 +11,7 @@ import {
     serverTimestamp,
     setDoc,
 } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
     KeyboardAvoidingView,
@@ -47,6 +48,20 @@ export default function CreateQuizScreen() {
     title: "",
     message: "",
   });
+
+  // Reset form when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Reset all form fields to initial state
+      setQuizName("");
+      setNumQuestions("");
+      setSubject("");
+      setExamType("Diagnostic Test");
+      setChoicesPerItem(4);
+      setCreatedExamId("");
+      setLoading(false);
+    }, []),
+  );
 
   const handleSave = async () => {
     // Validation
@@ -90,27 +105,33 @@ export default function CreateQuizScreen() {
         return;
       }
 
+      // Get user's instructor ID
+      const userProfile = await UserService.getUserProfile();
+      const instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
+
+      console.log("User profile:", userProfile);
+      console.log("Instructor ID:", instructorId);
+
       const currentDate = new Date().toISOString().split("T")[0];
 
       // Create exam document
       const examData = {
         title: quizName.trim(),
-        subject: subject.trim() || "N/A",
+        subject: subject.trim() || "General",
         examType: examType,
         num_items: questionsCount,
         choices_per_item: choicesPerItem,
-        status: "draft",
+        status: "Draft", // Changed from "draft" to "Draft"
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         created_at: currentDate,
-        approvedAt: null,
-        approvedBy: null,
+        // Add missing fields from Firebase structure
         classId: null,
-        className: "N/A",
+        className: null,
+        instructorId: instructorId, // Use actual instructor ID from user profile
         examCode: null,
-        logoUrl: null,
-        student_id_length: 6,
+        version: 1,
         answer_keys: [],
         generated_sheets: [],
         choicePoints: {},
@@ -189,10 +210,7 @@ export default function CreateQuizScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={goToQuizzes}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Create New Quiz</Text>

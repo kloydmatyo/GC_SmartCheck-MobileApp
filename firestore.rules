@@ -33,23 +33,16 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
     
-    
     // Exams collection - users can only access their own exams
     match /exams/{examId} {
-      allow read: if isSignedIn() && (
-        resource.data.createdBy == request.auth.uid ||
-        resource.data.instructorId == request.resource.data.instructorId
-      );
+      allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
     
     // Classes collection - users can only access their own classes
     match /classes/{classId} {
-      allow read: if isSignedIn() && (
-        resource.data.createdBy == request.auth.uid ||
-        resource.data.instructorId == request.resource.data.instructorId
-      );
+      allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
@@ -64,7 +57,7 @@ service cloud.firestore {
     // Templates collection - instructors can create and manage answer sheet templates
     match /templates/{templateId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
     
@@ -79,16 +72,75 @@ service cloud.firestore {
       allow create: if isSignedIn();
     }
     
-    // Validation logs - authenticated users can create, read
-    match /validation_logs/{logId} {
+    // Audit logs (camelCase collection used by auditLogger service)
+    match /auditLogs/{logId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
+      allow update, delete: if false; // immutable
     }
     
-    // Invalid grading logs - authenticated users can create, read
-    match /invalid_grading_logs/{logId} {
+    // Scanned Results collection - for exam scanning results
+    match /scannedResults/{resultId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.scannedBy == request.auth.uid;
+    }
+    
+    // Student Grades collection - for grading records
+    match /studentGrades/{gradeId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.graded_by == request.auth.uid;
+    }
+    
+    // Null ID Alerts collection - for scanning alerts
+    match /nullIdAlerts/{alertId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn();
+    }
+    
+    // Student Attendance collection
+    match /studentAttendance/{attendanceId} {
+      allow read, write: if isSignedIn();
+    }
+    
+    // Student Enrollments collection
+    match /studentEnrollments/{enrollmentId} {
+      allow read, write: if isSignedIn();
+    }
+    
+    // Student Exam Results collection
+    match /studentExamResults/{resultId} {
+      allow read, write: if isSignedIn();
+    }
+    
+    // Report History collection - instructors can manage their own report logs
+    match /reportHistory/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn();
+    }
+    
+    // ========================================
+    // NEW: Exam Batches Collection
+    // For batch tracking and duplication prevention
+    // ========================================
+    match /examBatches/{batchId} {
+      // Allow read if user is authenticated and is the creator
+      allow read: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      
+      // Allow create if user is authenticated and sets themselves as creator
+      allow create: if isSignedIn() && 
+                      request.resource.data.createdBy == request.auth.uid;
+      
+      // Allow update if user is the creator (for status changes like mark as printed)
+      allow update: if isSignedIn() && 
+                      resource.data.createdBy == request.auth.uid;
+      
+      // Allow delete if user is the creator (soft delete)
+      allow delete: if isSignedIn() && 
+                      resource.data.createdBy == request.auth.uid;
     }
   }
 }
