@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "GC_SmartCheck-MobileApp",
-    "slug": "GC_SmartCheck-MobileApp",
+    "slug": "gcsmartcheck-mobileapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/gordon-college-logo.png",
