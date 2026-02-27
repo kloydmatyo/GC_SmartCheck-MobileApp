@@ -56,23 +56,31 @@ export const Fonts = Platform.select({
 // Additional theme constants for compatibility
 export const COLORS = {
   primary: "#00a550",
+  primaryMid: "#00a550",
   secondary: "#4a90e2",
   error: "#e74c3c",
+  danger: "#e74c3c",
   warning: "#ff9800",
   success: "#00a550",
   bg: "#f5f5f5",
   white: "#ffffff",
   black: "#000000",
   text: "#333333",
+  textDark: "#222222",
+  textMid: "#555555",
   textSecondary: "#666666",
   textTertiary: "#999999",
+  textMuted: "#999999",
   border: "#e0e0e0",
+  borderLight: "#f0f0f0",
   gray: "#9e9e9e",
 };
 
 export const RADIUS = {
   small: 8,
+  sm: 8,
   medium: 12,
+  md: 12,
   large: 16,
   xlarge: 20,
 };
