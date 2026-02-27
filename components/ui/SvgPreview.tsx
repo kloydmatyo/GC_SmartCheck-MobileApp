@@ -7,6 +7,10 @@ interface SvgPreviewProps {
   title?: string;
   studentId?: string;
   filledAnswers?: { [questionNumber: number]: "A" | "B" | "C" | "D" };
+  templateInfo?: {
+    totalQuestions: number;
+    columns: number;
+  };
 }
 
 export default function SvgPreview({
@@ -14,18 +18,45 @@ export default function SvgPreview({
   title = "Answer Sheet Preview",
   studentId,
   filledAnswers = {},
+  templateInfo,
 }: SvgPreviewProps) {
   // Parse SVG content for basic info
   const parseSvgContent = (svg: string) => {
     const widthMatch = svg.match(/width="(\d+)"/);
     const heightMatch = svg.match(/height="(\d+)"/);
 
-    // Find filled bubbles (circles with fill="black")
-    const filledBubbles = svg.match(/<circle[^>]*fill="black"[^>]*>/g) || [];
+    // Find filled bubbles (circles with fill="black"), excluding alignment markers
+    // Alignment markers have r="3" and are at corners (cx="30" or cx="582", cy="30" or cy="762")
+    const allFilledCircles = svg.match(/<circle[^>]*fill="black"[^>]*>/g) || [];
+    const filledBubbles = allFilledCircles.filter((circle) => {
+      // Exclude alignment markers (r="3")
+      return !circle.includes('r="3"');
+    });
 
-    // Extract question count from the SVG structure or default to 20
-    const questionMatches = svg.match(/Q(\d+)/g) || [];
-    const questionCount = questionMatches.length || 20;
+    // Use template info if provided, otherwise try to detect from SVG
+    let questionCount = templateInfo?.totalQuestions || 20;
+    let columns = templateInfo?.columns || 1;
+
+    // If no template info, try to detect from SVG structure
+    if (!templateInfo) {
+      // Look for question numbers in text elements with class="question-text"
+      // The SVG generates: <text x="..." y="..." class="question-text">1</text>
+      const questionTextMatches =
+        svg.match(/<text[^>]*class="question-text"[^>]*>(\d+)<\/text>/g) || [];
+      if (questionTextMatches.length > 0) {
+        // Extract the highest question number
+        const questionNumbers = questionTextMatches
+          .map((match) => {
+            const numMatch = match.match(/>(\d+)</);
+            return numMatch ? parseInt(numMatch[1]) : 0;
+          })
+          .filter((num) => num > 0);
+
+        if (questionNumbers.length > 0) {
+          questionCount = Math.max(...questionNumbers);
+        }
+      }
+    }
 
     // Parse student ID from provided prop
     const studentIdDigits: { position: number; digit: number }[] = [];
@@ -51,6 +82,7 @@ export default function SvgPreview({
       width: widthMatch ? parseInt(widthMatch[1]) : 612,
       height: heightMatch ? parseInt(heightMatch[1]) : 792,
       questionCount,
+      columns,
       filledBubblesCount:
         filledBubbles.length + answerBubbles.length + studentIdDigits.length,
       studentIdBubbles: studentIdDigits,
@@ -89,6 +121,12 @@ export default function SvgPreview({
             <Text style={styles.infoLabel}>Questions:</Text>
             <Text style={styles.infoValue}>
               {svgInfo.questionCount} detected
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Layout:</Text>
+            <Text style={styles.infoValue}>
+              {svgInfo.columns} column{svgInfo.columns > 1 ? "s" : ""}
             </Text>
           </View>
           {svgInfo.hasFilledBubbles && (

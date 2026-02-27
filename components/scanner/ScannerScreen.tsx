@@ -1,6 +1,14 @@
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import { GradingService } from "../../services/gradingService";
@@ -9,14 +17,18 @@ import { GradingResult, ScanResult } from "../../types/scanning";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
 
-type ScannerState = "camera" | "results";
+type ScannerState = "exam-select" | "camera" | "results";
 
 interface ScannerScreenProps {
   onClose: () => void;
+  sectionId?: string; // Section context for validation
 }
 
 export default function ScannerScreen({ onClose }: ScannerScreenProps) {
-  const [currentState, setCurrentState] = useState<ScannerState>("camera");
+  const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
+  const [activeExamId, setActiveExamId] = useState("");
+  const [examIdInput, setExamIdInput] = useState("");
+  const [isValidatingExam, setIsValidatingExam] = useState(false);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
     null,
   );
@@ -91,6 +103,22 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     }
   };
 
+  // Retry save from results screen
+  const handleRetrySave = async () => {
+    if (!gradingResult) return;
+    const storageResult = await GradeStorageService.saveGradingResult(
+      gradingResult,
+      activeExamId,
+    );
+    setSaveStatus(storageResult);
+    Toast.show({
+      type: storageResult.success ? "success" : "error",
+      text1: storageResult.success ? "Saved Successfully" : "Save Failed",
+      text2: storageResult.message,
+      visibilityTime: 4000,
+    });
+  };
+
   const handleScanAnother = () => {
     setGradingResult(null);
     setScannedImage(undefined);
@@ -106,6 +134,57 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
   return (
     <View style={styles.container}>
+      {/* ── Step 5: Exam Selector ── */}
+      {currentState === "exam-select" && (
+        <View style={styles.examSelector}>
+          <TouchableOpacity onPress={handleClose} style={styles.backButton}>
+            <Ionicons name="close" size={24} color="#666" />
+          </TouchableOpacity>
+
+          <View style={styles.examSelectorContent}>
+            <Ionicons name="document-text" size={56} color="#007AFF" />
+            <Text style={styles.examSelectorTitle}>Select Exam</Text>
+            <Text style={styles.examSelectorSubtitle}>
+              Enter the Exam ID before scanning answer sheets
+            </Text>
+
+            <TextInput
+              style={styles.examInput}
+              placeholder="Exam ID (e.g. abc123xyz)"
+              placeholderTextColor="#aaa"
+              value={examIdInput}
+              onChangeText={setExamIdInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handleConfirmExam}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.confirmButton,
+                (!examIdInput.trim() || isValidatingExam) &&
+                  styles.confirmButtonDisabled,
+              ]}
+              onPress={handleConfirmExam}
+              disabled={!examIdInput.trim() || isValidatingExam}
+            >
+              {isValidatingExam ? (
+                <ActivityIndicator color="white" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={20} color="white" />
+                  <Text style={styles.confirmButtonText}>
+                    Confirm & Start Scanning
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* ── Camera ── */}
       {currentState === "camera" && (
         <CameraScanner
           onScanComplete={handleScanComplete}
@@ -113,6 +192,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         />
       )}
 
+      {/* ── Results ── */}
       {currentState === "results" && gradingResult && (
         <ScanResults
           result={gradingResult}
@@ -120,6 +200,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           questionCount={gradingResult.totalQuestions}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
+          onRetrySave={handleRetrySave}
         />
       )}
 
@@ -132,5 +213,64 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#000",
+  },
+  // ── Exam Selector ──
+  examSelector: {
+    flex: 1,
+    backgroundColor: "#f5f5f5",
+  },
+  backButton: {
+    padding: 20,
+    alignSelf: "flex-end",
+  },
+  examSelectorContent: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 32,
+  },
+  examSelectorTitle: {
+    fontSize: 26,
+    fontWeight: "bold",
+    color: "#333",
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  examSelectorSubtitle: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 32,
+    lineHeight: 22,
+  },
+  examInput: {
+    width: "100%",
+    backgroundColor: "white",
+    borderWidth: 1.5,
+    borderColor: "#007AFF",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: "#333",
+    marginBottom: 20,
+  },
+  confirmButton: {
+    width: "100%",
+    backgroundColor: "#007AFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
+  },
+  confirmButtonDisabled: {
+    backgroundColor: "#b0c8f0",
+  },
+  confirmButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "bold",
   },
 });

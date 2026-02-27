@@ -14,12 +14,12 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-console.log(`[Firebase] Initializing for project: ${firebaseConfig.projectId}`);
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase services
+// Initialize Firebase Auth (simplified - no persistence for now)
 export const auth = getAuth(app);
+
+// Initialize Firestore
 export const db = getFirestore(app);
-console.log(`[Firebase] Services initialized (Auth & Firestore)`);
 
 export default app;

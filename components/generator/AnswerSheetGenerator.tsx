@@ -89,6 +89,8 @@ export default function AnswerSheetGenerator({
           <TouchableOpacity
             onPress={() => setShowPreview(false)}
             style={styles.backButton}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Ionicons name="arrow-back" size={24} color="#007AFF" />
             <Text style={styles.backText}>Back</Text>
@@ -106,6 +108,10 @@ export default function AnswerSheetGenerator({
           title="Answer Sheet Preview"
           studentId={sheetData.studentId}
           filledAnswers={sheetData.answers}
+          templateInfo={{
+            totalQuestions: templates[selectedTemplate].totalQuestions,
+            columns: templates[selectedTemplate].columns,
+          }}
         />
       </View>
     );

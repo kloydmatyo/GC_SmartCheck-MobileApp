@@ -117,6 +117,49 @@ export default function TabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="create-quiz"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
+      <Tabs.Screen
+        name="edit-answer-key"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="exam-preview"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="class-details"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="print-answer-sheet"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="sync"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="edit-exam"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

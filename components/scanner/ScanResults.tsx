@@ -12,6 +12,8 @@ import {
 } from "react-native";
 import { StorageService } from "../../services/storageService";
 import { GradingResult } from "../../types/scanning";
+import { GradingResultExtended } from "../../types/student";
+import { StudentValidationResult } from "../student/StudentValidationResult";
 
 interface ScanResultsProps {
   result: GradingResult;
@@ -19,6 +21,7 @@ interface ScanResultsProps {
   questionCount?: number;
   onClose: () => void;
   onScanAnother: () => void;
+  onRetrySave?: () => void;
 }
 
 export default function ScanResults({
@@ -27,6 +30,7 @@ export default function ScanResults({
   questionCount,
   onClose,
   onScanAnother,
+  onRetrySave,
 }: ScanResultsProps) {
   const [isImageModalVisible, setImageModalVisible] = useState(false);
   const [isEditingId, setIsEditingId] = useState(false);
@@ -57,6 +61,9 @@ export default function ScanResults({
     setEditedStudentId(result.studentId || "");
     setIsEditingId(false);
   };
+
+  // REQ 14, 15: Handle NULL grades
+  const isNullGrade = result.score === null;
 
   return (
     <View style={styles.container}>

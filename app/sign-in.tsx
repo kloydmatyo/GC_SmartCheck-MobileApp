@@ -51,12 +51,8 @@ export default function SignInScreen() {
 
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          Alert.alert("Success", `Welcome back, ${userData.fullName}!`, [
-            {
-              text: "OK",
-              onPress: () => router.replace("/(tabs)"),
-            },
-          ]);
+          router.replace("/(tabs)");
+          Alert.alert("Success", `Welcome back, ${userData.fullName}!`);
         } else {
           router.replace("/(tabs)");
         }
@@ -65,12 +61,8 @@ export default function SignInScreen() {
         const result = authService.signIn(email, password);
 
         if (result.success) {
-          Alert.alert("Success", `Welcome ${result.user?.name}!`, [
-            {
-              text: "OK",
-              onPress: () => router.replace("/(tabs)"),
-            },
-          ]);
+          router.replace("/(tabs)");
+          Alert.alert("Success", `Welcome ${result.user?.name}!`);
         } else {
           Alert.alert(
             "Sign In Failed",
