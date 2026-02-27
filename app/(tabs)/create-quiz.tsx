@@ -114,6 +114,27 @@ export default function CreateQuizScreen() {
 
       const currentDate = new Date().toISOString().split("T")[0];
 
+      // Generate exam code from quiz name and date
+      const generateExamCode = (title: string, date: string): string => {
+        // Extract initials from title (e.g., "Midterm Exam" -> "ME")
+        const words = title.trim().split(/\s+/);
+        const initials = words
+          .slice(0, 3) // Take first 3 words max
+          .map((word) => word.charAt(0).toUpperCase())
+          .join("");
+
+        // Format: INITIALS-YYYYMMDD-XXX (e.g., ME-20260227-A1B)
+        const dateCode = date.replace(/-/g, "");
+        const randomSuffix = Math.random()
+          .toString(36)
+          .substring(2, 5)
+          .toUpperCase();
+
+        return `${initials}-${dateCode}-${randomSuffix}`;
+      };
+
+      const examCode = generateExamCode(quizName.trim(), currentDate);
+
       // Create exam document
       const examData = {
         title: quizName.trim(),
@@ -130,7 +151,7 @@ export default function CreateQuizScreen() {
         classId: null,
         className: null,
         instructorId: instructorId, // Use actual instructor ID from user profile
-        examCode: null,
+        examCode: examCode, // Generated exam code
         version: 1,
         answer_keys: [],
         generated_sheets: [],

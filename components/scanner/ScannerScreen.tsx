@@ -1,13 +1,14 @@
+import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -36,7 +37,10 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     undefined,
   );
 
-  const handleScanComplete = async (scanResult: ScanResult, imageUri: string) => {
+  const handleScanComplete = async (
+    scanResult: ScanResult,
+    imageUri: string,
+  ) => {
     try {
       const studentId = scanResult.studentId;
 
@@ -59,10 +63,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       const duration = Date.now() - startTime;
 
       const isValidId = !querySnapshot.empty;
-      console.log(`[Firestore] Verification complete for ${studentId}: ${isValidId ? 'MATCH FOUND' : 'NO MATCH'} (${duration}ms)`);
+      console.log(
+        `[Firestore] Verification complete for ${studentId}: ${isValidId ? "MATCH FOUND" : "NO MATCH"} (${duration}ms)`,
+      );
 
       if (!isValidId) {
-        console.warn(`[Firestore] Student ID ${studentId} not found in 'students' collection.`);
+        console.warn(
+          `[Firestore] Student ID ${studentId} not found in 'students' collection.`,
+        );
         Alert.alert(
           "Unrecognized ID",
           `Student ID ${studentId} is not a valid or registered account, but it was still scored.`,
@@ -80,7 +88,9 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       const result = GradingService.gradeAnswers(scanResult, answerKey);
       result.metadata = { ...result.metadata, isValidId: isValidId } as any;
 
-      console.log(`[ScannerScreen] Scanned student ID: ${result.studentId} (Valid: ${isValidId})`);
+      console.log(
+        `[ScannerScreen] Scanned student ID: ${result.studentId} (Valid: ${isValidId})`,
+      );
       console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
 
       // Store result and image
@@ -105,18 +115,39 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
   // Retry save from results screen
   const handleRetrySave = async () => {
-    if (!gradingResult) return;
-    const storageResult = await GradeStorageService.saveGradingResult(
-      gradingResult,
-      activeExamId,
-    );
-    setSaveStatus(storageResult);
-    Toast.show({
-      type: storageResult.success ? "success" : "error",
-      text1: storageResult.success ? "Saved Successfully" : "Save Failed",
-      text2: storageResult.message,
-      visibilityTime: 4000,
-    });
+    if (!gradingResult || !scannedImage) return;
+    try {
+      await StorageService.saveScanResult(gradingResult, scannedImage);
+      Toast.show({
+        type: "success",
+        text1: "Saved Successfully",
+        text2: "Result has been saved",
+        visibilityTime: 4000,
+      });
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: "Save Failed",
+        text2: "Could not save result",
+        visibilityTime: 4000,
+      });
+    }
+  };
+
+  const handleConfirmExam = async () => {
+    if (!examIdInput.trim()) return;
+
+    setIsValidatingExam(true);
+    try {
+      // Validate exam exists
+      // For now, just accept any exam ID
+      setActiveExamId(examIdInput.trim());
+      setCurrentState("camera");
+    } catch (error) {
+      Alert.alert("Error", "Invalid exam ID");
+    } finally {
+      setIsValidatingExam(false);
+    }
   };
 
   const handleScanAnother = () => {

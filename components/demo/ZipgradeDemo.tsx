@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { GradingService } from "../../services/gradingService";
 import { ZipgradeGenerator } from "../../services/zipgradeGenerator";
-import { ZipgradeScanner } from "../../services/zipgradeScanner";
 import SvgPreview from "../ui/SvgPreview";
 
 interface ZipgradeDemoProps {
@@ -51,21 +50,18 @@ export default function ZipgradeDemo({ onClose }: ZipgradeDemoProps) {
     if (!generatedSheet) return;
 
     try {
-      // Simulate scanning the generated sheet
-      const mockImageUri = "mock://generated-sheet";
-      const scanResult = await ZipgradeScanner.processZipgradeSheet(
-        mockImageUri,
-        "standard20",
-      );
-
-      // Override with actual generated data for demo
-      scanResult.studentId = generatedSheet.studentId;
-      scanResult.answers = Object.entries(generatedSheet.answers).map(
-        ([questionNum, answer]) => ({
-          questionNumber: parseInt(questionNum),
-          selectedAnswer: answer,
-        }),
-      );
+      // For demo purposes, directly create scan result without OpenCV
+      const scanResult = {
+        studentId: generatedSheet.studentId,
+        answers: Object.entries(generatedSheet.answers).map(
+          ([questionNum, answer]) => ({
+            questionNumber: parseInt(questionNum),
+            selectedAnswer: answer,
+          }),
+        ),
+        confidence: 0.95,
+        processedImageUri: "",
+      };
 
       // Grade the answers
       const answerKey = GradingService.getDefaultAnswerKey();

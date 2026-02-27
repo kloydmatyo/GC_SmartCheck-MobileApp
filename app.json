@@ -10,7 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.GC-SmartCheckMobileApp"
+      "bundleIdentifier": "com.anonymous.GC-SmartCheckMobileApp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs camera access to scan answer sheets and grade exams.",
+        "NSPhotoLibraryUsageDescription": "This app needs photo library access to select answer sheets for grading."
+      }
     },
     "android": {
       "adaptiveIcon": {

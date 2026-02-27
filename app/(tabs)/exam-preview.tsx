@@ -155,17 +155,42 @@ export default function ExamPreviewScreen() {
       grid.push(row);
     }
 
+    // Check if there are any answers
+    const hasAnswers = exam.answerKey.answers.some(
+      (answer) => answer && answer.trim() !== "",
+    );
+
+    if (!hasAnswers) {
+      return (
+        <View style={styles.noAnswersContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
+          <Text style={styles.noAnswersText}>No answers set yet</Text>
+          <Text style={styles.noAnswersSubtext}>
+            Click "Edit Answer Key" below to set the correct answers
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.answerKeyGrid}>
         {grid.map((row, rowIndex) => (
           <View key={rowIndex} style={styles.answerKeyRow}>
             {row.map((questionNum) => {
-              const answer = exam.answerKey.answers[questionNum - 1];
+              const answer = exam.answerKey.answers[questionNum - 1] || "";
+              const hasAnswer = answer && answer.trim() !== "";
               return (
                 <View key={questionNum} style={styles.answerKeyItem}>
                   <Text style={styles.questionNumber}>{questionNum}.</Text>
-                  <View style={styles.answerBubble}>
-                    <Text style={styles.answerText}>{answer}</Text>
+                  <View
+                    style={[
+                      styles.answerBubble,
+                      !hasAnswer && styles.answerBubbleEmpty,
+                    ]}
+                  >
+                    <Text style={styles.answerText}>
+                      {hasAnswer ? answer : "?"}
+                    </Text>
                   </View>
                 </View>
               );
@@ -611,10 +636,33 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  answerBubbleEmpty: {
+    backgroundColor: "#ccc",
+  },
   answerText: {
     fontSize: 16,
     color: "#fff",
     fontWeight: "bold",
+  },
+  noAnswersContainer: {
+    alignItems: "center",
+    padding: 32,
+    backgroundColor: "#fff3cd",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ffc107",
+  },
+  noAnswersText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#856404",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  noAnswersSubtext: {
+    fontSize: 14,
+    color: "#856404",
+    textAlign: "center",
   },
   versionInfo: {
     gap: 8,

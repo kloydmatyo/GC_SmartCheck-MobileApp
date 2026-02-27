@@ -19,20 +19,78 @@ export class ExamService {
 
       const examData = examSnap.data();
 
-      // Fetch answer key
-      const answerKeyId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
-      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
-      const answerKeySnap = await getDoc(answerKeyRef);
-
+      // Fetch answer key - try multiple strategies to find it
       let answerKeyData = null;
+      let answerKeyId = null;
+
+      // Strategy 1: Try the timestamp-based ID
+      const timestampBasedId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
+      let answerKeyRef = doc(db, "answerKeys", timestampBasedId);
+      let answerKeySnap = await getDoc(answerKeyRef);
+
       if (answerKeySnap.exists()) {
         answerKeyData = answerKeySnap.data();
+        answerKeyId = answerKeySnap.id;
+        console.log("[ExamService] Found answer key with timestamp-based ID");
+      } else {
+        // Strategy 2: Query for answer key by examId
+        console.log(
+          "[ExamService] Timestamp-based ID not found, querying by examId",
+        );
+        const { collection, query, where, getDocs } =
+          await import("firebase/firestore");
+        const answerKeysQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", examId),
+        );
+        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+
+        if (!answerKeysSnapshot.empty) {
+          const firstDoc = answerKeysSnapshot.docs[0];
+          answerKeyData = firstDoc.data();
+          answerKeyId = firstDoc.id;
+          console.log("[ExamService] Found answer key via query:", answerKeyId);
+        } else {
+          console.log("[ExamService] No answer key found for exam:", examId);
+        }
       }
 
       // Determine choice format
       const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
       const totalQuestions =
-        answerKeyData?.answers?.length || examData.num_items || 20;
+        answerKeyData?.questionSettings?.length || examData.num_items || 20;
+
+      // Extract answers from questionSettings
+      const extractedAnswers: string[] = [];
+      if (answerKeyData?.questionSettings) {
+        console.log(
+          "[ExamService] Found questionSettings:",
+          answerKeyData.questionSettings.length,
+        );
+        for (let i = 0; i < totalQuestions; i++) {
+          const setting = answerKeyData.questionSettings.find(
+            (qs: any) => qs.questionNumber === i + 1,
+          );
+          const answer = setting?.correctAnswer || "";
+          extractedAnswers.push(answer);
+          if (i < 5) {
+            // Log first 5 for debugging
+            console.log(`[ExamService] Q${i + 1}: ${answer}`);
+          }
+        }
+        console.log(
+          "[ExamService] Total answers extracted:",
+          extractedAnswers.filter((a) => a).length,
+        );
+      } else {
+        console.log(
+          "[ExamService] No questionSettings found, using empty answers",
+        );
+        // Fallback to empty answers
+        for (let i = 0; i < totalQuestions; i++) {
+          extractedAnswers.push("");
+        }
+      }
 
       // Transform to ExamPreviewData format
       return {
@@ -51,9 +109,9 @@ export class ExamService {
         },
         answerKey: answerKeyData
           ? {
-              id: answerKeySnap.id,
+              id: answerKeyId || "",
               examId: examData.examId || examSnap.id,
-              answers: answerKeyData.answers || [],
+              answers: extractedAnswers, // Use extracted answers
               questionSettings: answerKeyData.questionSettings || [],
               locked: answerKeyData.locked || false,
               createdAt: answerKeyData.createdAt?.toDate() || new Date(),
@@ -64,7 +122,7 @@ export class ExamService {
           : {
               id: "",
               examId: examSnap.id,
-              answers: [],
+              answers: extractedAnswers, // Use extracted answers (empty)
               questionSettings: [],
               locked: false,
               createdAt: new Date(),

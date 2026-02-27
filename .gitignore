@@ -43,3 +43,31 @@ app-example
 # generated native folders
 /ios
 /android
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# IDE - IntelliJ IDEA / WebStorm / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE - Eclipse
+.project
+.classpath
+.settings/
+.metadata/
+
+# Logs
+logs/
+*.log
+
+# OS
+Thumbs.db

@@ -142,5 +142,57 @@ service cloud.firestore {
       allow delete: if isSignedIn() && 
                       resource.data.createdBy == request.auth.uid;
     }
+
+    // ========================================
+    // Scan Sessions Collection
+    // For tracking active scanning sessions
+    // ========================================
+    match /scanSessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
+
+    // ========================================
+    // Offline Queue Collection
+    // For offline data synchronization
+    // ========================================
+    match /offlineQueue/{queueId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ========================================
+    // Sync Status Collection
+    // For tracking sync operations
+    // ========================================
+    match /syncStatus/{statusId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ========================================
+    // Storage Usage Collection
+    // For tracking storage metrics
+    // ========================================
+    match /storageUsage/{usageId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ========================================
+    // Invalid Record Logs Collection
+    // For rejected/invalid record tracking (immutable)
+    // ========================================
+    match /invalidRecordLogs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // immutable logs
+    }
+
+    // ========================================
+    // Student Rosters Collection
+    // For exam student rosters
+    // ========================================
+    match /studentRosters/{rosterId} {
+      allow read, write: if isSignedIn();
+    }
   }
 }
