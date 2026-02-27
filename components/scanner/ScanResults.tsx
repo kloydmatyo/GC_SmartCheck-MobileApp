@@ -1,20 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useState } from "react";
 import {
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { SaveResult } from "../../services/gradeStorageService";
+import { StorageService } from "../../services/storageService";
 import { GradingResult } from "../../types/scanning";
 import { GradingResultExtended } from "../../types/student";
 import { StudentValidationResult } from "../student/StudentValidationResult";
 
 interface ScanResultsProps {
-  result: GradingResultExtended;
-  saveStatus: SaveResult | null;
+  result: GradingResult;
+  imageUri?: string;
+  questionCount?: number;
   onClose: () => void;
   onScanAnother: () => void;
   onRetrySave?: () => void;
@@ -22,61 +26,40 @@ interface ScanResultsProps {
 
 export default function ScanResults({
   result,
-  saveStatus,
+  imageUri,
+  questionCount,
   onClose,
   onScanAnother,
   onRetrySave,
 }: ScanResultsProps) {
-  // Save status banner config 
-  const getBanner = () => {
-    if (!saveStatus) return null;
-    switch (saveStatus.status) {
-      case "saved":
-        return {
-          icon: "checkmark-circle" as const,
-          color: "#4CAF50",
-          bg: "#f0fff4",
-          text: "Result saved to database",
-        };
-      case "duplicate":
-        return {
-          icon: "warning" as const,
-          color: "#FF9800",
-          bg: "#fff8e1",
-          text: "Duplicate — already recorded for this exam",
-        };
-      case "pending":
-        return {
-          icon: "cloud-upload" as const,
-          color: "#2196F3",
-          bg: "#e3f2fd",
-          text: "Saved offline — queued for sync",
-        };
-      case "error":
-        return {
-          icon: "close-circle" as const,
-          color: "#F44336",
-          bg: "#fff0f0",
-          text: saveStatus.message,
-        };
-      default:
-        return null;
+  const [isImageModalVisible, setImageModalVisible] = useState(false);
+  const [isEditingId, setIsEditingId] = useState(false);
+  const [editedStudentId, setEditedStudentId] = useState(
+    result.studentId || ""
+  );
+  const details = result?.details || [];
+
+  const totalQuestions =
+    questionCount ??
+    (details.length > 0 ? details.length : result?.totalPoints ?? 20);
+
+  const handleSaveId = async () => {
+    setIsEditingId(false);
+
+    try {
+      if (result.metadata?.timestamp) {
+        await StorageService.updateStudentId(result.metadata.timestamp, editedStudentId);
+        // We also want to update the local result object so the UI reflects it immediately
+        result.studentId = editedStudentId;
+      }
+    } catch (error) {
+      console.error("Failed to update student ID:", error);
     }
   };
-  const banner = getBanner();
-  const getScoreColor = (percentage: number) => {
-    if (percentage >= 90) return "#4CAF50"; // Green
-    if (percentage >= 80) return "#FF9800"; // Orange
-    if (percentage >= 70) return "#FFC107"; // Yellow
-    return "#F44336"; // Red
-  };
 
-  const getGradeLetter = (percentage: number) => {
-    if (percentage >= 90) return "A";
-    if (percentage >= 80) return "B";
-    if (percentage >= 70) return "C";
-    if (percentage >= 60) return "D";
-    return "F";
+  const handleCancelEdit = () => {
+    setEditedStudentId(result.studentId || "");
+    setIsEditingId(false);
   };
 
   // REQ 14, 15: Handle NULL grades
@@ -84,178 +67,158 @@ export default function ScanResults({
 
   return (
     <View style={styles.container}>
+      {/* Institution Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Scan Results</Text>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Ionicons name="close" size={24} color="#666" />
-        </TouchableOpacity>
+        <View>
+          <Text style={styles.institution}>GORDON COLLEGE</Text>
+          <Text style={styles.location}>OLONGAPO CITY</Text>
+        </View>
+        <View style={styles.scoreBadge}>
+          <Text style={styles.scoreText}>
+            {result.score}/{result.totalPoints}
+          </Text>
+        </View>
       </View>
 
       <ScrollView style={styles.content}>
-          {/* REQ 7: Validation Status Display */}
-          {isNullGrade && (
-            <View style={styles.validationCard}>
-              <Ionicons name="alert-circle" size={48} color="#e74c3c" />
-              <Text style={styles.nullGradeTitle}>Invalid Student ID</Text>
-              <Text style={styles.nullGradeMessage}>
-                {result.gradeStatus === 'NULL_INVALID_ID' && 'Student ID not found in database'}
-                {result.gradeStatus === 'NULL_INACTIVE' && 'Student account is inactive'}
-                {result.gradeStatus === 'NULL_NOT_IN_SECTION' && 'Student not enrolled in this section'}
-              </Text>
-              <Text style={styles.nullGradeNote}>
-                This entry has been flagged for instructor review.
-              </Text>
-            </View>
-          )}
-
-          {/* Save Status Banner */}
-          {banner && (
-            <View
-              style={[
-                styles.statusBanner,
-                { backgroundColor: banner.bg, borderColor: banner.color },
-              ]}
+        {/* Scanned Image Thumbnail */}
+        {imageUri && (
+          <View style={styles.imageSection}>
+            <Text style={styles.sectionTitle}>Original Capture</Text>
+            <TouchableOpacity
+              onPress={() => setImageModalVisible(true)}
+              style={styles.thumbnailContainer}
             >
-              <Ionicons name={banner.icon} size={20} color={banner.color} />
-              <Text style={[styles.statusBannerText, { color: banner.color }]}>
-                {banner.text}
-              </Text>
-              {saveStatus?.status === "error" && onRetrySave && (
-                <TouchableOpacity
-                  onPress={onRetrySave}
-                  style={[styles.retryButton, { borderColor: banner.color }]}
-                >
-                  <Text style={[styles.retryButtonText, { color: banner.color }]}>
-                    Retry
-                  </Text>
-                </TouchableOpacity>
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.thumbnail}
+                resizeMode="cover"
+              />
+              <View style={styles.imageOverlay}>
+                <Ionicons name="expand" size={20} color="white" />
+                <Text style={styles.overlayText}>Tap to Enlarge</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Student ID - Editable Section */}
+        {result.studentId && result.studentId !== "00000000" && (
+          <View
+            style={[
+              styles.studentIdSection,
+              isEditingId && styles.studentIdSectionEditing,
+            ]}
+          >
+            <View style={styles.studentIdLeft}>
+              <Text style={styles.studentIdLabel}>Student ZipGrade ID</Text>
+              {isEditingId ? (
+                <TextInput
+                  style={styles.studentIdInput}
+                  value={editedStudentId}
+                  onChangeText={setEditedStudentId}
+                  placeholder="Enter Student ID"
+                  placeholderTextColor="#999"
+                  maxLength={20}
+                  autoFocus
+                />
+              ) : (
+                <Text style={styles.studentIdValue}>{editedStudentId}</Text>
               )}
             </View>
-          )}
 
-        {/* Student Info */}
-        <View style={styles.studentCard}>
-          <Text style={styles.studentId}>Student ID: {result.studentId}</Text>
-          
-          {!isNullGrade ? (
-            <>
-              <View style={styles.scoreContainer}>
-                <Text
-                  style={[
-                    styles.scoreText,
-                    { color: getScoreColor(result.percentage!) },
-                  ]}
+            {isEditingId ? (
+              <View style={styles.editButtonsContainer}>
+                <TouchableOpacity
+                  style={styles.iconButtonCancel}
+                  onPress={handleCancelEdit}
                 >
-                  {result.score}/{result.totalPoints}
-                </Text>
-                <Text
-                  style={[
-                    styles.percentageText,
-                    { color: getScoreColor(result.percentage!) },
-                  ]}
+                  <Ionicons name="close" size={18} color="#F44336" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconButtonSave}
+                  onPress={handleSaveId}
                 >
-                  {result.percentage}%
-                </Text>
-                <Text
-                  style={[
-                    styles.gradeText,
-                    { color: getScoreColor(result.percentage!) },
-                  ]}
-                >
-                  {getGradeLetter(result.percentage!)}
-                </Text>
+                  <Ionicons name="checkmark" size={18} color="#4CAF50" />
+                </TouchableOpacity>
               </View>
-            </>
-          ) : (
-            <View style={styles.nullScoreContainer}>
-              <Text style={styles.nullScoreText}>NULL</Text>
-              <Text style={styles.nullScoreLabel}>Grade Not Assigned</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Answer Details - Only show for valid grades */}
-        {!isNullGrade && (
-          <View style={styles.detailsCard}>
-            <Text style={styles.detailsTitle}>Answer Details</Text>
-            <Text style={styles.detailsNote}>
-              Showing scanned answers (grading was prevented due to validation)
-            </Text>
-          </View>
-        )}
-
-        {/* Metadata */}
-        <View style={styles.metadataCard}>
-          <Text style={styles.metadataTitle}>Grading Information</Text>
-          <Text style={styles.metadataText}>Status: {result.gradeStatus}</Text>
-          <Text style={styles.metadataText}>Validation: {result.validationStatus}</Text>
-          <Text style={styles.metadataText}>Graded At: {new Date(result.gradedAt).toLocaleString()}</Text>
-          {result.reasonCode && (
-            <Text style={styles.metadataText}>Reason: {result.reasonCode}</Text>
-          )}
-          {result.reviewRequired && (
-            <View style={styles.reviewBadge}>
-              <Ionicons name="flag" size={16} color="#ff9800" />
-              <Text style={styles.reviewText}>Requires Review</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Legacy Answer Details Grid (hidden for NULL grades) */}
-        {false && (
-          <View style={styles.detailsCard}>
-            <Text style={styles.detailsTitle}>Answer Details</Text>
-            <View style={styles.detailsGrid}>
-              {/* Placeholder - details not available in GradingResultExtended */}
-            </View>
-          </View>
-        )}
-
-        <View style={{display: 'none'}}>
-          <View style={styles.detailsGrid}>
-            {[].map((detail: any, index: number) => (
-              <View
-                key={detail.questionNumber}
-                style={[
-                  styles.answerItem,
-                  detail.isCorrect
-                    ? styles.correctAnswer
-                    : styles.incorrectAnswer,
-                ]}
+            ) : (
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => setIsEditingId(true)}
               >
-                <Text style={styles.questionNumber}>
-                  Q{detail.questionNumber}
-                </Text>
-                <Text style={styles.answerText}>
-                  {detail.studentAnswer || "—"} / {detail.correctAnswer}
-                </Text>
-                <Ionicons
-                  name={detail.isCorrect ? "checkmark-circle" : "close-circle"}
-                  size={16}
-                  color={detail.isCorrect ? "#4CAF50" : "#F44336"}
-                />
-              </View>
-            ))}
+                <Ionicons name="pencil" size={18} color="#5C6BC0" />
+              </TouchableOpacity>
+            )}
           </View>
+        )}
+
+        {/* Scanned Items Breakdown */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            Scanned {totalQuestions}-Question Sheet
+          </Text>
+          {details.map((item) => (
+            <View key={item.questionNumber} style={styles.row}>
+              <View style={styles.qBox}>
+                <Text style={styles.qLabel}>{item.questionNumber}</Text>
+              </View>
+              <View style={styles.comparisonContainer}>
+                <View style={styles.scanGroup}>
+                  <Text style={styles.miniLabel}>SCANNED</Text>
+                  <Text
+                    style={[
+                      styles.bubbleValue,
+                      item.isCorrect ? styles.correctColor : styles.errorColor,
+                    ]}
+                  >
+                    {item.studentAnswer || "—"}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={14} color="#DDD" />
+                <View style={styles.scanGroup}>
+                  <Text style={styles.miniLabel}>KEY</Text>
+                  <Text style={styles.bubbleValue}>{item.correctAnswer}</Text>
+                </View>
+              </View>
+              <Ionicons
+                name={item.isCorrect ? "checkmark-circle" : "close-circle"}
+                size={22}
+                color={item.isCorrect ? "#4CAF50" : "#F44336"}
+              />
+            </View>
+          ))}
         </View>
       </ScrollView>
 
-      {/* Action Buttons */}
-      <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.scanAnotherButton]}
-          onPress={onScanAnother}
-        >
-          <Ionicons name="camera" size={20} color="white" />
-          <Text style={styles.actionButtonText}>Scan Another</Text>
-        </TouchableOpacity>
+      {/* Full Screen Image Modal */}
+      <Modal
+        visible={isImageModalVisible}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.modalBackground}>
+          <TouchableOpacity
+            style={styles.closeModal}
+            onPress={() => setImageModalVisible(false)}
+          >
+            <Ionicons name="close-circle" size={40} color="white" />
+          </TouchableOpacity>
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.fullImage}
+            resizeMode="contain"
+          />
+        </View>
+      </Modal>
 
-        <TouchableOpacity
-          style={[styles.actionButton, styles.doneButton]}
-          onPress={onClose}
-        >
-          <Ionicons name="checkmark" size={20} color="white" />
-          <Text style={styles.actionButtonText}>Done</Text>
+      {/* Footer */}
+      <View style={styles.footer}>
+        <TouchableOpacity style={styles.btnSecondary} onPress={onClose}>
+          <Text style={styles.btnTextSecondary}>Discard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.btnPrimary} onPress={onScanAnother}>
+          <Text style={styles.btnTextPrimary}>Next Scan</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -263,256 +226,165 @@ export default function ScanResults({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
+  container: { flex: 1, backgroundColor: "#F2F4F7" },
   header: {
+    padding: 20,
+    backgroundColor: "#1A237E",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: 20,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
   },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
+  institution: { color: "white", fontSize: 18, fontWeight: "800" },
+  location: { color: "#BBDEFB", fontSize: 12 },
+  scoreBadge: { backgroundColor: "white", padding: 8, borderRadius: 8 },
+  scoreText: { fontWeight: "bold", fontSize: 18, color: "#1A237E" },
+  content: { flex: 1, padding: 15 },
+
+  // Image styles
+  imageSection: { marginBottom: 15 },
+  thumbnailContainer: {
+    height: 180,
+    borderRadius: 15,
+    overflow: "hidden",
+    backgroundColor: "#000",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  closeButton: {
-    padding: 5,
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  // Save Status Banner 
-  statusBanner: {
+  thumbnail: { width: "100%", height: "100%", opacity: 0.8 },
+  imageOverlay: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    padding: 6,
+    borderRadius: 8,
+  },
+  overlayText: { color: "white", fontSize: 12, marginLeft: 5, fontWeight: "600" },
+
+  // Student ID
+  studentIdSection: {
+    backgroundColor: "#E8EAF6",
     borderRadius: 10,
     padding: 12,
-    marginBottom: 16,
-    gap: 10,
-  },
-  statusBannerText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  retryButton: {
-    borderWidth: 1.5,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  retryButtonText: {
-    fontSize: 13,
-    fontWeight: "bold",
-  },
-  studentCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  studentId: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
     marginBottom: 15,
-  },
-  scoreContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
-  },
-  scoreText: {
-    fontSize: 32,
-    fontWeight: "bold",
-    marginRight: 15,
-  },
-  percentageText: {
-    fontSize: 28,
-    fontWeight: "bold",
-    marginRight: 15,
-  },
-  gradeText: {
-    fontSize: 36,
-    fontWeight: "bold",
-  },
-  correctAnswers: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-  },
-  detailsCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  detailsTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 15,
-  },
-  detailsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-  },
-  answerItem: {
-    width: "48%",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 10,
-    marginBottom: 8,
-    borderRadius: 8,
-    borderWidth: 1,
   },
-  correctAnswer: {
-    backgroundColor: "#E8F5E8",
-    borderColor: "#4CAF50",
-  },
-  incorrectAnswer: {
-    backgroundColor: "#FFEBEE",
-    borderColor: "#F44336",
-  },
-  questionNumber: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#333",
-  },
-  answerText: {
-    fontSize: 14,
-    color: "#666",
-    flex: 1,
-    textAlign: "center",
-  },
-  actions: {
-    flexDirection: "row",
-    padding: 20,
-    gap: 10,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 15,
-    borderRadius: 8,
-    gap: 8,
-  },
-  scanAnotherButton: {
-    backgroundColor: "#007AFF",
-  },
-  doneButton: {
-    backgroundColor: "#4CAF50",
-  },
-  actionButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  // NULL grade styles
-  validationCard: {
-    backgroundColor: "#fff3e0",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    alignItems: "center",
+  studentIdSectionEditing: {
+    backgroundColor: "#F3E5F5",
     borderWidth: 2,
-    borderColor: "#ff9800",
+    borderColor: "#5C6BC0",
   },
-  nullGradeTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#e74c3c",
-    marginTop: 10,
-    marginBottom: 8,
+  studentIdLeft: {
+    flex: 1,
   },
-  nullGradeMessage: {
+  studentIdLabel: { fontSize: 12, color: "#5C6BC0", fontWeight: "700" },
+  studentIdValue: { fontSize: 16, fontWeight: "800", color: "#1A237E", letterSpacing: 2, marginTop: 4 },
+  studentIdInput: {
     fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 12,
+    fontWeight: "800",
+    color: "#1A237E",
+    letterSpacing: 2,
+    marginTop: 4,
+    borderBottomWidth: 2,
+    borderBottomColor: "#5C6BC0",
+    paddingVertical: 4,
+    paddingHorizontal: 0,
   },
-  nullGradeNote: {
-    fontSize: 14,
-    color: "#ff9800",
-    textAlign: "center",
-    fontStyle: "italic",
+  editButton: {
+    padding: 8,
+    marginLeft: 10,
   },
-  nullScoreContainer: {
+  editButtonsContainer: {
+    flexDirection: "row",
+    gap: 8,
+    marginLeft: 10,
+  },
+  iconButtonSave: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#E8F5E9",
+    justifyContent: "center",
     alignItems: "center",
-    padding: 20,
   },
-  nullScoreText: {
-    fontSize: 48,
-    fontWeight: "bold",
-    color: "#e74c3c",
+  iconButtonCancel: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#FFEBEE",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  nullScoreLabel: {
-    fontSize: 16,
-    color: "#666",
-    marginTop: 8,
+
+  // Modal
+  modalBackground: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    justifyContent: "center",
   },
-  metadataCard: {
+  fullImage: { width: "100%", height: "80%" },
+  closeModal: { position: "absolute", top: 50, right: 20, zIndex: 10 },
+
+  // List
+  section: {
     backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderRadius: 15,
+    padding: 15,
+    elevation: 2,
   },
-  metadataTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 12,
-  },
-  metadataText: {
+  sectionTitle: {
     fontSize: 14,
+    fontWeight: "700",
     color: "#666",
-    marginBottom: 6,
+    marginBottom: 15,
   },
-  reviewBadge: {
+  row: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#fff3e0",
-    padding: 8,
-    borderRadius: 8,
-    marginTop: 8,
-    gap: 8,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
   },
-  reviewText: {
-    fontSize: 14,
-    color: "#ff9800",
-    fontWeight: "600",
+  qBox: { width: 35 },
+  qLabel: { fontWeight: "bold", color: "#333" },
+  comparisonContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-evenly",
   },
-  detailsNote: {
-    fontSize: 14,
-    color: "#999",
-    fontStyle: "italic",
-    marginTop: 8,
+  scanGroup: { alignItems: "center" },
+  miniLabel: { fontSize: 8, color: "#AAA", fontWeight: "bold" },
+  bubbleValue: { fontSize: 18, fontWeight: "700" },
+  correctColor: { color: "#4CAF50" },
+  errorColor: { color: "#F44336" },
+  footer: {
+    padding: 20,
+    flexDirection: "row",
+    gap: 10,
+    backgroundColor: "white",
   },
+  btnPrimary: {
+    flex: 2,
+    backgroundColor: "#1A237E",
+    padding: 16,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  btnSecondary: {
+    flex: 1,
+    backgroundColor: "#EEE",
+    padding: 16,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  btnTextPrimary: { color: "white", fontWeight: "bold" },
+  btnTextSecondary: { color: "#666" },
 });

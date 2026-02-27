@@ -1,19 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import HistoryList from "../../components/scanner/HistoryList";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function ScannerTab() {
   const [showScanner, setShowScanner] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   if (showScanner) {
     return <ScannerScreen onClose={() => setShowScanner(false)} />;
+  }
+
+  if (showHistory) {
+    return <HistoryList onClose={() => setShowHistory(false)} />;
   }
 
   return (
@@ -55,6 +61,14 @@ export default function ScannerTab() {
         >
           <Ionicons name="camera" size={24} color="white" />
           <Text style={styles.scanButtonText}>Start Scanning</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={() => setShowHistory(true)}
+        >
+          <Ionicons name="time-outline" size={24} color="#007AFF" />
+          <Text style={styles.historyButtonText}>View History</Text>
         </TouchableOpacity>
 
         <View style={styles.instructions}>
@@ -145,6 +159,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     marginLeft: 10,
+  },
+  historyButton: {
+    backgroundColor: "white",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+  },
+  historyButtonText: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
+    marginLeft: 8,
   },
   instructions: {
     backgroundColor: "white",

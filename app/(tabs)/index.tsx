@@ -1,16 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import HistoryList from "../../components/scanner/HistoryList";
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function HomeScreen() {
+  const [showScanner, setShowScanner] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
   const router = useRouter();
 
   // Mock data - replace with actual data from API/state management
@@ -61,6 +66,13 @@ export default function HomeScreen() {
     }
   };
 
+  if (showScanner) {
+    return <ScannerScreen onClose={() => setShowScanner(false)} />;
+  }
+
+  if (showHistory) {
+    return <HistoryList onClose={() => setShowHistory(false)} />;
+  }
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -90,7 +102,7 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.scanButton}
-          onPress={() => router.push("/(tabs)/scanner")}
+          onPress={() => setShowScanner(true)}
         >
           <Ionicons name="document-text-outline" size={20} color="#fff" />
           <Text style={styles.scanButtonText}>Start Scanning Papers</Text>
@@ -161,6 +173,16 @@ export default function HomeScreen() {
           ))}
         </View>
 
+        {/* New History Button */}
+        <TouchableOpacity
+          style={styles.newQuizButton}
+          onPress={() => setShowHistory(true)}
+        >
+          <Ionicons name="add-circle" size={24} color="#fff" />
+          <Text style={styles.newQuizButtonText}>History</Text>
+        </TouchableOpacity>
+
+        {/* New Quiz Button */}
         <TouchableOpacity
           style={styles.newQuizButton}
           onPress={() => router.push("/(tabs)/generator")}

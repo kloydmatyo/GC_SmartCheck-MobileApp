@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.GC-SmartCheckMobileApp"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +18,8 @@
         "foregroundImage": "./assets/images/gordon-college-logo.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.GC_SmartCheckMobileApp"
     },
     "web": {
       "output": "static",
