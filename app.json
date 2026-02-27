@@ -13,7 +13,8 @@
       "bundleIdentifier": "com.anonymous.GC-SmartCheckMobileApp",
       "infoPlist": {
         "NSCameraUsageDescription": "This app needs camera access to scan answer sheets and grade exams.",
-        "NSPhotoLibraryUsageDescription": "This app needs photo library access to select answer sheets for grading."
+        "NSPhotoLibraryUsageDescription": "This app needs photo library access to select answer sheets for grading.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -47,6 +48,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "b7937d33-03a3-4010-b609-9a07e0f17386"
+      }
     }
   }
 }
