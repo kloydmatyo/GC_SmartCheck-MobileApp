@@ -1,20 +1,19 @@
 import { auth, db } from "@/config/firebase";
 import {
-    addDoc,
-    collection,
-    doc,
-    getDocs,
-    orderBy,
-    query,
-    serverTimestamp,
-    updateDoc,
-    where
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where
 } from "firebase/firestore";
 import {
-    BatchDuplicateWarning,
-    BatchHistoryFilter,
-    BatchVersionMismatch,
-    ExamBatch,
+  BatchDuplicateWarning,
+  BatchHistoryFilter,
+  BatchVersionMismatch,
+  ExamBatch,
 } from "../types/batch";
 import { AuditLogService } from "./auditLogService";
 
@@ -97,20 +96,12 @@ export class BatchHistoryService {
         throw new Error("User not authenticated");
       }
 
+      // Simple query without orderBy to avoid index requirement
+      // We'll sort client-side instead
       let q = query(
         collection(db, "examBatches"),
         where("createdBy", "==", currentUser.uid),
-        orderBy("createdAt", "desc"),
       );
-
-      // Apply filters
-      if (filter?.examId) {
-        q = query(q, where("examId", "==", filter.examId));
-      }
-
-      if (filter?.status) {
-        q = query(q, where("status", "==", filter.status));
-      }
 
       const querySnapshot = await getDocs(q);
       const batches: ExamBatch[] = [];
@@ -133,8 +124,25 @@ export class BatchHistoryService {
         });
       });
 
+      // Sort by createdAt descending (client-side)
+      batches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
       // Apply client-side filters
       let filteredBatches = batches;
+
+      // Filter by examId
+      if (filter?.examId) {
+        filteredBatches = filteredBatches.filter(
+          (batch) => batch.examId === filter.examId,
+        );
+      }
+
+      // Filter by status
+      if (filter?.status) {
+        filteredBatches = filteredBatches.filter(
+          (batch) => batch.status === filter.status,
+        );
+      }
 
       if (filter?.searchQuery) {
         const query = filter.searchQuery.toLowerCase();
@@ -181,20 +189,31 @@ export class BatchHistoryService {
 
       const recentTime = new Date(Date.now() - timeWindowMinutes * 60 * 1000);
 
+      // Simplified query without complex indexes
       const q = query(
         collection(db, "examBatches"),
-        where("examId", "==", examId),
-        where("version", "==", version),
         where("createdBy", "==", currentUser.uid),
-        where("status", "!=", "deleted"),
-        orderBy("status"),
-        orderBy("createdAt", "desc"),
       );
 
       const querySnapshot = await getDocs(q);
 
-      if (!querySnapshot.empty) {
-        const latestBatch = querySnapshot.docs[0].data();
+      // Filter client-side to avoid index requirements
+      const matchingBatches = querySnapshot.docs
+        .map((doc) => doc.data())
+        .filter(
+          (data) =>
+            data.examId === examId &&
+            data.version === version &&
+            data.status !== "deleted",
+        )
+        .sort((a, b) => {
+          const timeA = a.createdAt?.toDate?.()?.getTime() || 0;
+          const timeB = b.createdAt?.toDate?.()?.getTime() || 0;
+          return timeB - timeA;
+        });
+
+      if (matchingBatches.length > 0) {
+        const latestBatch = matchingBatches[0];
         const batchTime = latestBatch.createdAt?.toDate() || new Date(0);
 
         if (batchTime >= recentTime) {
@@ -239,19 +258,26 @@ export class BatchHistoryService {
         return { hasMismatch: false, currentVersion, batchVersion: 0 };
       }
 
+      // Simplified query without complex indexes
       const q = query(
         collection(db, "examBatches"),
-        where("examId", "==", examId),
         where("createdBy", "==", currentUser.uid),
-        where("status", "!=", "deleted"),
-        orderBy("status"),
-        orderBy("createdAt", "desc"),
       );
 
       const querySnapshot = await getDocs(q);
 
-      if (!querySnapshot.empty) {
-        const latestBatch = querySnapshot.docs[0].data();
+      // Filter client-side to avoid index requirements
+      const matchingBatches = querySnapshot.docs
+        .map((doc) => doc.data())
+        .filter((data) => data.examId === examId && data.status !== "deleted")
+        .sort((a, b) => {
+          const timeA = a.createdAt?.toDate?.()?.getTime() || 0;
+          const timeB = b.createdAt?.toDate?.()?.getTime() || 0;
+          return timeB - timeA;
+        });
+
+      if (matchingBatches.length > 0) {
+        const latestBatch = matchingBatches[0];
         const batchVersion = latestBatch.templateVersion || 1;
 
         if (batchVersion !== currentVersion) {
