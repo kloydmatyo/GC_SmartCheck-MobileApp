@@ -1,4 +1,6 @@
 import StatusManager from "@/components/exam/StatusManager";
+import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -26,6 +28,7 @@ export default function ExamPreviewScreen() {
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     loadExamData();
@@ -40,6 +43,61 @@ export default function ExamPreviewScreen() {
       const currentUser = auth.currentUser;
       if (!currentUser) {
         setError("You must be logged in to view exams.");
+        return;
+      }
+
+      // Check if we're online
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
+
+      // Try to load from offline storage first
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+
+      if (offlineExam) {
+        // We have offline data - use it
+        const examData: ExamPreviewData = {
+          metadata: {
+            examCode: examId,
+            title: offlineExam.title,
+            subject: "",
+            section: "",
+            date: offlineExam.createdAt,
+            status: "Active",
+            version: offlineExam.version,
+            createdAt: offlineExam.createdAt,
+          },
+          totalQuestions: offlineExam.questions?.length || 0,
+          choiceFormat: "A-D",
+          answerKey: {
+            answers: offlineExam.answerKey?.answers || [],
+            locked: true,
+          },
+          templateLayout: null,
+          lastModified: offlineExam.updatedAt,
+        };
+
+        setExam(examData);
+
+        // If online, try to sync in background
+        if (online) {
+          try {
+            const freshData = await ExamService.getExamById(examId);
+            if (freshData) {
+              setExam(freshData);
+            }
+          } catch (err) {
+            console.log("Could not fetch fresh data, using offline version");
+          }
+        }
+
+        return;
+      }
+
+      // No offline data - must fetch from Firebase
+      if (!online) {
+        setError(
+          "This exam is not available offline. Please connect to the internet.",
+        );
         return;
       }
 
@@ -150,7 +208,12 @@ export default function ExamPreviewScreen() {
           <Ionicons name="arrow-back" size={24} color="#eef7f0" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Exam Preview</Text>
-        <View style={styles.placeholder} />
+        {isOffline && (
+          <View style={styles.offlineBadge}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+          </View>
+        )}
+        {!isOffline && <View style={styles.placeholder} />}
       </View>
 
       <ScrollView
@@ -389,6 +452,11 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 32,
+  },
+  offlineBadge: {
+    backgroundColor: "#ff9800",
+    borderRadius: 16,
+    padding: 6,
   },
   scrollView: {
     flex: 1,

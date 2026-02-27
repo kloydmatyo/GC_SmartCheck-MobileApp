@@ -1,10 +1,19 @@
 import { auth, db } from "@/config/firebase";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    where,
+} from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     StyleSheet,
     Text,
@@ -20,6 +29,7 @@ interface Quiz {
   date: string;
   papers: number | null;
   status: "Draft" | "Scheduled" | "Active" | "Completed";
+  isDownloaded?: boolean;
 }
 
 export default function QuizzesScreen() {
@@ -31,6 +41,7 @@ export default function QuizzesScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
 
   // Fetch quizzes from Firebase
   const loadQuizzes = async () => {
@@ -51,6 +62,10 @@ export default function QuizzesScreen() {
 
       const querySnapshot = await getDocs(q);
       const examsList: Quiz[] = [];
+
+      // Check which exams are downloaded
+      const downloadedExams = await OfflineStorageService.getDownloadedExams();
+      const downloadedIds = new Set(downloadedExams.map((e) => e.id));
 
       querySnapshot.forEach((doc) => {
         const data = doc.data();
@@ -96,6 +111,7 @@ export default function QuizzesScreen() {
             : "No Date",
           papers: data.scanned_papers || null,
           status: status,
+          isDownloaded: downloadedIds.has(doc.id),
         });
       });
 
@@ -123,6 +139,80 @@ export default function QuizzesScreen() {
 
     return matchesFilter && matchesSearch;
   });
+
+  // Download exam for offline access
+  const handleDownloadExam = async (examId: string) => {
+    try {
+      setDownloadingIds((prev) => new Set(prev).add(examId));
+
+      // Fetch full exam data from Firebase
+      const examDoc = await getDoc(doc(db, "exams", examId));
+      if (!examDoc.exists()) {
+        Alert.alert("Error", "Exam not found");
+        return;
+      }
+
+      const data = examDoc.data();
+      const examData = {
+        id: examDoc.id,
+        title: data.title || "Untitled Exam",
+        description: data.description || "",
+        questions: data.questions || [],
+        answerKey: data.answerKey || null,
+        createdBy: data.createdBy || "",
+        createdAt: data.createdAt?.toDate?.() || new Date(),
+        updatedAt: data.updatedAt?.toDate?.() || new Date(),
+        version: data.version || 1,
+      };
+
+      await OfflineStorageService.downloadExam(examData);
+
+      // Update UI
+      setQuizzes((prev) =>
+        prev.map((q) => (q.id === examId ? { ...q, isDownloaded: true } : q)),
+      );
+
+      Alert.alert("Success", "Exam downloaded for offline access!");
+    } catch (error: any) {
+      console.error("Error downloading exam:", error);
+
+      // Check if error is due to offline
+      if (
+        error?.message?.includes("offline") ||
+        error?.code === "unavailable"
+      ) {
+        Alert.alert(
+          "No Internet Connection",
+          "You need to be online to download exams for offline access.",
+        );
+      } else {
+        Alert.alert("Error", "Failed to download exam. Please try again.");
+      }
+    } finally {
+      setDownloadingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(examId);
+        return newSet;
+      });
+    }
+  };
+
+  // Remove downloaded exam
+  const handleRemoveDownload = async (examId: string) => {
+    try {
+      await OfflineStorageService.deleteDownloadedExam(examId);
+
+      // Update UI
+      setQuizzes((prev) =>
+        prev.map((q) => (q.id === examId ? { ...q, isDownloaded: false } : q)),
+      );
+
+      Alert.alert("Success", "Offline copy removed");
+    } catch (error) {
+      console.error("Error removing download:", error);
+      Alert.alert("Error", "Failed to remove offline copy");
+    }
+  };
 
   const renderQuizCard = ({ item }: { item: Quiz }) => (
     <TouchableOpacity
@@ -160,13 +250,40 @@ export default function QuizzesScreen() {
           </Text>
         </View>
         <View style={styles.actionsRow}>
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              item.isDownloaded && styles.actionButtonDownloaded,
+            ]}
+            onPress={() =>
+              item.isDownloaded
+                ? handleRemoveDownload(item.id)
+                : handleDownloadExam(item.id)
+            }
+            disabled={downloadingIds.has(item.id)}
+          >
+            {downloadingIds.has(item.id) ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons
+                  name={
+                    item.isDownloaded
+                      ? "cloud-done-outline"
+                      : "cloud-download-outline"
+                  }
+                  size={12}
+                  color="#fff"
+                />
+                <Text style={styles.actionText}>
+                  {item.isDownloaded ? "Offline" : "Download"}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
           <TouchableOpacity style={styles.actionButton}>
             <Ionicons name="share-social-outline" size={12} color="#fff" />
             <Text style={styles.actionText}>Share</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="download-outline" size={12} color="#fff" />
-            <Text style={styles.actionText}>Export</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -472,6 +589,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 9,
     paddingVertical: 6,
+  },
+  actionButtonDownloaded: {
+    backgroundColor: "#00a550",
   },
   actionText: {
     color: "#fff",
