@@ -3,24 +3,31 @@
  * Requirements: 33-42 (Mobile Search & Filtering), 43-51 (Offline Caching)
  */
 
-import { Ionicons } from "@expo/vector-icons";
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import {
-    FlatList,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    ActivityIndicator,
-    RefreshControl,
-    Modal,
-} from "react-native";
-import { auth, db } from "@/config/firebase";
-import { collection, getDocs, query, where, orderBy, limit, startAfter } from "firebase/firestore";
-import { StudentExtended } from "@/types/student";
-import { StudentImportModal } from "@/components/student/StudentImportModal";
 import { CacheSyncIndicator } from "@/components/student/CacheSyncIndicator";
+import { StudentImportModal } from "@/components/student/StudentImportModal";
+import { auth, db } from "@/config/firebase";
+import { StudentExtended } from "@/types/student";
+import { Ionicons } from "@expo/vector-icons";
+import {
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  where
+} from "firebase/firestore";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 export default function StudentsScreen() {
   // REQ 33, 34: Search with debounce
@@ -29,7 +36,9 @@ export default function StudentsScreen() {
   const searchTimeoutRef = useRef<NodeJS.Timeout>();
 
   // REQ 35: Filter state
-  const [selectedSection, setSelectedSection] = useState<string | undefined>(undefined);
+  const [selectedSection, setSelectedSection] = useState<string | undefined>(
+    undefined,
+  );
   const [activeOnly, setActiveOnly] = useState(true);
   const [showFilterModal, setShowFilterModal] = useState(false);
 
@@ -38,8 +47,10 @@ export default function StudentsScreen() {
   const [pageSize] = useState(20);
 
   // REQ 38: Sorting state
-  const [sortBy, setSortBy] = useState<'name' | 'student_id' | 'section'>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [sortBy, setSortBy] = useState<"name" | "student_id" | "section">(
+    "name",
+  );
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
   // Data state
   const [students, setStudents] = useState<StudentExtended[]>([]);
@@ -78,13 +89,20 @@ export default function StudentsScreen() {
   // Load students when query, filters, or pagination changes
   useEffect(() => {
     loadStudents();
-  }, [debouncedQuery, selectedSection, activeOnly, sortBy, sortOrder, currentPage]);
+  }, [
+    debouncedQuery,
+    selectedSection,
+    activeOnly,
+    sortBy,
+    sortOrder,
+    currentPage,
+  ]);
 
   const initializeAndLoad = async () => {
     try {
       await loadStudents();
     } catch (error) {
-      console.error('Failed to initialize:', error);
+      console.error("Failed to initialize:", error);
     }
   };
 
@@ -94,7 +112,7 @@ export default function StudentsScreen() {
       setIsLoading(true);
 
       if (!auth.currentUser) {
-        console.error('User not authenticated');
+        console.error("User not authenticated");
         setStudents([]);
         setTotalCount(0);
         return;
@@ -102,41 +120,50 @@ export default function StudentsScreen() {
 
       // REQ 36: Use SQLite for indexed server-side queries
       try {
-        const { StudentDatabaseService } = await import('../../services/studentDatabaseService');
-        
+        const { StudentDatabaseService } =
+          await import("../../services/studentDatabaseService");
+
         // Convert sortBy to match SQLite method
-        const sortField = sortBy === 'id' ? 'student_id' : sortBy;
-        
+        const sortField = sortBy === "id" ? "student_id" : sortBy;
+
         const result = await StudentDatabaseService.searchStudents(
           debouncedQuery || undefined,
           selectedSection || undefined,
           activeOnly,
-          sortField as 'name' | 'student_id' | 'section',
+          sortField as "name" | "student_id" | "section",
           sortOrder,
           currentPage,
-          pageSize
+          pageSize,
         );
 
         setStudents(result.students);
         setTotalCount(result.total);
       } catch (sqliteError) {
-        console.warn('[Students] SQLite query failed, falling back to Firestore:', sqliteError);
-        
+        console.warn(
+          "[Students] SQLite query failed, falling back to Firestore:",
+          sqliteError,
+        );
+
         // Fallback to Firestore if SQLite fails
-        const studentsRef = collection(db, 'students');
+        const studentsRef = collection(db, "students");
         let q = query(studentsRef);
 
         const queryConstraints: any[] = [];
 
         if (activeOnly !== undefined) {
-          queryConstraints.push(where('is_active', '==', activeOnly));
+          queryConstraints.push(where("is_active", "==", activeOnly));
         }
 
         if (selectedSection) {
-          queryConstraints.push(where('section', '==', selectedSection));
+          queryConstraints.push(where("section", "==", selectedSection));
         }
 
-        const sortField = sortBy === 'name' ? 'last_name' : sortBy === 'student_id' ? 'student_id' : 'section';
+        const sortField =
+          sortBy === "name"
+            ? "last_name"
+            : sortBy === "student_id"
+              ? "student_id"
+              : "section";
         queryConstraints.push(orderBy(sortField, sortOrder));
         queryConstraints.push(limit(pageSize));
 
@@ -149,8 +176,8 @@ export default function StudentsScreen() {
           const data = doc.data();
           allStudents.push({
             student_id: data.student_id || doc.id,
-            first_name: data.first_name || data.firstName || '',
-            last_name: data.last_name || data.lastName || '',
+            first_name: data.first_name || data.firstName || "",
+            last_name: data.last_name || data.lastName || "",
             email: data.email,
             section: data.section,
             is_active: data.is_active !== false,
@@ -162,19 +189,19 @@ export default function StudentsScreen() {
         // Client-side search filter as fallback
         if (debouncedQuery) {
           const searchLower = debouncedQuery.toLowerCase();
-          allStudents = allStudents.filter(s =>
-            s.first_name.toLowerCase().includes(searchLower) ||
-            s.last_name.toLowerCase().includes(searchLower) ||
-            s.student_id.toLowerCase().includes(searchLower)
+          allStudents = allStudents.filter(
+            (s) =>
+              s.first_name.toLowerCase().includes(searchLower) ||
+              s.last_name.toLowerCase().includes(searchLower) ||
+              s.student_id.toLowerCase().includes(searchLower),
           );
         }
 
         setStudents(allStudents);
         setTotalCount(allStudents.length);
       }
-
     } catch (error) {
-      console.error('Failed to load students:', error);
+      console.error("Failed to load students:", error);
       setStudents([]);
       setTotalCount(0);
     } finally {
@@ -187,7 +214,7 @@ export default function StudentsScreen() {
     try {
       await loadStudents();
     } catch (error) {
-      console.error('Refresh failed:', error);
+      console.error("Refresh failed:", error);
     } finally {
       setIsRefreshing(false);
     }
@@ -208,15 +235,15 @@ export default function StudentsScreen() {
   };
 
   const toggleSortOrder = () => {
-    setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
   };
 
-  const changeSortBy = (field: 'name' | 'student_id' | 'section') => {
+  const changeSortBy = (field: "name" | "student_id" | "section") => {
     if (sortBy === field) {
       toggleSortOrder();
     } else {
       setSortBy(field);
-      setSortOrder('asc');
+      setSortOrder("asc");
     }
   };
 
@@ -281,18 +308,22 @@ export default function StudentsScreen() {
 
           <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>Sort By</Text>
-            {(['name', 'student_id', 'section'] as const).map((field) => (
+            {(["name", "student_id", "section"] as const).map((field) => (
               <TouchableOpacity
                 key={field}
                 style={styles.sortOption}
                 onPress={() => changeSortBy(field)}
               >
                 <Text style={styles.sortOptionText}>
-                  {field === 'name' ? 'Name' : field === 'student_id' ? 'Student ID' : 'Section'}
+                  {field === "name"
+                    ? "Name"
+                    : field === "student_id"
+                      ? "Student ID"
+                      : "Section"}
                 </Text>
                 {sortBy === field && (
                   <Ionicons
-                    name={sortOrder === 'asc' ? "arrow-up" : "arrow-down"}
+                    name={sortOrder === "asc" ? "arrow-up" : "arrow-down"}
                     size={20}
                     color="#00a550"
                   />
@@ -323,11 +354,18 @@ export default function StudentsScreen() {
     return (
       <View style={styles.paginationContainer}>
         <TouchableOpacity
-          style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
-          onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+          style={[
+            styles.pageButton,
+            currentPage === 1 && styles.pageButtonDisabled,
+          ]}
+          onPress={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
           disabled={currentPage === 1}
         >
-          <Ionicons name="chevron-back" size={20} color={currentPage === 1 ? "#ccc" : "#00a550"} />
+          <Ionicons
+            name="chevron-back"
+            size={20}
+            color={currentPage === 1 ? "#ccc" : "#00a550"}
+          />
         </TouchableOpacity>
 
         <Text style={styles.pageInfo}>
@@ -335,11 +373,20 @@ export default function StudentsScreen() {
         </Text>
 
         <TouchableOpacity
-          style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
-          onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+          style={[
+            styles.pageButton,
+            currentPage === totalPages && styles.pageButtonDisabled,
+          ]}
+          onPress={() =>
+            setCurrentPage((prev) => Math.min(totalPages, prev + 1))
+          }
           disabled={currentPage === totalPages}
         >
-          <Ionicons name="chevron-forward" size={20} color={currentPage === totalPages ? "#ccc" : "#00a550"} />
+          <Ionicons
+            name="chevron-forward"
+            size={20}
+            color={currentPage === totalPages ? "#ccc" : "#00a550"}
+          />
         </TouchableOpacity>
       </View>
     );
@@ -357,11 +404,7 @@ export default function StudentsScreen() {
             onPress={handleRefresh}
             disabled={isRefreshing}
           >
-            <Ionicons
-              name="cloud-download"
-              size={24}
-              color="#00a550"
-            />
+            <Ionicons name="cloud-download" size={24} color="#00a550" />
           </TouchableOpacity>
           {/* REQ 22: Import button */}
           <TouchableOpacity
@@ -380,7 +423,12 @@ export default function StudentsScreen() {
 
       {/* REQ 33: Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+        <Ionicons
+          name="search"
+          size={20}
+          color="#666"
+          style={styles.searchIcon}
+        />
         <TextInput
           style={styles.searchInput}
           placeholder="Search by name, ID, or section..."
@@ -419,7 +467,13 @@ export default function StudentsScreen() {
 
         <View style={styles.sortIndicator}>
           <Text style={styles.sortText}>
-            Sort: {sortBy === 'name' ? 'Name' : sortBy === 'student_id' ? 'ID' : 'Section'} {sortOrder === 'asc' ? '↑' : '↓'}
+            Sort:{" "}
+            {sortBy === "name"
+              ? "Name"
+              : sortBy === "student_id"
+                ? "ID"
+                : "Section"}{" "}
+            {sortOrder === "asc" ? "↑" : "↓"}
           </Text>
         </View>
       </View>

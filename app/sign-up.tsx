@@ -2,20 +2,29 @@ import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import {
+    collection,
+    doc,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    serverTimestamp,
+    setDoc,
+} from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    Alert,
-    Image,
-    ImageBackground,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { auth, db } from "@/config/firebase";
@@ -67,6 +76,15 @@ export default function SignUpScreen() {
     setIsLoading(true);
 
     try {
+      // Debug: Log the config values
+      console.log("Firebase config check:");
+      console.log(
+        "API Key exists:",
+        !!process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+      );
+      console.log("Project ID:", process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID);
+      console.log("Auth domain:", process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN);
+
       // Create user in Firebase Auth
       const userCredential = await createUserWithEmailAndPassword(
         auth,
@@ -74,13 +92,43 @@ export default function SignUpScreen() {
         password,
       );
 
+      // Generate sequential instructor ID
+      const instructorsRef = collection(db, "instructors");
+      const instructorsQuery = query(
+        instructorsRef,
+        orderBy("instructorId", "desc"),
+        limit(1),
+      );
+      const instructorsSnapshot = await getDocs(instructorsQuery);
+
+      let nextInstructorNumber = 1;
+      if (!instructorsSnapshot.empty) {
+        const lastInstructor = instructorsSnapshot.docs[0].data();
+        const lastId = lastInstructor.instructorId; // e.g., "INSTRUCTOR-008"
+        const lastNumber = parseInt(lastId.split("-")[1]);
+        nextInstructorNumber = lastNumber + 1;
+      }
+
+      const instructorId = `INSTRUCTOR-${String(nextInstructorNumber).padStart(3, "0")}`;
+
       // Create user document in Firestore
       await setDoc(doc(db, "users", userCredential.user.uid), {
         fullName: fullName.trim(),
         email: email.toLowerCase().trim(),
         role: "instructor",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        instructorId: instructorId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Create instructor document in instructors collection
+      await setDoc(doc(db, "instructors", instructorId), {
+        email: email.toLowerCase().trim(),
+        fullName: fullName.trim(),
+        instructorId: instructorId,
+        userId: userCredential.user.uid,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
 
       Alert.alert("Success", "Account created successfully! Please sign in.", [
@@ -91,6 +139,12 @@ export default function SignUpScreen() {
       ]);
     } catch (error: any) {
       console.error("Sign up error:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
+      console.error(
+        "Attempting to register email:",
+        email.toLowerCase().trim(),
+      );
 
       let errorMessage = "Failed to create account. Please try again.";
 

@@ -13,6 +13,7 @@ export interface ScanResult {
   studentId: string;
   answers: StudentAnswer[];
   confidence: number; // 0-1 scale
+  processedImageUri?: string;
 }
 
 export interface GradingResult {
@@ -33,6 +34,13 @@ export interface GradingResult {
     isCorrect: boolean;
     points: number;
   }[];
+  metadata?: {
+    timestamp: number;
+    deviceId: string;
+    isBlurred?: boolean;
+    imageUri?: string;
+    isValidId?: boolean;
+  };
 }
 
 export interface GradeStorageRecord {

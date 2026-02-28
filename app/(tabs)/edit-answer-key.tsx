@@ -1,11 +1,14 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
+import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     FlatList,
     StyleSheet,
     Text,
@@ -20,32 +23,123 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const { examId } = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
   const [choicesPerItem, setChoicesPerItem] = useState(4);
   const [answerKeyId, setAnswerKeyId] = useState("");
+  const [isOffline, setIsOffline] = useState(false);
+  const [incompleteConfirmVisible, setIncompleteConfirmVisible] =
+    useState(false);
+  const [incompleteCount, setIncompleteCount] = useState(0);
+  const pendingSaveResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+    onClose?: () => void;
+  }>({
+    visible: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
 
   useEffect(() => {
     loadAnswerKey();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingSaveResolveRef.current) {
+        pendingSaveResolveRef.current(false);
+        pendingSaveResolveRef.current = null;
+      }
+    };
+  }, []);
 
   const loadAnswerKey = async () => {
     try {
       setLoading(true);
 
-      // Load exam data
+      // Check if we're online
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
+
+      // Try to load from offline storage first
+      const offlineExam = await OfflineStorageService.getDownloadedExam(
+        examId as string,
+      );
+
+      if (offlineExam) {
+        // We have offline data
+        const numItems = offlineExam.questions?.length || 20;
+        const choices = 4; // Default to 4 choices
+        setChoicesPerItem(choices);
+
+        const answerKeyIdStr = `ak_${examId}_offline`;
+        setAnswerKeyId(answerKeyIdStr);
+
+        // Load answers from offline exam
+        const initialAnswers: QuestionAnswer[] = Array.from(
+          { length: numItems },
+          (_, i) => ({
+            questionNumber: i + 1,
+            answer: offlineExam.answerKey?.answers?.[i] || "",
+          }),
+        );
+
+        setAnswers(initialAnswers);
+        setLoading(false);
+        return;
+      }
+
+      // No offline data - must be online
+      if (!online) {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Offline",
+          message:
+            "This exam is not available offline. Please connect to the internet or download it first.",
+          onClose: goToQuizzes,
+        });
+        return;
+      }
+
+      // Load exam data from Firebase
       const examRef = doc(db, "exams", examId as string);
       const examSnap = await getDoc(examRef);
 
       if (!examSnap.exists()) {
-        Alert.alert("Error", "Exam not found");
-        router.back();
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Error",
+          message: "Exam not found",
+          onClose: goToQuizzes,
+        });
         return;
       }
 
       const examData = examSnap.data();
+
+      // Check if exam is in Draft status
+      if (examData.status !== "Draft") {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Edit Restricted",
+          message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
+          onClose: goToQuizzes,
+        });
+        return;
+      }
+
       const numItems = examData.num_items || 20;
       const choices = examData.choices_per_item || 4;
       setChoicesPerItem(choices);
@@ -78,7 +172,12 @@ export default function EditAnswerKeyScreen() {
       setAnswers(initialAnswers);
     } catch (error) {
       console.error("Error loading answer key:", error);
-      Alert.alert("Error", "Failed to load answer key");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to load answer key",
+      });
     } finally {
       setLoading(false);
     }
@@ -100,18 +199,9 @@ export default function EditAnswerKeyScreen() {
       const emptyAnswers = answers.filter((a) => !a.answer);
       if (emptyAnswers.length > 0) {
         const shouldContinue = await new Promise<boolean>((resolve) => {
-          Alert.alert(
-            "Incomplete Answer Key",
-            `${emptyAnswers.length} question(s) don't have answers yet. Save anyway?`,
-            [
-              {
-                text: "Cancel",
-                style: "cancel",
-                onPress: () => resolve(false),
-              },
-              { text: "Save Anyway", onPress: () => resolve(true) },
-            ],
-          );
+          setIncompleteCount(emptyAnswers.length);
+          pendingSaveResolveRef.current = resolve;
+          setIncompleteConfirmVisible(true);
         });
 
         if (!shouldContinue) {
@@ -120,6 +210,46 @@ export default function EditAnswerKeyScreen() {
         }
       }
 
+      // Check if we're offline
+      const online = await NetworkService.isOnline();
+
+      if (!online) {
+        // Save offline - queue for sync
+        const offlineExam = await OfflineStorageService.getDownloadedExam(
+          examId as string,
+        );
+        if (offlineExam) {
+          // Update offline exam with new answer key
+          const updatedExam = {
+            ...offlineExam,
+            answerKey: {
+              answers: answers.map((a) => a.answer),
+              locked: false,
+            },
+            updatedAt: new Date(),
+            version: (offlineExam.version || 1) + 1,
+          };
+
+          await OfflineStorageService.downloadExam(updatedExam);
+
+          // Queue update for sync
+          await OfflineStorageService.queueUpdate(examId as string, "update", {
+            answerKey: updatedExam.answerKey,
+          });
+
+          setStatusModal({
+            visible: true,
+            type: "success",
+            title: "Saved Offline",
+            message:
+              "Answer key saved offline. Changes will sync when you're back online.",
+            onClose: goToQuizzes,
+          });
+        }
+        return;
+      }
+
+      // Online - save to Firebase
       // Prepare answer key data
       const answerKeyData: any = {
         examId: examId as string,
@@ -146,15 +276,21 @@ export default function EditAnswerKeyScreen() {
       const answerKeyRef = doc(db, "answerKeys", answerKeyId);
       await setDoc(answerKeyRef, answerKeyData, { merge: true });
 
-      Alert.alert("Success", "Answer key saved successfully!", [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]);
+      setStatusModal({
+        visible: true,
+        type: "success",
+        title: "Success",
+        message: "Answer key saved successfully!",
+        onClose: goToQuizzes,
+      });
     } catch (error) {
       console.error("Error saving answer key:", error);
-      Alert.alert("Error", "Failed to save answer key");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to save answer key",
+      });
     } finally {
       setSaving(false);
     }
@@ -206,10 +342,7 @@ export default function EditAnswerKeyScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
+          <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Edit Answer Key</Text>
@@ -227,14 +360,17 @@ export default function EditAnswerKeyScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit Answer Key</Text>
-        <View style={styles.placeholder} />
+        {isOffline ? (
+          <View style={styles.offlineBadge}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+          </View>
+        ) : (
+          <View style={styles.placeholder} />
+        )}
       </View>
 
       {/* Questions List */}
@@ -267,6 +403,41 @@ export default function EditAnswerKeyScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <ConfirmationModal
+        visible={incompleteConfirmVisible}
+        title="Incomplete Answer Key"
+        message={`${incompleteCount} question(s) don't have answers yet. Save anyway?`}
+        cancelText="Cancel"
+        confirmText="Save Anyway"
+        onCancel={() => {
+          setIncompleteConfirmVisible(false);
+          pendingSaveResolveRef.current?.(false);
+          pendingSaveResolveRef.current = null;
+        }}
+        onConfirm={() => {
+          setIncompleteConfirmVisible(false);
+          pendingSaveResolveRef.current?.(true);
+          pendingSaveResolveRef.current = null;
+        }}
+      />
+
+      <StatusModal
+        visible={statusModal.visible}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() => {
+          const onClose = statusModal.onClose;
+          setStatusModal({
+            visible: false,
+            type: "info",
+            title: "",
+            message: "",
+          });
+          if (onClose) onClose();
+        }}
+      />
     </View>
   );
 }
@@ -281,7 +452,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#3d5a3d",
-    paddingTop: 50,
+    paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },
@@ -295,6 +466,11 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 32,
+  },
+  offlineBadge: {
+    backgroundColor: "#ff9800",
+    borderRadius: 16,
+    padding: 6,
   },
   loadingContainer: {
     flex: 1,
@@ -327,13 +503,15 @@ const styles = StyleSheet.create({
   choicesContainer: {
     flexDirection: "row",
     gap: 8,
+    flexWrap: "wrap",
   },
   choiceButton: {
-    flex: 1,
+    width: 44,
+    height: 44,
     backgroundColor: "#f5f5f5",
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 22,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 2,
     borderColor: "#e0e0e0",
   },

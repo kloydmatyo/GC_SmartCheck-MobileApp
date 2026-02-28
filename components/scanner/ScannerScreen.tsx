@@ -1,22 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import {
-  GradeStorageService,
-  SaveResult,
-} from "../../services/gradeStorageService";
+import { db } from "../../config/firebase";
 import { GradingService } from "../../services/gradingService";
-import { ScanResult } from "../../types/scanning";
-import { GradingResultExtended } from "../../types/student";
+import { StorageService } from "../../services/storageService";
+import { GradingResult, ScanResult } from "../../types/scanning";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
 
@@ -35,77 +33,79 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
     null,
   );
-  const [saveStatus, setSaveStatus] = useState<SaveResult | null>(null);
+  const [scannedImage, setScannedImage] = useState<string | undefined>(
+    undefined,
+  );
 
-  // Exam selector 
-  const handleConfirmExam = async () => {
-    const trimmed = examIdInput.trim();
-    if (!trimmed) {
-      Alert.alert(
-        "Exam ID required",
-        "Please enter a valid Exam ID before scanning.",
-      );
-      return;
-    }
-    setIsValidatingExam(true);
-    const isValid = await GradeStorageService.validateExamId(trimmed);
-    setIsValidatingExam(false);
-    if (!isValid) {
-      Alert.alert(
-        "Invalid Exam",
-        `Exam "${trimmed}" was not found or is not active. Please check the ID and try again.`,
-      );
-      return;
-    }
-    setActiveExamId(trimmed);
-    setCurrentState("camera");
-  };
-
-  // ── Step 3: Scan + grade + store ─────────────────────────────────────────
-  const handleScanComplete = async (scanResult: ScanResult) => {
+  const handleScanComplete = async (
+    scanResult: ScanResult,
+    imageUri: string,
+  ) => {
     try {
-      const answerKey = GradingService.getDefaultAnswerKey();
-      const result = GradingService.gradeAnswers(scanResult, answerKey);
+      const studentId = scanResult.studentId;
 
-      // Attempt to save to Firestore
-      const storageResult = await GradeStorageService.saveGradingResult(
-        result,
-        activeExamId,
-      );
-      setSaveStatus(storageResult);
-
-      // Toast based on save status
-      if (storageResult.status === "saved") {
-        Toast.show({
-          type: "success",
-          text1: "Scan Complete!",
-          text2: `Student ${result.studentId}: ${result.score}/${result.totalPoints} (${result.percentage}%) — Saved`,
-          visibilityTime: 4000,
-        });
-      } else if (storageResult.status === "duplicate") {
-        Toast.show({
-          type: "error",
-          text1: "Already Graded",
-          text2: storageResult.message,
-          visibilityTime: 5000,
-        });
-      } else if (storageResult.status === "pending") {
-        Toast.show({
-          type: "info",
-          text1: "Saved Offline",
-          text2: "No internet — result queued and will sync automatically.",
-          visibilityTime: 5000,
-        });
-      } else {
-        Toast.show({
-          type: "error",
-          text1: "Save Failed",
-          text2: storageResult.message,
-          visibilityTime: 5000,
-        });
+      // Ensure that a valid student ID was parsed
+      if (!studentId || studentId === "0000000" || studentId === "Unknown") {
+        Alert.alert(
+          "Invalid ID",
+          "Could not detect a valid student ID from the scanned sheet.",
+        );
+        return;
       }
 
-      setGradingResult(result);
+      // Verify the student account with Firestore
+      console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+      const studentsRef = collection(db, "students");
+      const q = query(studentsRef, where("studentId", "==", studentId));
+
+      const startTime = Date.now();
+      const querySnapshot = await getDocs(q);
+      const duration = Date.now() - startTime;
+
+      const isValidId = !querySnapshot.empty;
+      console.log(
+        `[Firestore] Verification complete for ${studentId}: ${isValidId ? "MATCH FOUND" : "NO MATCH"} (${duration}ms)`,
+      );
+
+      if (!isValidId) {
+        console.warn(
+          `[Firestore] Student ID ${studentId} not found in 'students' collection.`,
+        );
+        Alert.alert(
+          "Unrecognized ID",
+          `Student ID ${studentId} is not a valid or registered account, but it was still scored.`,
+        );
+      } else {
+        const studentData = querySnapshot.docs[0].data();
+        console.log(`[Firestore] Student data:`, studentData);
+      }
+
+      // Get answer key (in production, this would come from the exam setup)
+      const rawCount = scanResult.answers?.length || 20;
+      const answerKey = GradingService.getDefaultAnswerKey(rawCount);
+
+      // Grade the answers
+      const result = GradingService.gradeAnswers(scanResult, answerKey);
+      result.metadata = { ...result.metadata, isValidId: isValidId } as any;
+
+      console.log(
+        `[ScannerScreen] Scanned student ID: ${result.studentId} (Valid: ${isValidId})`,
+      );
+      console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
+
+      // Store result and image
+      const savedResult = await StorageService.saveScanResult(result, imageUri);
+
+      // Show success toast
+      Toast.show({
+        type: "success",
+        text1: `Sheet Scanned: ${rawCount} Questions`,
+        text2: `Student ${result.studentId || "00000000"}: ${result.score}/${result.totalPoints}`,
+        visibilityTime: 4000,
+      });
+
+      setGradingResult(savedResult);
+      setScannedImage(imageUri);
       setCurrentState("results");
     } catch (error) {
       console.error("Error grading answers:", error);
@@ -115,32 +115,51 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
   // Retry save from results screen
   const handleRetrySave = async () => {
-    if (!gradingResult) return;
-    const storageResult = await GradeStorageService.saveGradingResult(
-      gradingResult,
-      activeExamId,
-    );
-    setSaveStatus(storageResult);
-    Toast.show({
-      type: storageResult.success ? "success" : "error",
-      text1: storageResult.success ? "Saved Successfully" : "Save Failed",
-      text2: storageResult.message,
-      visibilityTime: 4000,
-    });
+    if (!gradingResult || !scannedImage) return;
+    try {
+      await StorageService.saveScanResult(gradingResult, scannedImage);
+      Toast.show({
+        type: "success",
+        text1: "Saved Successfully",
+        text2: "Result has been saved",
+        visibilityTime: 4000,
+      });
+    } catch (error) {
+      Toast.show({
+        type: "error",
+        text1: "Save Failed",
+        text2: "Could not save result",
+        visibilityTime: 4000,
+      });
+    }
+  };
+
+  const handleConfirmExam = async () => {
+    if (!examIdInput.trim()) return;
+
+    setIsValidatingExam(true);
+    try {
+      // Validate exam exists
+      // For now, just accept any exam ID
+      setActiveExamId(examIdInput.trim());
+      setCurrentState("camera");
+    } catch (error) {
+      Alert.alert("Error", "Invalid exam ID");
+    } finally {
+      setIsValidatingExam(false);
+    }
   };
 
   const handleScanAnother = () => {
     setGradingResult(null);
-    setSaveStatus(null);
+    setScannedImage(undefined);
     setCurrentState("camera");
   };
 
   const handleClose = () => {
     setGradingResult(null);
-    setSaveStatus(null);
-    setActiveExamId("");
-    setExamIdInput("");
-    setCurrentState("exam-select");
+    setScannedImage(undefined);
+    setCurrentState("camera");
     onClose();
   };
 
@@ -208,7 +227,8 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       {currentState === "results" && gradingResult && (
         <ScanResults
           result={gradingResult}
-          saveStatus={saveStatus}
+          imageUri={scannedImage}
+          questionCount={gradingResult.totalQuestions}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
           onRetrySave={handleRetrySave}

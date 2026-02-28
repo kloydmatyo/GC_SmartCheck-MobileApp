@@ -121,6 +121,7 @@ export default function TabLayout() {
         name="create-quiz"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
@@ -149,6 +150,12 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="sync"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="edit-exam"
         options={{
           href: null,
         }}

@@ -1,3 +1,6 @@
+import StatusManager from "@/components/exam/StatusManager";
+import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -19,14 +22,18 @@ export default function ExamPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
+  const refreshKey = params.refresh as string; // Add refresh trigger
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
 
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     loadExamData();
-  }, [examId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [examId, refreshKey]); // Reload when refreshKey changes
 
   const loadExamData = async () => {
     try {
@@ -36,6 +43,61 @@ export default function ExamPreviewScreen() {
       const currentUser = auth.currentUser;
       if (!currentUser) {
         setError("You must be logged in to view exams.");
+        return;
+      }
+
+      // Check if we're online
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
+
+      // Try to load from offline storage first
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+
+      if (offlineExam) {
+        // We have offline data - use it
+        const examData: ExamPreviewData = {
+          metadata: {
+            examCode: examId,
+            title: offlineExam.title,
+            subject: "",
+            section: "",
+            date: offlineExam.createdAt,
+            status: "Active",
+            version: offlineExam.version,
+            createdAt: offlineExam.createdAt,
+          },
+          totalQuestions: offlineExam.questions?.length || 0,
+          choiceFormat: "A-D",
+          answerKey: {
+            answers: offlineExam.answerKey?.answers || [],
+            locked: true,
+          },
+          templateLayout: null,
+          lastModified: offlineExam.updatedAt,
+        };
+
+        setExam(examData);
+
+        // If online, try to sync in background
+        if (online) {
+          try {
+            const freshData = await ExamService.getExamById(examId);
+            if (freshData) {
+              setExam(freshData);
+            }
+          } catch (err) {
+            console.log("Could not fetch fresh data, using offline version");
+          }
+        }
+
+        return;
+      }
+
+      // No offline data - must fetch from Firebase
+      if (!online) {
+        setError(
+          "This exam is not available offline. Please connect to the internet.",
+        );
         return;
       }
 
@@ -93,17 +155,42 @@ export default function ExamPreviewScreen() {
       grid.push(row);
     }
 
+    // Check if there are any answers
+    const hasAnswers = exam.answerKey.answers.some(
+      (answer) => answer && answer.trim() !== "",
+    );
+
+    if (!hasAnswers) {
+      return (
+        <View style={styles.noAnswersContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
+          <Text style={styles.noAnswersText}>No answers set yet</Text>
+          <Text style={styles.noAnswersSubtext}>
+            Click "Edit Answer Key" below to set the correct answers
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.answerKeyGrid}>
         {grid.map((row, rowIndex) => (
           <View key={rowIndex} style={styles.answerKeyRow}>
             {row.map((questionNum) => {
-              const answer = exam.answerKey.answers[questionNum - 1];
+              const answer = exam.answerKey.answers[questionNum - 1] || "";
+              const hasAnswer = answer && answer.trim() !== "";
               return (
                 <View key={questionNum} style={styles.answerKeyItem}>
                   <Text style={styles.questionNumber}>{questionNum}.</Text>
-                  <View style={styles.answerBubble}>
-                    <Text style={styles.answerText}>{answer}</Text>
+                  <View
+                    style={[
+                      styles.answerBubble,
+                      !hasAnswer && styles.answerBubbleEmpty,
+                    ]}
+                  >
+                    <Text style={styles.answerText}>
+                      {hasAnswer ? answer : "?"}
+                    </Text>
                   </View>
                 </View>
               );
@@ -131,10 +218,7 @@ export default function ExamPreviewScreen() {
         <TouchableOpacity style={styles.retryButton} onPress={loadExamData}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -145,11 +229,16 @@ export default function ExamPreviewScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
+        <TouchableOpacity style={styles.backIcon} onPress={goToQuizzes}>
+          <Ionicons name="arrow-back" size={24} color="#eef7f0" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Exam Preview</Text>
-        <View style={styles.placeholder} />
+        {isOffline && (
+          <View style={styles.offlineBadge}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+          </View>
+        )}
+        {!isOffline && <View style={styles.placeholder} />}
       </View>
 
       <ScrollView
@@ -174,7 +263,7 @@ export default function ExamPreviewScreen() {
           <Text style={styles.sectionTitle}>Exam Information</Text>
 
           <View style={styles.infoRow}>
-            <Ionicons name="document-text-outline" size={20} color="#666" />
+            <Ionicons name="document-text-outline" size={20} color="#3d5a3d" />
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Title</Text>
               <Text style={styles.infoValue}>{exam.metadata.title}</Text>
@@ -183,7 +272,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.subject && (
             <View style={styles.infoRow}>
-              <Ionicons name="book-outline" size={20} color="#666" />
+              <Ionicons name="book-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Subject</Text>
                 <Text style={styles.infoValue}>{exam.metadata.subject}</Text>
@@ -193,7 +282,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.section && (
             <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={20} color="#666" />
+              <Ionicons name="people-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Section</Text>
                 <Text style={styles.infoValue}>{exam.metadata.section}</Text>
@@ -203,7 +292,7 @@ export default function ExamPreviewScreen() {
 
           {exam.metadata.date && (
             <View style={styles.infoRow}>
-              <Ionicons name="calendar-outline" size={20} color="#666" />
+              <Ionicons name="calendar-outline" size={20} color="#3d5a3d" />
               <View style={styles.infoContent}>
                 <Text style={styles.infoLabel}>Date</Text>
                 <Text style={styles.infoValue}>
@@ -214,7 +303,7 @@ export default function ExamPreviewScreen() {
           )}
 
           <View style={styles.infoRow}>
-            <Ionicons name="code-outline" size={20} color="#666" />
+            <Ionicons name="code-outline" size={20} color="#3d5a3d" />
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Exam Code</Text>
               <View style={styles.codeContainer}>
@@ -224,7 +313,7 @@ export default function ExamPreviewScreen() {
                     copyToClipboard(exam.metadata.examCode, "Exam code")
                   }
                 >
-                  <Ionicons name="copy-outline" size={18} color="#00a550" />
+                  <Ionicons name="copy-outline" size={18} color="#2d7a5f" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -263,7 +352,7 @@ export default function ExamPreviewScreen() {
                 </View>
               </View>
               <View style={styles.templateInfo}>
-                <Ionicons name="grid-outline" size={16} color="#666" />
+                <Ionicons name="grid-outline" size={16} color="#4f6b5a" />
                 <Text style={styles.templateText}>
                   Template: {exam.templateLayout.name}
                 </Text>
@@ -286,6 +375,13 @@ export default function ExamPreviewScreen() {
           <Text style={styles.sectionSubtitle}>Read-only view</Text>
           {renderAnswerKeyGrid()}
         </View>
+
+        {/* Status Management Section */}
+        <StatusManager
+          examId={examId}
+          currentStatus={exam.metadata.status}
+          onStatusChanged={loadExamData}
+        />
 
         {/* Version Information */}
         <View style={styles.section}>
@@ -314,6 +410,15 @@ export default function ExamPreviewScreen() {
 
       {/* Action Buttons */}
       <View style={styles.actionButtons}>
+        {exam.metadata.status === "Draft" && (
+          <TouchableOpacity
+            style={styles.editExamButton}
+            onPress={() => router.push(`/(tabs)/edit-exam?examId=${examId}`)}
+          >
+            <Ionicons name="pencil-outline" size={20} color="#fff" />
+            <Text style={styles.editExamButtonText}>Edit Exam</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.editButton}
           onPress={() =>
@@ -342,13 +447,13 @@ export default function ExamPreviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#edf3ee",
   },
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#edf3ee",
     padding: 20,
   },
   header: {
@@ -356,11 +461,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    paddingTop: 60,
+    paddingTop: 56,
     paddingBottom: 16,
-    backgroundColor: "#fff",
+    backgroundColor: "#3d5a3d",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#2f4a38",
   },
   backIcon: {
     padding: 4,
@@ -368,10 +473,15 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#eef7f0",
   },
   placeholder: {
     width: 32,
+  },
+  offlineBadge: {
+    backgroundColor: "#ff9800",
+    borderRadius: 16,
+    padding: 6,
   },
   scrollView: {
     flex: 1,
@@ -393,12 +503,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   section: {
-    backgroundColor: "#fff",
+    backgroundColor: "#f3f7f4",
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "#cad9cf",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -409,12 +519,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#2b4337",
     marginBottom: 12,
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: "#999",
+    color: "#5f7668",
     marginBottom: 12,
     fontStyle: "italic",
   },
@@ -443,12 +553,12 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 12,
-    color: "#999",
+    color: "#607a69",
     marginBottom: 4,
   },
   infoValue: {
     fontSize: 16,
-    color: "#333",
+    color: "#2d4639",
     fontWeight: "500",
   },
   codeContainer: {
@@ -458,7 +568,7 @@ const styles = StyleSheet.create({
   },
   examCode: {
     fontSize: 20,
-    color: "#00a550",
+    color: "#2d7a5f",
     fontWeight: "bold",
     fontFamily: "monospace",
   },
@@ -469,19 +579,19 @@ const styles = StyleSheet.create({
   },
   configItem: {
     flex: 1,
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "#e6efe8",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
   },
   configLabel: {
     fontSize: 12,
-    color: "#666",
+    color: "#527060",
     marginBottom: 4,
   },
   configValue: {
     fontSize: 18,
-    color: "#333",
+    color: "#234033",
     fontWeight: "bold",
   },
   templateInfo: {
@@ -490,11 +600,11 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "#cad9cf",
   },
   templateText: {
     fontSize: 13,
-    color: "#666",
+    color: "#4f6b5a",
   },
   answerKeyGrid: {
     gap: 8,
@@ -507,14 +617,14 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "#e6efe8",
     padding: 10,
     borderRadius: 8,
     gap: 8,
   },
   questionNumber: {
     fontSize: 14,
-    color: "#666",
+    color: "#4f6b5a",
     fontWeight: "600",
     minWidth: 24,
   },
@@ -522,14 +632,37 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#00a550",
+    backgroundColor: "#2d7a5f",
     justifyContent: "center",
     alignItems: "center",
+  },
+  answerBubbleEmpty: {
+    backgroundColor: "#ccc",
   },
   answerText: {
     fontSize: 16,
     color: "#fff",
     fontWeight: "bold",
+  },
+  noAnswersContainer: {
+    alignItems: "center",
+    padding: 32,
+    backgroundColor: "#fff3cd",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ffc107",
+  },
+  noAnswersText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#856404",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  noAnswersSubtext: {
+    fontSize: 14,
+    color: "#856404",
+    textAlign: "center",
   },
   versionInfo: {
     gap: 8,
@@ -540,21 +673,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    borderBottomColor: "#d7e4db",
   },
   versionLabel: {
     fontSize: 14,
-    color: "#666",
+    color: "#4f6b5a",
   },
   versionValue: {
     fontSize: 14,
-    color: "#333",
+    color: "#2b4337",
     fontWeight: "500",
   },
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: "#666",
+    color: "#4f6b5a",
   },
   errorText: {
     marginTop: 12,
@@ -564,7 +697,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: "#00a550",
+    backgroundColor: "#2d7a5f",
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
@@ -580,19 +713,37 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   backButtonText: {
-    color: "#666",
+    color: "#3d5a3d",
     fontSize: 16,
   },
   actionButtons: {
     flexDirection: "row",
     padding: 16,
     gap: 12,
-    backgroundColor: "#fff",
+    backgroundColor: "#e5efe8",
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "#cad9cf",
+    flexWrap: "wrap",
+  },
+  editExamButton: {
+    flex: 1,
+    minWidth: "45%",
+    backgroundColor: "#ff9800",
+    borderRadius: 8,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  editExamButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
   },
   editButton: {
     flex: 1,
+    minWidth: "45%",
     backgroundColor: "#2d7a5f",
     borderRadius: 8,
     padding: 14,
@@ -608,7 +759,8 @@ const styles = StyleSheet.create({
   },
   printButton: {
     flex: 1,
-    backgroundColor: "#00a550",
+    minWidth: "45%",
+    backgroundColor: "#2f6d58",
     borderRadius: 8,
     padding: 14,
     flexDirection: "row",

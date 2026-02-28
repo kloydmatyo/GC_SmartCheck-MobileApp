@@ -1,6 +1,9 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
+import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
     addDoc,
     collection,
@@ -8,10 +11,9 @@ import {
     serverTimestamp,
     setDoc,
 } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -24,6 +26,7 @@ import {
 
 export default function CreateQuizScreen() {
   const router = useRouter();
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const [loading, setLoading] = useState(false);
 
   // Form state
@@ -32,17 +35,54 @@ export default function CreateQuizScreen() {
   const [subject, setSubject] = useState("");
   const [examType, setExamType] = useState("Diagnostic Test");
   const [choicesPerItem, setChoicesPerItem] = useState(4);
+  const [postSaveConfirmVisible, setPostSaveConfirmVisible] = useState(false);
+  const [createdExamId, setCreatedExamId] = useState("");
+  const [statusModal, setStatusModal] = useState<{
+    visible: boolean;
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    type: "info",
+    title: "",
+    message: "",
+  });
+
+  // Reset form when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Reset all form fields to initial state
+      setQuizName("");
+      setNumQuestions("");
+      setSubject("");
+      setExamType("Diagnostic Test");
+      setChoicesPerItem(4);
+      setCreatedExamId("");
+      setLoading(false);
+    }, []),
+  );
 
   const handleSave = async () => {
     // Validation
     if (!quizName.trim()) {
-      Alert.alert("Error", "Please enter a quiz name");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please enter a quiz name",
+      });
       return;
     }
 
     const questionsCount = parseInt(numQuestions);
     if (!numQuestions || isNaN(questionsCount) || questionsCount <= 0) {
-      Alert.alert("Error", "Please enter a valid number of questions");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please enter a valid number of questions",
+      });
       return;
     }
 
@@ -56,31 +96,63 @@ export default function CreateQuizScreen() {
       console.log("User email:", currentUser?.email);
 
       if (!currentUser) {
-        Alert.alert("Error", "You must be logged in to create a quiz");
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Error",
+          message: "You must be logged in to create a quiz",
+        });
         return;
       }
 
+      // Get user's instructor ID
+      const userProfile = await UserService.getUserProfile();
+      const instructorId = userProfile?.instructorId || "INSTRUCTOR-000";
+
+      console.log("User profile:", userProfile);
+      console.log("Instructor ID:", instructorId);
+
       const currentDate = new Date().toISOString().split("T")[0];
+
+      // Generate exam code from quiz name and date
+      const generateExamCode = (title: string, date: string): string => {
+        // Extract initials from title (e.g., "Midterm Exam" -> "ME")
+        const words = title.trim().split(/\s+/);
+        const initials = words
+          .slice(0, 3) // Take first 3 words max
+          .map((word) => word.charAt(0).toUpperCase())
+          .join("");
+
+        // Format: INITIALS-YYYYMMDD-XXX (e.g., ME-20260227-A1B)
+        const dateCode = date.replace(/-/g, "");
+        const randomSuffix = Math.random()
+          .toString(36)
+          .substring(2, 5)
+          .toUpperCase();
+
+        return `${initials}-${dateCode}-${randomSuffix}`;
+      };
+
+      const examCode = generateExamCode(quizName.trim(), currentDate);
 
       // Create exam document
       const examData = {
         title: quizName.trim(),
-        subject: subject.trim() || "N/A",
+        subject: subject.trim() || "General",
         examType: examType,
         num_items: questionsCount,
         choices_per_item: choicesPerItem,
-        status: "draft",
+        status: "Draft", // Changed from "draft" to "Draft"
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         created_at: currentDate,
-        approvedAt: null,
-        approvedBy: null,
+        // Add missing fields from Firebase structure
         classId: null,
-        className: "N/A",
-        examCode: null,
-        logoUrl: null,
-        student_id_length: 6,
+        className: null,
+        instructorId: instructorId, // Use actual instructor ID from user profile
+        examCode: examCode, // Generated exam code
+        version: 1,
         answer_keys: [],
         generated_sheets: [],
         choicePoints: {},
@@ -119,43 +191,37 @@ export default function CreateQuizScreen() {
       console.log("Answer key created successfully");
       console.log("=== Quiz Creation Complete ===");
 
-      Alert.alert(
-        "Success",
-        "Quiz created successfully! Would you like to edit the answer key now?",
-        [
-          {
-            text: "Later",
-            style: "cancel",
-            onPress: () => router.back(),
-          },
-          {
-            text: "Edit Answer Key",
-            onPress: () => {
-              router.replace(`/(tabs)/edit-answer-key?examId=${examRef.id}`);
-            },
-          },
-        ],
-      );
+      setCreatedExamId(examRef.id);
+      setPostSaveConfirmVisible(true);
     } catch (error) {
       console.error("Error creating quiz:", error);
-      Alert.alert("Error", "Failed to create quiz. Please try again.");
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to create quiz. Please try again.",
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleEditAnswerKey = () => {
-    Alert.alert(
-      "Save First",
-      "Please save the quiz first before editing the answer key",
-    );
+    setStatusModal({
+      visible: true,
+      type: "info",
+      title: "Save First",
+      message: "Please save the quiz first before editing the answer key",
+    });
   };
 
   const handleScanAnswerKey = () => {
-    Alert.alert(
-      "Save First",
-      "Please save the quiz first before scanning the answer key",
-    );
+    setStatusModal({
+      visible: true,
+      type: "info",
+      title: "Save First",
+      message: "Please save the quiz first before scanning the answer key",
+    });
   };
 
   return (
@@ -165,10 +231,7 @@ export default function CreateQuizScreen() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Create New Quiz</Text>
@@ -316,6 +379,40 @@ export default function CreateQuizScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <ConfirmationModal
+        visible={postSaveConfirmVisible}
+        title="Quiz Created"
+        message="Quiz created successfully. Would you like to edit the answer key now?"
+        cancelText="Later"
+        confirmText="Edit Answer Key"
+        onCancel={() => {
+          setPostSaveConfirmVisible(false);
+          setCreatedExamId("");
+          goToQuizzes();
+        }}
+        onConfirm={() => {
+          if (!createdExamId) return;
+          setPostSaveConfirmVisible(false);
+          router.replace(`/(tabs)/edit-answer-key?examId=${createdExamId}`);
+          setCreatedExamId("");
+        }}
+      />
+
+      <StatusModal
+        visible={statusModal.visible}
+        type={statusModal.type}
+        title={statusModal.title}
+        message={statusModal.message}
+        onClose={() =>
+          setStatusModal({
+            visible: false,
+            type: "info",
+            title: "",
+            message: "",
+          })
+        }
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -330,7 +427,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     backgroundColor: "#3d5a3d",
-    paddingTop: 50,
+    paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },
