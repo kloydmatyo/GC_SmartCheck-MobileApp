@@ -1,8 +1,13 @@
+import { db } from "@/config/firebase";
+import { addDoc, collection } from "firebase/firestore";
 import { AnswerKey, GradingResult, ScanResult } from "../types/scanning";
-import { GradingResultExtended, GradeStatus, ValidationResult, ValidationStatus } from "../types/student";
+import {
+  GradeStatus,
+  GradingResultExtended,
+  ValidationResult,
+  ValidationStatus,
+} from "../types/student";
 import { StudentValidationService } from "./studentValidationService";
-import { auth, db } from "@/config/firebase";
-import { collection, addDoc } from "firebase/firestore";
 
 export class GradingService {
   /**
@@ -11,19 +16,23 @@ export class GradingService {
   static async gradeWithValidation(
     scanResult: ScanResult,
     answerKey: AnswerKey[],
-    sectionId?: string
+    sectionId?: string,
   ): Promise<GradingResultExtended> {
     const timestamp = new Date().toISOString();
 
     // REQ 9: Validate student ID before grading
     const validationResult = await StudentValidationService.validateStudentId(
       scanResult.studentId,
-      sectionId
+      sectionId,
     );
 
     // REQ 13, 14, 15: Handle NULL grade assignment based on validation status
     if (!validationResult.isValid) {
-      return await this.createNullGradeResult(scanResult, validationResult, timestamp);
+      return await this.createNullGradeResult(
+        scanResult,
+        validationResult,
+        timestamp,
+      );
     }
 
     // Student is valid - proceed with grading
@@ -34,10 +43,10 @@ export class GradingService {
       score: gradingResult.score,
       totalPoints: gradingResult.totalPoints,
       percentage: gradingResult.percentage,
-      gradeStatus: 'GRADED',
+      gradeStatus: "GRADED",
       validationStatus: validationResult.status,
       gradedAt: timestamp,
-      reviewRequired: false
+      reviewRequired: false,
     };
   }
 
@@ -47,35 +56,39 @@ export class GradingService {
   private static async createNullGradeResult(
     scanResult: ScanResult,
     validationResult: ValidationResult,
-    timestamp: string
-  ): GradingResultExtended {
+    timestamp: string,
+  ): Promise<GradingResultExtended> {
     // REQ 14: Map validation status to grade status with status flag
     const gradeStatusMap: Record<ValidationStatus, GradeStatus> = {
-      'INVALID_ID': 'NULL_INVALID_ID',
-      'INACTIVE_STUDENT': 'NULL_INACTIVE',
-      'NOT_IN_SECTION': 'NULL_NOT_IN_SECTION',
-      'INVALID_FORMAT': 'NULL_INVALID_ID',
-      'VALIDATION_ERROR': 'PENDING',
-      'VALID': 'GRADED',
-      'OFFLINE_CACHED': 'GRADED'
+      INVALID_ID: "NULL_INVALID_ID",
+      INACTIVE_STUDENT: "NULL_INACTIVE",
+      NOT_IN_SECTION: "NULL_NOT_IN_SECTION",
+      INVALID_FORMAT: "NULL_INVALID_ID",
+      VALIDATION_ERROR: "PENDING",
+      VALID: "GRADED",
+      OFFLINE_CACHED: "GRADED",
     };
 
     // REQ 19: Backend reason code mapping
     const reasonCodes: Record<ValidationStatus, string> = {
-      'INVALID_ID': 'ERR_STUDENT_NOT_FOUND',
-      'INACTIVE_STUDENT': 'ERR_STUDENT_INACTIVE',
-      'NOT_IN_SECTION': 'ERR_STUDENT_WRONG_SECTION',
-      'INVALID_FORMAT': 'ERR_INVALID_ID_FORMAT',
-      'VALIDATION_ERROR': 'ERR_VALIDATION_FAILED',
-      'VALID': 'OK',
-      'OFFLINE_CACHED': 'OK_OFFLINE'
+      INVALID_ID: "ERR_STUDENT_NOT_FOUND",
+      INACTIVE_STUDENT: "ERR_STUDENT_INACTIVE",
+      NOT_IN_SECTION: "ERR_STUDENT_WRONG_SECTION",
+      INVALID_FORMAT: "ERR_INVALID_ID_FORMAT",
+      VALIDATION_ERROR: "ERR_VALIDATION_FAILED",
+      VALID: "OK",
+      OFFLINE_CACHED: "OK_OFFLINE",
     };
 
     const gradeStatus = gradeStatusMap[validationResult.status];
     const reasonCode = reasonCodes[validationResult.status];
 
     // REQ 16: Log invalid grading attempt
-    await this.logInvalidGradingAttempt(scanResult.studentId, validationResult, timestamp);
+    await this.logInvalidGradingAttempt(
+      scanResult.studentId,
+      validationResult,
+      timestamp,
+    );
 
     // REQ 15, 21: Create NULL grade with review required flag
     return {
@@ -87,7 +100,7 @@ export class GradingService {
       validationStatus: validationResult.status,
       reasonCode,
       gradedAt: timestamp,
-      reviewRequired: true // REQ 21: Flag for review screen
+      reviewRequired: true, // REQ 21: Flag for review screen
     };
   }
 
@@ -97,21 +110,21 @@ export class GradingService {
   private static async logInvalidGradingAttempt(
     studentId: string,
     validationResult: ValidationResult,
-    timestamp: string
+    timestamp: string,
   ): Promise<void> {
     const logEntry = {
       studentId,
       validationStatus: validationResult.status,
       message: validationResult.message,
       timestamp,
-      action: 'grading_prevented',
-      source: validationResult.source
+      action: "grading_prevented",
+      source: validationResult.source,
     };
 
-    console.log('[INVALID_GRADING_ATTEMPT]', logEntry);
-    
+    console.log("[INVALID_GRADING_ATTEMPT]", logEntry);
+
     // REQ 16: Persist to Firestore backend logging
-    await addDoc(collection(db, 'invalid_grading_logs'), logEntry);
+    await addDoc(collection(db, "invalid_grading_logs"), logEntry);
   }
 
   /**
@@ -136,8 +149,7 @@ export class GradingService {
         };
       }
 
-      const isCorrect =
-        studentAnswer.selectedAnswer === key.correctAnswer;
+      const isCorrect = studentAnswer.selectedAnswer === key.correctAnswer;
 
       return {
         questionNumber: key.questionNumber,
@@ -170,6 +182,13 @@ export class GradingService {
   }
 
   /**
+   * REQ: Determine if a score is passing (>= 50%)
+   */
+  static isPassing(percentage: number): boolean {
+    return percentage >= 50;
+  }
+
+  /**
    * Compute letter grade from percentage
    */
   static computeGradeEquivalent(percentage: number): string {
@@ -197,7 +216,9 @@ export class GradingService {
    */
   static calculateStatisticsExtended(results: GradingResultExtended[]) {
     // REQ 17: Filter out NULL grades from statistics
-    const validResults = results.filter(r => r.gradeStatus === 'GRADED' && r.score !== null);
+    const validResults = results.filter(
+      (r) => r.gradeStatus === "GRADED" && r.score !== null,
+    );
 
     if (validResults.length === 0) {
       return {
@@ -207,8 +228,8 @@ export class GradingService {
         lowestScore: 0,
         totalStudents: 0,
         gradedCount: 0,
-        nullGradeCount: results.filter(r => r.score === null).length,
-        pendingReviewCount: results.filter(r => r.reviewRequired).length
+        nullGradeCount: results.filter((r) => r.score === null).length,
+        pendingReviewCount: results.filter((r) => r.reviewRequired).length,
       };
     }
 
@@ -226,8 +247,8 @@ export class GradingService {
       lowestScore: Math.min(...scores),
       totalStudents: results.length,
       gradedCount: validResults.length,
-      nullGradeCount: results.filter(r => r.score === null).length,
-      pendingReviewCount: results.filter(r => r.reviewRequired).length
+      nullGradeCount: results.filter((r) => r.score === null).length,
+      pendingReviewCount: results.filter((r) => r.reviewRequired).length,
     };
   }
 
@@ -274,19 +295,19 @@ export class GradingService {
       "Validation Status",
       "Reason Code",
       "Graded At",
-      "Review Required"
+      "Review Required",
     ];
-    
+
     const rows = results.map((result) => [
       result.studentId,
-      result.score !== null ? result.score.toString() : 'NULL',
+      result.score !== null ? result.score.toString() : "NULL",
       result.totalPoints.toString(),
-      result.percentage !== null ? `${result.percentage}%` : 'NULL',
+      result.percentage !== null ? `${result.percentage}%` : "NULL",
       result.gradeStatus,
       result.validationStatus,
-      result.reasonCode || '',
+      result.reasonCode || "",
       result.gradedAt,
-      result.reviewRequired ? 'YES' : 'NO'
+      result.reviewRequired ? "YES" : "NO",
     ]);
 
     return [headers, ...rows].map((row) => row.join(",")).join("\n");
@@ -319,8 +340,10 @@ export class GradingService {
   /**
    * REQ 21: Get results that require review
    */
-  static getResultsRequiringReview(results: GradingResultExtended[]): GradingResultExtended[] {
-    return results.filter(r => r.reviewRequired);
+  static getResultsRequiringReview(
+    results: GradingResultExtended[],
+  ): GradingResultExtended[] {
+    return results.filter((r) => r.reviewRequired);
   }
 
   /**
@@ -331,18 +354,18 @@ export class GradingService {
     byReason: Record<string, number>;
     requiresReview: GradingResultExtended[];
   } {
-    const invalidResults = results.filter(r => r.score === null);
+    const invalidResults = results.filter((r) => r.score === null);
 
     const byReason: Record<string, number> = {};
-    invalidResults.forEach(r => {
-      const reason = r.reasonCode || 'UNKNOWN';
+    invalidResults.forEach((r) => {
+      const reason = r.reasonCode || "UNKNOWN";
       byReason[reason] = (byReason[reason] || 0) + 1;
     });
 
     return {
       totalInvalid: invalidResults.length,
       byReason,
-      requiresReview: this.getResultsRequiringReview(results)
+      requiresReview: this.getResultsRequiringReview(results),
     };
   }
 }
