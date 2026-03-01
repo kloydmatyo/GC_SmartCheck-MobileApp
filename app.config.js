@@ -1,4 +1,15 @@
-require("dotenv").config({ path: ".env.local" });
+const dotenv = require("dotenv");
+const path = require("path");
+
+// Load .env.local with absolute path
+const result = dotenv.config({ path: path.resolve(__dirname, ".env.local") });
+
+// Debug: log if env loading failed
+if (result.error) {
+  console.error("Error loading .env.local:", result.error);
+} else {
+  console.log("Successfully loaded .env.local");
+}
 
 module.exports = {
   expo: {
