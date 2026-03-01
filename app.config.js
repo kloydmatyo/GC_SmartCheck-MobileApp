@@ -39,7 +39,7 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      package: "com.anonymous.GC-SmartCheckMobileApp",
+      package: "com.anonymous.gcsmartcheckmobileapp",
     },
     web: {
       output: "static",
