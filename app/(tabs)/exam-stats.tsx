@@ -1,10 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { QueryDocumentSnapshot } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  LayoutChangeEvent,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,13 +10,10 @@ import {
   View,
 } from "react-native";
 
-import GradeBarChart from "@/components/ui/GradeBarChart";
-import PassFailDonut from "@/components/ui/PassFailDonut";
 import {
   DashboardDateFilter,
   DashboardService,
   ExamDashboardStats,
-  ScanResultRow,
 } from "@/services/dashboardService";
 
 // ── Skeleton placeholder block ────────────────────────────────────────────
@@ -93,43 +87,8 @@ function StatsSkeleton() {
           </View>
         ))}
       </View>
-      {/* Donut skeleton */}
-      <View style={styles.donutBox}>
-        <SkeletonBox
-          width={120}
-          height={120}
-          style={{ borderRadius: 60, alignSelf: "center" }}
-        />
-        <SkeletonBox
-          width={100}
-          height={10}
-          style={{ marginTop: 10, alignSelf: "center" }}
-        />
-        <SkeletonBox
-          width={80}
-          height={10}
-          style={{ marginTop: 6, alignSelf: "center" }}
-        />
-      </View>
     </ScrollView>
   );
-}
-
-// ── Grade colour helper ──────────────────────────────────────────────────
-function gradeColor(grade: string): string {
-  switch (grade) {
-    case "A":
-      return "#00a550";
-    case "B":
-      return "#4a90e2";
-    case "C":
-      return "#f0a500";
-    case "D":
-      return "#e07030";
-    case "F":
-    default:
-      return "#e74c3c";
-  }
 }
 
 // ── Date-filter chip options ─────────────────────────────────────────────
@@ -153,72 +112,7 @@ export default function ExamStatsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DashboardDateFilter>("all");
   const [sortByCount, setSortByCount] = useState(false);
-  const [chartType, setChartType] = useState<"bar" | "donut">("bar");
-  const [chartWidth, setChartWidth] = useState(320);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-
-  // ── Paginated scan results state ─────────────────────────────────────────
-  const [scanResults, setScanResults] = useState<ScanResultRow[]>([]);
-  const [lastDocSnapshot, setLastDocSnapshot] =
-    useState<QueryDocumentSnapshot | null>(null);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  const onChartLayout = useCallback((e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0) setChartWidth(w);
-  }, []);
-
-  // ── Derive a Date lower-bound from the active filter ───────────────────────
-  const getDateFrom = useCallback((): Date | undefined => {
-    if (dateFilter === "today") {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      return d;
-    }
-    if (dateFilter === "week") {
-      const d = new Date();
-      d.setDate(d.getDate() - 7);
-      return d;
-    }
-    return undefined;
-  }, [dateFilter]);
-
-  // ── Paginated scan results loader ───────────────────────────────────────
-  const loadInitialResults = useCallback(async () => {
-    if (!examId) return;
-    try {
-      const paged = await DashboardService.getPagedResults(
-        examId as string,
-        null,
-        getDateFrom(),
-      );
-      setScanResults(paged.items);
-      setLastDocSnapshot(paged.lastDoc);
-      setHasMore(paged.hasMore);
-    } catch {
-      // non-blocking
-    }
-  }, [examId, getDateFrom]);
-
-  const loadMore = useCallback(async () => {
-    if (!hasMore || loadingMore || !examId) return;
-    setLoadingMore(true);
-    try {
-      const paged = await DashboardService.getPagedResults(
-        examId as string,
-        lastDocSnapshot,
-        getDateFrom(),
-      );
-      setScanResults((prev) => [...prev, ...paged.items]);
-      setLastDocSnapshot(paged.lastDoc);
-      setHasMore(paged.hasMore);
-    } catch {
-      // non-blocking
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [examId, getDateFrom, hasMore, loadingMore, lastDocSnapshot]);
 
   const subscribe = useCallback(
     (isRefresh = false) => {
@@ -271,28 +165,34 @@ export default function ExamStatsScreen() {
     };
   }, [examId, dateFilter, subscribe]);
 
-  // Reset and reload paginated results whenever exam or date filter changes
-  useEffect(() => {
-    setScanResults([]);
-    setLastDocSnapshot(null);
-    setHasMore(false);
-    setLoadingMore(false);
-    if (!examId) return;
-    loadInitialResults();
-  }, [examId, dateFilter, loadInitialResults]);
-
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    setScanResults([]);
-    setLastDocSnapshot(null);
-    setHasMore(false);
     subscribe(true);
-    loadInitialResults();
-  }, [subscribe, loadInitialResults]);
+  }, [subscribe]);
 
   const title = examTitle
     ? decodeURIComponent(examTitle)
     : (stats?.examTitle ?? "Exam Stats");
+
+  // Grade definitions — may be reordered by sort toggle
+  const BASE_GRADES: {
+    label: string;
+    key: keyof NonNullable<typeof stats>["distribution"];
+    color: string;
+  }[] = [
+    { label: "A  ≥90%", key: "A", color: "#00a550" },
+    { label: "B  80–89%", key: "B", color: "#4a90e2" },
+    { label: "C  70–79%", key: "C", color: "#f5a623" },
+    { label: "D  60–69%", key: "D", color: "#e67e22" },
+    { label: "F  <60%", key: "F", color: "#e74c3c" },
+  ];
+
+  const grades =
+    sortByCount && stats
+      ? [...BASE_GRADES].sort(
+          (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
+        )
+      : BASE_GRADES;
 
   return (
     <View style={styles.container}>
@@ -416,105 +316,65 @@ export default function ExamStatsScreen() {
             </View>
           </View>
 
-          {/* Chart section */}
-          <View style={styles.distBox} onLayout={onChartLayout}>
-            {/* Header row: title + chart-type toggle + sort toggle */}
+          {/* Distribution Chart */}
+          <View style={styles.distBox}>
             <View style={styles.distHeader}>
               <Text style={styles.distTitle}>Score Distribution</Text>
-              <View style={styles.headerControls}>
-                {/* Chart type pills */}
-                <View style={styles.chartTypePills}>
-                  <TouchableOpacity
-                    style={[
-                      styles.chartTypePill,
-                      chartType === "bar" && styles.chartTypePillActive,
-                    ]}
-                    onPress={() => setChartType("bar")}
-                  >
-                    <Ionicons
-                      name="bar-chart"
-                      size={12}
-                      color={chartType === "bar" ? "#fff" : "#555"}
-                    />
-                    <Text
-                      style={[
-                        styles.chartTypePillText,
-                        chartType === "bar" && styles.chartTypePillTextActive,
-                      ]}
-                    >
-                      Bar
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.chartTypePill,
-                      chartType === "donut" && styles.chartTypePillActive,
-                    ]}
-                    onPress={() => setChartType("donut")}
-                  >
-                    <Ionicons
-                      name="pie-chart"
-                      size={12}
-                      color={chartType === "donut" ? "#fff" : "#555"}
-                    />
-                    <Text
-                      style={[
-                        styles.chartTypePillText,
-                        chartType === "donut" && styles.chartTypePillTextActive,
-                      ]}
-                    >
-                      Donut
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Sort toggle (bar chart only) */}
-                {chartType === "bar" && (
-                  <TouchableOpacity
-                    style={[
-                      styles.sortToggle,
-                      sortByCount && styles.sortToggleActive,
-                    ]}
-                    onPress={() => setSortByCount((v) => !v)}
-                  >
-                    <Ionicons
-                      name="swap-vertical"
-                      size={13}
-                      color={sortByCount ? "#fff" : "#555"}
-                    />
-                    <Text
-                      style={[
-                        styles.sortToggleText,
-                        sortByCount && styles.sortToggleTextActive,
-                      ]}
-                    >
-                      {sortByCount ? "Sorted" : "Sort"}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* Bar chart */}
-            {chartType === "bar" && (
-              <GradeBarChart
-                distribution={stats.distribution}
-                total={stats.totalGraded}
-                sortByCount={sortByCount}
-                width={chartWidth - 32}
-              />
-            )}
-
-            {/* Donut chart — pass/fail ratio */}
-            {chartType === "donut" && (
-              <View style={styles.donutInner}>
-                <PassFailDonut
-                  passCount={stats.passCount}
-                  failCount={stats.failCount}
-                  size={140}
+              {/* Sort toggle */}
+              <TouchableOpacity
+                style={[
+                  styles.sortToggle,
+                  sortByCount && styles.sortToggleActive,
+                ]}
+                onPress={() => setSortByCount((v) => !v)}
+              >
+                <Ionicons
+                  name="swap-vertical"
+                  size={13}
+                  color={sortByCount ? "#fff" : "#555"}
                 />
-              </View>
-            )}
+                <Text
+                  style={[
+                    styles.sortToggleText,
+                    sortByCount && styles.sortToggleTextActive,
+                  ]}
+                >
+                  {sortByCount ? "Sorted by count" : "Sort by count"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {(() => {
+              const dist = stats.distribution;
+              const total = stats.totalGraded;
+              const maxCount = Math.max(
+                dist.A,
+                dist.B,
+                dist.C,
+                dist.D,
+                dist.F,
+                1,
+              );
+              return grades.map(({ label, key, color }) => (
+                <View key={key} style={styles.distRow}>
+                  <Text style={styles.distLabel}>{label}</Text>
+                  <View style={styles.distBarBg}>
+                    <View
+                      style={[
+                        styles.distBarFill,
+                        {
+                          width: `${Math.round((dist[key] / maxCount) * 100)}%`,
+                          backgroundColor: color,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.distCount}>
+                    {dist[key]} (
+                    {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                  </Text>
+                </View>
+              ));
+            })()}
           </View>
 
           {/* Last updated */}
@@ -525,67 +385,6 @@ export default function ExamStatsScreen() {
               minute: "2-digit",
             })}
           </Text>
-
-          {/* Individual Scan Results with pagination */}
-          <View style={styles.resultsSection}>
-            <Text style={styles.resultsSectionTitle}>Individual Results</Text>
-            {scanResults.length === 0 ? (
-              <Text style={styles.resultsEmpty}>
-                No individual results available.
-              </Text>
-            ) : (
-              <>
-                {scanResults.map((row, i) => (
-                  <View key={row.docId || String(i)} style={styles.resultItem}>
-                    <View style={styles.resultLeft}>
-                      <Text style={styles.resultStudentId}>
-                        {row.studentId || "—"}
-                      </Text>
-                      <Text style={styles.resultDate}>
-                        {row.dateScanned
-                          ? new Date(row.dateScanned).toLocaleDateString(
-                              "en-US",
-                              { month: "short", day: "numeric" },
-                            )
-                          : "—"}
-                      </Text>
-                    </View>
-                    <View style={styles.resultRight}>
-                      <Text style={styles.resultScore}>
-                        {row.score}/{row.totalPoints}
-                      </Text>
-                      <Text style={styles.resultPct}>{row.percentage}%</Text>
-                      <View
-                        style={[
-                          styles.resultGradeBadge,
-                          {
-                            backgroundColor: gradeColor(row.gradeEquivalent),
-                          },
-                        ]}
-                      >
-                        <Text style={styles.resultGradeText}>
-                          {row.gradeEquivalent}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                ))}
-                {hasMore && (
-                  <TouchableOpacity
-                    style={styles.loadMoreBtn}
-                    onPress={loadMore}
-                    disabled={loadingMore}
-                  >
-                    {loadingMore ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <Text style={styles.loadMoreText}>Load More</Text>
-                    )}
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
 
           <View style={{ height: 32 }} />
         </ScrollView>
@@ -782,63 +581,16 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 10,
   },
-  donutBox: {
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
-    padding: 16,
-    alignItems: "center",
-    gap: 6,
-  },
-  donutInner: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
   distHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 2,
-    flexWrap: "wrap",
-    gap: 6,
   },
   distTitle: {
     fontSize: 15,
     fontWeight: "700",
     color: "#333",
-  },
-  headerControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  chartTypePills: {
-    flexDirection: "row",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#b8b0a0",
-    overflow: "hidden",
-  },
-  chartTypePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    backgroundColor: "#ede8da",
-  },
-  chartTypePillActive: {
-    backgroundColor: "#24362f",
-  },
-  chartTypePillText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#555",
-  },
-  chartTypePillTextActive: {
-    color: "#fff",
   },
   sortToggle: {
     flexDirection: "row",
@@ -895,88 +647,5 @@ const styles = StyleSheet.create({
     color: "#aaa",
     textAlign: "center",
     marginTop: 4,
-  },
-  // ── Individual results & pagination ──────────────────────────────────────────────
-  resultsSection: {
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
-    padding: 16,
-    gap: 8,
-  },
-  resultsSectionTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#333",
-    marginBottom: 4,
-  },
-  resultsEmpty: {
-    fontSize: 13,
-    color: "#aaa",
-    textAlign: "center",
-    paddingVertical: 12,
-  },
-  resultItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: "#e8e0c8",
-  },
-  resultLeft: {
-    flex: 1,
-    gap: 2,
-  },
-  resultStudentId: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#333",
-  },
-  resultDate: {
-    fontSize: 11,
-    color: "#888",
-  },
-  resultRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  resultScore: {
-    fontSize: 12,
-    color: "#555",
-  },
-  resultPct: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#333",
-    minWidth: 40,
-    textAlign: "right",
-  },
-  resultGradeBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  resultGradeText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  loadMoreBtn: {
-    backgroundColor: "#24362f",
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: "center",
-    marginTop: 4,
-  },
-  loadMoreText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
   },
 });
