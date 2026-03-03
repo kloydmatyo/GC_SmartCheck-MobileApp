@@ -5,23 +5,23 @@ import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
-    addDoc,
-    collection,
-    doc,
-    serverTimestamp,
-    setDoc,
+  addDoc,
+  collection,
+  doc,
+  serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 export default function CreateQuizScreen() {
@@ -153,7 +153,7 @@ export default function CreateQuizScreen() {
         instructorId: instructorId, // Use actual instructor ID from user profile
         examCode: examCode, // Generated exam code
         version: 1,
-        answer_keys: [],
+        answerKeys: [],
         generated_sheets: [],
         choicePoints: {},
       };
@@ -174,13 +174,16 @@ export default function CreateQuizScreen() {
         updatedAt: serverTimestamp(),
         locked: false,
         version: 1,
+        // Mobile app format
         questionSettings: Array.from({ length: questionsCount }, (_, i) => ({
           questionNumber: i + 1,
           correctAnswer: "",
           points: 1,
           choiceLabels: {},
         })),
-        // Initialize empty answers
+        // Web app format (for compatibility)
+        answers: Array.from({ length: questionsCount }, () => ""),
+        // Initialize empty answers (legacy format)
         ...Object.fromEntries(
           Array.from({ length: questionsCount }, (_, i) => [i.toString(), ""]),
         ),

@@ -814,92 +814,12 @@ export class ZipgradeScanner {
       //   y ∈ [26%, 33%] of paper height
       //   5 digit columns, 10 rows each (digits 1-9 then 0, top to bottom)
       //
+      // NOTE: Student ID auto-detection is disabled for stability
+      // Users can manually edit the ID after scanning
       let studentId = "00000000";
-
-      if (detectedQ >= 40) {
-        const idBubbles = bubbles.filter(
-          (b) => b.y >= paperH * 0.02 && b.y <= paperH * 0.22,
-        );
-        console.log(`[OMR] ID bubbles: ${idBubbles.length}`);
-
-        if (idBubbles.length >= 10) {
-          // Find 4 largest X gaps → 5 columns
-          const idXs = idBubbles.map((b) => b.x).sort((a, b) => a - b);
-          const idGaps: { pos: number; size: number }[] = [];
-          for (let i = 1; i < idXs.length; i++) {
-            const gap = idXs[i] - idXs[i - 1];
-            if (gap > medianW * 0.5) {
-              idGaps.push({ pos: (idXs[i] + idXs[i - 1]) / 2, size: gap });
-            }
-          }
-          idGaps.sort((a, b) => b.size - a.size);
-          const idColSeps = idGaps
-            .slice(0, 4)
-            .map((g) => g.pos)
-            .sort((a, b) => a - b);
-
-          const idCols: Bubble[][] = [];
-          let idPrev = -Infinity;
-          for (const sep of idColSeps) {
-            idCols.push(idBubbles.filter((b) => b.x > idPrev && b.x <= sep));
-            idPrev = sep;
-          }
-          idCols.push(idBubbles.filter((b) => b.x > idPrev));
-
-          console.log(
-            `[OMR] ID cols: ${idCols.length}, sizes: [${idCols.map((c) => c.length).join(",")}]`,
-          );
-
-          // ZipGrade digit row order: 1,2,3,4,5,6,7,8,9,0
-          const digitLabels = [
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9",
-            "0",
-          ];
-          const idDigits: string[] = [];
-
-          for (const col of idCols) {
-            if (col.length === 0) {
-              idDigits.push("0");
-              continue;
-            }
-            const digitRows = clusterByY(
-              [...col].sort((a, b) => a.y - b.y),
-              medianH * 0.8,
-            );
-            digitRows.sort(
-              (a, b) =>
-                a.reduce((s, b) => s + b.y, 0) / a.length -
-                b.reduce((s, b) => s + b.y, 0) / b.length,
-            );
-            let bestIdx = -1,
-              bestFill = 0.35;
-            digitRows.forEach((row, idx) => {
-              const maxFill = Math.max(...row.map((b) => b.fill));
-              if (maxFill > bestFill) {
-                bestFill = maxFill;
-                bestIdx = idx;
-              }
-            });
-            idDigits.push(
-              bestIdx >= 0 && bestIdx < digitLabels.length
-                ? digitLabels[bestIdx]
-                : "0",
-            );
-          }
-
-          while (idDigits.length < 8) idDigits.unshift("0");
-          studentId = idDigits.slice(-8).join("");
-          console.log(`[OMR] ID: [${idDigits.join(",")}] → "${studentId}"`);
-        }
-      }
+      console.log(
+        `[OMR] Student ID: Using default (manual edit available after scan)`,
+      );
 
       // Ensure numeric
       const numericId = studentId

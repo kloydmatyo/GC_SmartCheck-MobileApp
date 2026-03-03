@@ -17,16 +17,28 @@ export interface ScanResult {
 }
 
 export interface GradingResult {
+  id?: string;
   studentId: string;
   examId: string;
   score: number;
   totalPoints: number;
   percentage: number;
   gradeEquivalent: string; // A, B, C, D, or F
+  letterGrade: string; // Alias for gradeEquivalent
   correctAnswers: number;
   totalQuestions: number;
   dateScanned: string; // ISO 8601 timestamp
+  timestamp: string; // Alias for dateScanned
   status: "saved" | "duplicate" | "pending" | "error";
+  confidence: number; // 0-1 scale
+  answers: {
+    questionNumber: number;
+    studentAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    points: number;
+    selectedAnswer?: string; // Alias for studentAnswer
+  }[];
   details: {
     questionNumber: number;
     studentAnswer: string;
@@ -40,6 +52,10 @@ export interface GradingResult {
     isBlurred?: boolean;
     imageUri?: string;
     isValidId?: boolean;
+    replacedDuplicate?: boolean;
+    previousResultId?: string;
+    duplicateOverride?: boolean;
+    overrideTimestamp?: string;
   };
 }
 

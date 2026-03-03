@@ -2,10 +2,10 @@ import { db } from "@/config/firebase";
 import { addDoc, collection } from "firebase/firestore";
 import { AnswerKey, GradingResult, ScanResult } from "../types/scanning";
 import {
-  GradeStatus,
-  GradingResultExtended,
-  ValidationResult,
-  ValidationStatus,
+    GradeStatus,
+    GradingResultExtended,
+    ValidationResult,
+    ValidationStatus,
 } from "../types/student";
 import { StudentValidationService } from "./studentValidationService";
 
@@ -57,7 +57,7 @@ export class GradingService {
     scanResult: ScanResult,
     validationResult: ValidationResult,
     timestamp: string,
-  ): Promise<GradingResultExtended> {
+  ): GradingResultExtended {
     // REQ 14: Map validation status to grade status with status flag
     const gradeStatusMap: Record<ValidationStatus, GradeStatus> = {
       INVALID_ID: "NULL_INVALID_ID",
@@ -165,6 +165,8 @@ export class GradingService {
     const correctAnswers = details.filter((detail) => detail.isCorrect).length;
     const percentage =
       totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
+    const letterGrade = GradingService.computeGradeEquivalent(percentage);
+    const timestamp = new Date().toISOString();
 
     return {
       studentId: scanResult.studentId,
@@ -172,11 +174,18 @@ export class GradingService {
       score,
       totalPoints,
       percentage,
-      gradeEquivalent: GradingService.computeGradeEquivalent(percentage),
+      gradeEquivalent: letterGrade,
+      letterGrade, // Alias for compatibility
       correctAnswers,
       totalQuestions: scanResult.answers.length,
-      dateScanned: new Date().toISOString(),
+      dateScanned: timestamp,
+      timestamp, // Alias for compatibility
       status: "pending" as const,
+      confidence: scanResult.confidence || 0.95,
+      answers: details.map((d) => ({
+        ...d,
+        selectedAnswer: d.studentAnswer, // Alias for compatibility
+      })),
       details,
     };
   }
@@ -201,8 +210,22 @@ export class GradingService {
 
   /**
    * Get default answer key for testing
+   * Returns a consistent answer key (not random)
    */
   static getDefaultAnswerKey(length: number = 20): AnswerKey[] {
+    // Fixed answer key pattern: A, B, C, D, E, A, B, C, D, E, ...
+    const answers = ["A", "B", "C", "D", "E"];
+    return Array.from({ length }, (_, index) => ({
+      questionNumber: index + 1,
+      correctAnswer: answers[index % answers.length],
+      points: 1,
+    }));
+  }
+
+  /**
+   * Get random answer key for testing (if needed)
+   */
+  static getRandomAnswerKey(length: number = 20): AnswerKey[] {
     const answers = ["A", "B", "C", "D", "E"];
     return Array.from({ length }, (_, index) => ({
       questionNumber: index + 1,

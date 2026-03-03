@@ -78,6 +78,8 @@ export default function CameraScanner({
         20,
         templateName,
       );
+
+      console.log("[CameraScanner] Scan complete, calling onScanComplete");
       onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
@@ -92,7 +94,12 @@ export default function CameraScanner({
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={styles.camera} facing={facing} enableTorch={torch}>
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={facing}
+        enableTorch={torch}
+      >
         {/* Overlay for Zipgrade answer sheet alignment */}
         <View style={styles.overlay}>
           <View style={styles.scanFrame} />
@@ -110,8 +117,15 @@ export default function CameraScanner({
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.controlButton} onPress={() => setTorch(!torch)}>
-            <Ionicons name={torch ? "flash" : "flash-off"} size={24} color="white" />
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={() => setTorch(!torch)}
+          >
+            <Ionicons
+              name={torch ? "flash" : "flash-off"}
+              size={24}
+              color="white"
+            />
           </TouchableOpacity>
 
           <TouchableOpacity

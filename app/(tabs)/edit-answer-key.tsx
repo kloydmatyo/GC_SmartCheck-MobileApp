@@ -8,12 +8,12 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 interface QuestionAnswer {
@@ -23,8 +23,14 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const { examId } = useLocalSearchParams();
+
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
+  const goToExamPreview = () =>
+    router.replace(
+      `/(tabs)/exam-preview?examId=${examId}&refresh=${Date.now()}`,
+    );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
@@ -250,7 +256,7 @@ export default function EditAnswerKeyScreen() {
       }
 
       // Online - save to Firebase
-      // Prepare answer key data
+      // Prepare answer key data (compatible with both mobile and web formats)
       const answerKeyData: any = {
         examId: examId as string,
         id: answerKeyId,
@@ -259,15 +265,18 @@ export default function EditAnswerKeyScreen() {
         updatedAt: serverTimestamp(),
         locked: false,
         version: 1,
+        // Mobile app format
         questionSettings: answers.map((item) => ({
           questionNumber: item.questionNumber,
           correctAnswer: item.answer,
           points: 1,
           choiceLabels: {},
         })),
+        // Web app format (for compatibility)
+        answers: answers.map((item) => item.answer),
       };
 
-      // Add individual answer fields (0, 1, 2, etc.)
+      // Add individual answer fields (0, 1, 2, etc.) for legacy support
       answers.forEach((item, index) => {
         answerKeyData[index.toString()] = item.answer;
       });
