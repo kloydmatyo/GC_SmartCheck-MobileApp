@@ -1,7 +1,6 @@
 import Constants from "expo-constants";
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -20,7 +19,10 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firebase Auth (simplified - no persistence for now)
 export const auth = getAuth(app);
 
-// Initialize Firestore
-export const db = getFirestore(app);
+// Initialize Firestore with memory cache (default for non-browser platforms)
+import { initializeFirestore, memoryLocalCache } from "firebase/firestore";
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache({})
+});
 
 export default app;

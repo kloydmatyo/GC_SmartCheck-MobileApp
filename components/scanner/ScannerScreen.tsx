@@ -154,14 +154,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           );
           // Fallback to default pattern
           answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-            (ak) => ak.answer,
+            (ak) => ak.correctAnswer,
           );
         }
       } catch (error) {
         console.error(`[ScannerScreen] Error fetching answer key:`, error);
         // Fallback to default pattern
         answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.answer,
+          (ak) => ak.correctAnswer,
         );
       }
 
@@ -279,6 +279,16 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
     setIsValidatingExam(true);
     try {
+      const { auth } = await import("../../config/firebase");
+      if (!auth.currentUser) {
+        Alert.alert(
+          "Online Mode Required",
+          "You are currently using a guest/dummy account. Searching for exams requires a real account signed in via Firebase.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
       const inputValue = examIdInput.trim();
       console.log(`[ScannerScreen] Looking up exam: ${inputValue}`);
 
@@ -339,9 +349,24 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
       setActiveExamId(examDocId);
       setCurrentState("camera");
-    } catch (error) {
+    } catch (error: any) {
       console.error("[ScannerScreen] Error validating exam:", error);
-      Alert.alert("Error", "Failed to validate exam ID");
+
+      let title = "Connectivity Error";
+      let message = "Failed to validate exam ID. Please try again.";
+
+      if (error.code === "permission-denied") {
+        title = "Access Denied";
+        message = "You don't have permission to access these exam records. Please ensure you are logged in with the correct account.";
+      } else if (
+        error.code === "unavailable" ||
+        error.message?.includes("offline") ||
+        error.message?.includes("network-error")
+      ) {
+        message = "You appear to be offline. Please check your internet connection.";
+      }
+
+      Alert.alert(title, message);
     } finally {
       setIsValidatingExam(false);
     }
@@ -450,7 +475,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
               style={[
                 styles.confirmButton,
                 (!examIdInput.trim() || isValidatingExam) &&
-                  styles.confirmButtonDisabled,
+                styles.confirmButtonDisabled,
               ]}
               onPress={handleConfirmExam}
               disabled={!examIdInput.trim() || isValidatingExam}
