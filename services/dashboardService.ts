@@ -1,16 +1,15 @@
 import { auth, db } from "@/config/firebase";
 import {
-    collection,
-    getDocs,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    QueryDocumentSnapshot,
-    startAfter,
-    Timestamp,
-    Unsubscribe,
-    where,
+  collection,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  QueryDocumentSnapshot,
+  startAfter,
+  Unsubscribe,
+  where,
 } from "firebase/firestore";
 import { GradingService } from "./gradingService";
 
@@ -58,7 +57,6 @@ export interface HomeDashboardStats {
   passRateToday: number; // percentage
   totalAllTime: number;
   totalStudentsGraded: number; // all-time total graded by this instructor
-  totalStudents: number; // total students in this instructor's roster
   highestScore: number; // highest percentage all-time
   lowestScore: number; // lowest percentage all-time
   distribution: GradeDistribution; // all-time grade distribution
@@ -240,7 +238,6 @@ export class DashboardService {
         passRateToday: 0,
         totalAllTime: 0,
         totalStudentsGraded: 0,
-        totalStudents: 0,
         highestScore: 0,
         lowestScore: 0,
         distribution: { A: 0, B: 0, C: 0, D: 0, F: 0 },
@@ -274,25 +271,12 @@ export class DashboardService {
       scannedToday > 0 ? Math.round((passingToday / scannedToday) * 100) : 0;
 
     const allPercentages = all.map((r) => r.percentage);
-
-    // Fetch total student count from the students collection
-    let totalStudents = 0;
-    try {
-      const studentsSnap = await getDocs(
-        query(collection(db, "students"), where("created_by", "==", uid)),
-      );
-      totalStudents = studentsSnap.size;
-    } catch {
-      // non-blocking — keep 0 if query fails
-    }
-
     return {
       scannedToday,
       avgScoreToday,
       passRateToday,
       totalAllTime: all.length,
       totalStudentsGraded: all.length,
-      totalStudents,
       highestScore: all.length > 0 ? Math.max(...allPercentages) : 0,
       lowestScore: all.length > 0 ? Math.min(...allPercentages) : 0,
       distribution: buildDistribution(allPercentages),
@@ -306,7 +290,6 @@ export class DashboardService {
   static async getPagedResults(
     examId: string,
     lastDoc: QueryDocumentSnapshot | null = null,
-    dateFrom?: Date,
   ): Promise<PagedScanResult> {
     const uid = auth.currentUser?.uid;
     if (!uid) return { items: [], hasMore: false, lastDoc: null };
@@ -314,11 +297,8 @@ export class DashboardService {
     const base = [
       where("examId", "==", examId),
       where("scannedBy", "==", uid),
-      ...(dateFrom
-        ? [where("scannedAt", ">=", Timestamp.fromDate(dateFrom))]
-        : []),
       orderBy("scannedAt", "desc"),
-    ];
+    ] as const;
 
     let q = query(
       collection(db, SCANNED_RESULTS),
@@ -368,7 +348,6 @@ export class DashboardService {
         passRateToday: 0,
         totalAllTime: 0,
         totalStudentsGraded: 0,
-        totalStudents: 0,
         highestScore: 0,
         lowestScore: 0,
         distribution: { A: 0, B: 0, C: 0, D: 0, F: 0 },
@@ -384,7 +363,7 @@ export class DashboardService {
 
     return onSnapshot(
       q,
-      async (snap) => {
+      (snap) => {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
         const todayISO = todayStart.toISOString();
@@ -407,17 +386,6 @@ export class DashboardService {
             ? Math.round((passingToday / scannedToday) * 100)
             : 0;
 
-        // Fetch total student count from the students collection
-        let totalStudents = 0;
-        try {
-          const studentsSnap = await getDocs(
-            query(collection(db, "students"), where("created_by", "==", uid)),
-          );
-          totalStudents = studentsSnap.size;
-        } catch {
-          // non-blocking — keep 0 if query fails
-        }
-
         const allPercentages = all.map((r) => r.percentage);
         const result: HomeDashboardStats = {
           scannedToday,
@@ -425,7 +393,6 @@ export class DashboardService {
           passRateToday,
           totalAllTime: all.length,
           totalStudentsGraded: all.length,
-          totalStudents,
           highestScore: all.length > 0 ? Math.max(...allPercentages) : 0,
           lowestScore: all.length > 0 ? Math.min(...allPercentages) : 0,
           distribution: buildDistribution(allPercentages),
@@ -477,23 +444,25 @@ export class DashboardService {
       return () => {};
     }
 
-    // Server-side date filter reduces bandwidth when a date range is active.
-    // Docs relying on legacy `dateScanned` (ISO string) without `scannedAt`
-    // are excluded by the Firestore filter — those are pre-production records.
-    const queryConstraints = [
+    const q = query(
+      collection(db, SCANNED_RESULTS),
       where("examId", "==", examId),
       where("scannedBy", "==", uid),
-      ...(dateFrom
-        ? [where("scannedAt", ">=", Timestamp.fromDate(dateFrom))]
-        : []),
-    ];
-
-    const q = query(collection(db, SCANNED_RESULTS), ...queryConstraints);
+    );
 
     return onSnapshot(
       q,
       async (snap) => {
-        const rows = snap.docs.map(rowFromDoc);
+        let rows = snap.docs.map(rowFromDoc);
+
+        // Apply optional date filter (client-side)
+        if (dateFrom) {
+          const fromISO = dateFrom.toISOString();
+          rows = rows.filter(
+            (r) =>
+              typeof r.dateScanned === "string" && r.dateScanned >= fromISO,
+          );
+        }
 
         let examTitle = examId;
         try {

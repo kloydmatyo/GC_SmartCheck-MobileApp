@@ -3,31 +3,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Image,
-  LayoutChangeEvent,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Image,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
 
 import HistoryList from "@/components/scanner/HistoryList";
 import ScannerScreen from "@/components/scanner/ScannerScreen";
-import GradeBarChart from "@/components/ui/GradeBarChart";
 import {
-  DashboardService,
-  HomeDashboardStats,
+    DashboardService,
+    HomeDashboardStats,
 } from "@/services/dashboardService";
 
 interface RecentExam {
@@ -37,7 +36,6 @@ interface RecentExam {
   date: string;
   papers: number | null;
   status: string;
-  section?: string;
 }
 
 export default function HomeScreen() {
@@ -52,7 +50,6 @@ export default function HomeScreen() {
     passRateToday: 0,
     totalAllTime: 0,
     totalStudentsGraded: 0,
-    totalStudents: 0,
     highestScore: 0,
     lowestScore: 0,
     distribution: { A: 0, B: 0, C: 0, D: 0, F: 0 },
@@ -63,15 +60,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [examsError, setExamsError] = useState<string | null>(null);
-  const [availableSections, setAvailableSections] = useState<string[]>([]);
-  const [selectedSection, setSelectedSection] = useState<string | null>(null);
-  const [chartWidth, setChartWidth] = useState(320);
   const unsubscribeRef = useRef<(() => void) | null>(null);
-
-  const onChartLayout = useCallback((e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w > 0) setChartWidth(w);
-  }, []);
 
   // ── Resolve faculty full name from Firestore ──────────────────────────
   useEffect(() => {
@@ -131,50 +120,30 @@ export default function HomeScreen() {
     setLoadingExams(true);
     setExamsError(null);
     try {
-      const q = query(collection(db, "exams"), where("createdBy", "==", uid));
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", uid),
+        orderBy("created_at", "desc"),
+      );
       const snap = await getDocs(q);
-      const exams: RecentExam[] = snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            id: d.id,
-            title: data.title ?? "Untitled Exam",
-            subject: data.subject ?? data.course_subject ?? "—",
-            date: data.created_at
-              ? new Date(data.created_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : "—",
-            papers: data.scanned_papers ?? null,
-            status: data.status ?? "Draft",
-            section: data.section ?? data.course_section ?? undefined,
-            _raw_created_at: data.created_at ?? 0,
-          };
-        })
-        .sort((a, b) => {
-          // sort descending by created_at (works with ISO strings, timestamps, and numbers)
-          const aVal =
-            typeof a._raw_created_at === "string"
-              ? new Date(a._raw_created_at).getTime()
-              : Number(a._raw_created_at);
-          const bVal =
-            typeof b._raw_created_at === "string"
-              ? new Date(b._raw_created_at).getTime()
-              : Number(b._raw_created_at);
-          return bVal - aVal;
-        })
-        .slice(0, 5)
-        .map(({ _raw_created_at: _discarded, ...rest }) => rest as RecentExam);
+      const exams: RecentExam[] = snap.docs.slice(0, 5).map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title ?? "Untitled Exam",
+          subject: data.subject ?? data.course_subject ?? "—",
+          date: data.created_at
+            ? new Date(data.created_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+            : "—",
+          papers: data.scanned_papers ?? null,
+          status: data.status ?? "Draft",
+        };
+      });
       setRecentExams(exams);
-      // Extract unique sections for filter chips
-      const sections = [
-        ...new Set(
-          exams.filter((e) => e.section).map((e) => e.section as string),
-        ),
-      ].sort();
-      setAvailableSections(sections);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to load exams.";
       setExamsError(msg);
@@ -311,9 +280,9 @@ export default function HomeScreen() {
             {loadingStats ? (
               <View style={styles.skeletonValue} />
             ) : (
-              <Text style={styles.statValue}>{stats.totalStudents}</Text>
+              <Text style={styles.statValue}>{stats.totalStudentsGraded}</Text>
             )}
-            <Text style={styles.statLabel}>Total Students</Text>
+            <Text style={styles.statLabel}>Total Graded</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -366,58 +335,57 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Score Distribution Chart — always visible */}
-        <View style={styles.distSection} onLayout={onChartLayout}>
-          <Text style={styles.distTitle}>Score Distribution (All-Time)</Text>
-          {loadingStats ? (
-            <View style={{ gap: 10, marginTop: 4 }}>
-              {[0, 1, 2, 3, 4].map((i) => (
-                <View
-                  key={i}
-                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-                >
-                  <View
-                    style={{
-                      width: 24,
-                      height: 20,
-                      borderRadius: 5,
-                      backgroundColor: "#d0d4ce",
-                    }}
-                  />
-                  <View
-                    style={{
-                      flex: 1,
-                      height: 18,
-                      borderRadius: 4,
-                      backgroundColor: "#ddd8c8",
-                    }}
-                  />
-                  <View
-                    style={{
-                      width: 52,
-                      height: 10,
-                      borderRadius: 4,
-                      backgroundColor: "#e5e0d0",
-                    }}
-                  />
-                </View>
-              ))}
-            </View>
-          ) : stats.totalStudentsGraded === 0 ? (
-            <View style={styles.distEmpty}>
-              <Ionicons name="bar-chart-outline" size={32} color="#c8c0a0" />
-              <Text style={styles.distEmptyText}>
-                No scan data yet — scan answer sheets to populate this chart.
-              </Text>
-            </View>
-          ) : (
-            <GradeBarChart
-              distribution={stats.distribution}
-              total={stats.totalStudentsGraded}
-              width={chartWidth - 28}
-            />
-          )}
-        </View>
+        {/* Score Distribution Summary */}
+        {!loadingStats &&
+          stats.totalStudentsGraded > 0 &&
+          (() => {
+            const dist = stats.distribution;
+            const total = stats.totalStudentsGraded;
+            const maxCount = Math.max(
+              dist.A,
+              dist.B,
+              dist.C,
+              dist.D,
+              dist.F,
+              1,
+            );
+            const grades: {
+              label: string;
+              key: keyof typeof dist;
+              color: string;
+            }[] = [
+              { label: "A (≥90%)", key: "A", color: "#00a550" },
+              { label: "B (80–89%)", key: "B", color: "#4a90e2" },
+              { label: "C (70–79%)", key: "C", color: "#f5a623" },
+              { label: "D (60–69%)", key: "D", color: "#e67e22" },
+              { label: "F (<60%)", key: "F", color: "#e74c3c" },
+            ];
+            return (
+              <View style={styles.distSection}>
+                <Text style={styles.distTitle}>Score Distribution</Text>
+                {grades.map(({ label, key, color }) => (
+                  <View key={key} style={styles.distRow}>
+                    <Text style={styles.distLabel}>{label}</Text>
+                    <View style={styles.distBarBg}>
+                      <View
+                        style={[
+                          styles.distBarFill,
+                          {
+                            width: `${Math.round((dist[key] / maxCount) * 100)}%`,
+                            backgroundColor: color,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.distCount}>
+                      {dist[key]} (
+                      {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
 
         {/* Recent Exams Section */}
         <View style={styles.sectionHeader}>
@@ -426,54 +394,6 @@ export default function HomeScreen() {
             <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Section filter chips */}
-        {availableSections.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ paddingHorizontal: 10, marginBottom: 8 }}
-            contentContainerStyle={{ flexDirection: "row", gap: 8 }}
-          >
-            <TouchableOpacity
-              style={[
-                styles.sectionChip,
-                selectedSection === null && styles.sectionChipActive,
-              ]}
-              onPress={() => setSelectedSection(null)}
-            >
-              <Text
-                style={[
-                  styles.sectionChipText,
-                  selectedSection === null && styles.sectionChipTextActive,
-                ]}
-              >
-                All
-              </Text>
-            </TouchableOpacity>
-            {availableSections.map((sec) => (
-              <TouchableOpacity
-                key={sec}
-                style={[
-                  styles.sectionChip,
-                  selectedSection === sec && styles.sectionChipActive,
-                ]}
-                onPress={() =>
-                  setSelectedSection(selectedSection === sec ? null : sec)
-                }
-              >
-                <Text
-                  style={[
-                    styles.sectionChipText,
-                    selectedSection === sec && styles.sectionChipTextActive,
-                  ]}
-                >
-                  {sec}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
 
         <View style={styles.examsContainer}>
           {loadingExams ? (
@@ -512,54 +432,42 @@ export default function HomeScreen() {
               </Text>
             </View>
           ) : (
-            recentExams
-              .filter(
-                (exam) => !selectedSection || exam.section === selectedSection,
-              )
-              .map((exam) => (
-                <TouchableOpacity
-                  key={exam.id}
-                  style={styles.examCard}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/exam-stats?examId=${exam.id}&examTitle=${encodeURIComponent(exam.title)}` as any,
-                    )
-                  }
-                >
-                  <View style={styles.examHeader}>
-                    <Text style={styles.examTitle}>{exam.title}</Text>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        { backgroundColor: getStatusColor(exam.status) },
-                      ]}
-                    >
-                      <Text style={styles.statusText}>{exam.status}</Text>
-                    </View>
+            recentExams.map((exam) => (
+              <TouchableOpacity
+                key={exam.id}
+                style={styles.examCard}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/exam-stats?examId=${exam.id}&examTitle=${encodeURIComponent(exam.title)}` as any,
+                  )
+                }
+              >
+                <View style={styles.examHeader}>
+                  <Text style={styles.examTitle}>{exam.title}</Text>
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStatusColor(exam.status) },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>{exam.status}</Text>
                   </View>
-                  <Text style={styles.examSubject}>{exam.subject}</Text>
-                  <View style={styles.examFooter}>
-                    <View style={styles.examInfo}>
-                      <Ionicons
-                        name="calendar-outline"
-                        size={14}
-                        color="#666"
-                      />
-                      <Text style={styles.examInfoText}>{exam.date}</Text>
-                    </View>
-                    <View style={styles.examInfo}>
-                      <Ionicons
-                        name="document-outline"
-                        size={14}
-                        color="#666"
-                      />
-                      <Text style={styles.examInfoText}>
-                        {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
-                      </Text>
-                    </View>
+                </View>
+                <Text style={styles.examSubject}>{exam.subject}</Text>
+                <View style={styles.examFooter}>
+                  <View style={styles.examInfo}>
+                    <Ionicons name="calendar-outline" size={14} color="#666" />
+                    <Text style={styles.examInfoText}>{exam.date}</Text>
                   </View>
-                </TouchableOpacity>
-              ))
+                  <View style={styles.examInfo}>
+                    <Ionicons name="document-outline" size={14} color="#666" />
+                    <Text style={styles.examInfoText}>
+                      {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))
           )}
         </View>
 
@@ -832,15 +740,33 @@ const styles = StyleSheet.create({
     color: "#333",
     marginBottom: 10,
   },
-  distEmpty: {
+  distRow: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 16,
+    marginBottom: 8,
     gap: 8,
   },
-  distEmptyText: {
-    fontSize: 12,
-    color: "#a09880",
-    textAlign: "center",
+  distLabel: {
+    fontSize: 11,
+    color: "#555",
+    width: 72,
+  },
+  distBarBg: {
+    flex: 1,
+    height: 10,
+    backgroundColor: "#e0d8c0",
+    borderRadius: 5,
+    overflow: "hidden",
+  },
+  distBarFill: {
+    height: 10,
+    borderRadius: 5,
+  },
+  distCount: {
+    fontSize: 11,
+    color: "#555",
+    width: 56,
+    textAlign: "right",
   },
   emptyState: {
     alignItems: "center",
@@ -915,27 +841,6 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: "#ece8da",
     borderRadius: 5,
-  },
-  // ── Section filter chips ─────────────────────────────────────────────────
-  sectionChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: "#c8c0a8",
-    backgroundColor: "#f0ead6",
-  },
-  sectionChipActive: {
-    backgroundColor: "#24362f",
-    borderColor: "#24362f",
-  },
-  sectionChipText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#555",
-  },
-  sectionChipTextActive: {
-    color: "#fff",
   },
   // ── Exams section error state ────────────────────────────────────────────
   examsErrorState: {
