@@ -191,6 +191,13 @@ export class GradingService {
   }
 
   /**
+   * REQ: Determine if a score is passing (>= 50%)
+   */
+  static isPassing(percentage: number): boolean {
+    return percentage >= 50;
+  }
+
+  /**
    * Compute letter grade from percentage
    */
   static computeGradeEquivalent(percentage: number): string {
