@@ -2,12 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-    ScrollView,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import AnswerSheetGenerator from "../../components/generator/AnswerSheetGenerator";
 
@@ -34,7 +34,7 @@ export default function GeneratorTab() {
         </View>
 
         <View style={styles.header}>
-          <Ionicons name="document-text" size={50} color="#007AFF" />
+          <Ionicons name="document-text" size={50} color="#3d5a3d" />
           <Text style={styles.title}>Answer Sheet Generator</Text>
           <Text style={styles.subtitle}>
             Create Zipgrade-compatible answer sheets for testing
@@ -43,24 +43,24 @@ export default function GeneratorTab() {
 
         <View style={styles.features}>
           <View style={styles.feature}>
-            <Ionicons name="document-outline" size={24} color="#4CAF50" />
+            <Ionicons name="document-outline" size={24} color="#3d5a3d" />
             <Text style={styles.featureText}>Generate blank answer sheets</Text>
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="flask" size={24} color="#4CAF50" />
+            <Ionicons name="flask" size={24} color="#3d5a3d" />
             <Text style={styles.featureText}>
               Create pre-filled test sheets
             </Text>
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="grid" size={24} color="#4CAF50" />
+            <Ionicons name="grid" size={24} color="#3d5a3d" />
             <Text style={styles.featureText}>Multiple template options</Text>
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="scan" size={24} color="#4CAF50" />
+            <Ionicons name="scan" size={24} color="#3d5a3d" />
             <Text style={styles.featureText}>Scanner-compatible format</Text>
           </View>
         </View>
@@ -119,7 +119,7 @@ export default function GeneratorTab() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#eef1ef",
   },
   content: {
     flex: 1,
@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#e4eee8",
+    backgroundColor: "#dbe7df",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -149,19 +149,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "#333",
+    color: "#1a2e1a",
     marginTop: 12,
     marginBottom: 8,
     textAlign: "center",
   },
   subtitle: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
     textAlign: "center",
     lineHeight: 20,
   },
   features: {
-    backgroundColor: "white",
+    backgroundColor: "#f0ead6",
     borderRadius: 12,
     padding: 20,
     marginBottom: 25,
@@ -178,32 +178,32 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 16,
-    color: "#333",
+    color: "#24362f",
     marginLeft: 15,
     fontWeight: "500",
   },
   generateButton: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#3d5a3d",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     padding: 18,
     borderRadius: 12,
     marginBottom: 25,
-    shadowColor: "#007AFF",
+    shadowColor: "#3d5a3d",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
   },
   generateButtonText: {
-    color: "white",
+    color: "#E8F5E9",
     fontSize: 18,
     fontWeight: "bold",
     marginLeft: 10,
   },
   templates: {
-    backgroundColor: "white",
+    backgroundColor: "#f0ead6",
     borderRadius: 12,
     padding: 20,
     marginBottom: 25,
@@ -216,29 +216,29 @@ const styles = StyleSheet.create({
   templatesTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 15,
   },
   templateCard: {
-    backgroundColor: "#f8f9fa",
+    backgroundColor: "#dbe7df",
     padding: 15,
     borderRadius: 8,
     marginBottom: 10,
     borderLeftWidth: 4,
-    borderLeftColor: "#007AFF",
+    borderLeftColor: "#2f8a74",
   },
   templateName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 4,
   },
   templateDesc: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
   },
   instructions: {
-    backgroundColor: "white",
+    backgroundColor: "#f0ead6",
     borderRadius: 12,
     padding: 20,
     shadowColor: "#000",
@@ -250,12 +250,12 @@ const styles = StyleSheet.create({
   instructionsTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 15,
   },
   instructionText: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
     marginBottom: 8,
     lineHeight: 20,
   },

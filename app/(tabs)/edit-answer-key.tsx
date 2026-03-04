@@ -5,7 +5,17 @@ import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  runTransaction,
+  serverTimestamp,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -30,11 +40,16 @@ export default function EditAnswerKeyScreen() {
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
   const [choicesPerItem, setChoicesPerItem] = useState(4);
   const [answerKeyId, setAnswerKeyId] = useState("");
+  const [answerKeyVersion, setAnswerKeyVersion] = useState(1);
+  const [remoteVersion, setRemoteVersion] = useState(1);
+  const [conflictDetected, setConflictDetected] = useState(false);
+  const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [incompleteConfirmVisible, setIncompleteConfirmVisible] =
     useState(false);
   const [incompleteCount, setIncompleteCount] = useState(0);
   const pendingSaveResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
     type: "success" | "error" | "info";
@@ -55,12 +70,122 @@ export default function EditAnswerKeyScreen() {
 
   useEffect(() => {
     return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
+
       if (pendingSaveResolveRef.current) {
         pendingSaveResolveRef.current(false);
         pendingSaveResolveRef.current = null;
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!answerKeyId || isOffline) return;
+
+    const answerKeyRef = doc(db, "answerKeys", answerKeyId);
+    const unsubscribe = onSnapshot(answerKeyRef, (snapshot) => {
+      if (!snapshot.exists()) return;
+
+      const data = snapshot.data();
+      const latestVersion = Number(data.version ?? 1);
+
+      setRemoteVersion((prev) => (latestVersion > prev ? latestVersion : prev));
+
+      if (latestVersion <= answerKeyVersion) return;
+
+      if (saving) return;
+
+      if (hasLocalChanges) {
+        setConflictDetected(true);
+        return;
+      }
+
+      setAnswers(parseAnswersFromAnswerKey(data, answers.length));
+      setAnswerKeyVersion(latestVersion);
+      setConflictDetected(false);
+    });
+
+    unsubscribeRef.current = unsubscribe;
+
+    return () => {
+      unsubscribe();
+      unsubscribeRef.current = null;
+    };
+  }, [answerKeyId, isOffline, saving, hasLocalChanges, answerKeyVersion, answers.length]);
+
+  const parseAnswersFromAnswerKey = (
+    data: Record<string, any>,
+    fallbackCount: number,
+  ): QuestionAnswer[] => {
+    const settingsAnswers = Array.isArray(data.questionSettings)
+      ? data.questionSettings
+          .slice()
+          .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+          .map((q: any) => String(q.correctAnswer ?? ""))
+      : [];
+
+    const numericAnswers = Object.keys(data)
+      .filter((key) => /^\d+$/.test(key))
+      .sort((a, b) => Number(a) - Number(b))
+      .map((key) => String(data[key] ?? ""));
+
+    const mergedAnswers =
+      settingsAnswers.length > 0 ? settingsAnswers : numericAnswers;
+
+    const totalCount = Math.max(
+      fallbackCount,
+      mergedAnswers.length,
+      Number(data.numItems ?? 0),
+      1,
+    );
+
+    return Array.from({ length: totalCount }, (_, i) => ({
+      questionNumber: i + 1,
+      answer: mergedAnswers[i] || "",
+    }));
+  };
+
+  const resolveAnswerKeyDoc = async (
+    examIdStr: string,
+    createdAtMillis?: number,
+  ): Promise<{ id: string; data: Record<string, any> | null }> => {
+    const answerKeysQuery = query(
+      collection(db, "answerKeys"),
+      where("examId", "==", examIdStr),
+    );
+    const answerKeysSnapshot = await getDocs(answerKeysQuery);
+
+    if (!answerKeysSnapshot.empty) {
+      let selected = answerKeysSnapshot.docs[0];
+      let selectedScore =
+        Number(selected.data().updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
+        Number(selected.data().version ?? 1);
+
+      answerKeysSnapshot.docs.slice(1).forEach((candidate) => {
+        const data = candidate.data();
+        const score =
+          Number(data.updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
+          Number(data.version ?? 1);
+        if (score > selectedScore) {
+          selected = candidate;
+          selectedScore = score;
+        }
+      });
+
+      return {
+        id: selected.id,
+        data: selected.data() as Record<string, any>,
+      };
+    }
+
+    if (createdAtMillis) {
+      return { id: `ak_${examIdStr}_${createdAtMillis}`, data: null };
+    }
+
+    return { id: `ak_${examIdStr}`, data: null };
+  };
 
   const loadAnswerKey = async () => {
     try {
@@ -70,36 +195,76 @@ export default function EditAnswerKeyScreen() {
       const online = await NetworkService.isOnline();
       setIsOffline(!online);
 
-      // Try to load from offline storage first
+      if (online) {
+        try {
+          // Load exam data from Firebase
+          const examRef = doc(db, "exams", examId as string);
+          const examSnap = await getDoc(examRef);
+
+          if (!examSnap.exists()) {
+            setStatusModal({
+              visible: true,
+              type: "error",
+              title: "Error",
+              message: "Exam not found",
+              onClose: goToQuizzes,
+            });
+            return;
+          }
+
+          const examData = examSnap.data();
+
+          // Check if exam is in Draft status
+          if (examData.status !== "Draft") {
+            setStatusModal({
+              visible: true,
+              type: "error",
+              title: "Edit Restricted",
+              message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
+              onClose: goToQuizzes,
+            });
+            return;
+          }
+
+          const numItems = examData.num_items || 20;
+          const choices = examData.choices_per_item || 4;
+          setChoicesPerItem(choices);
+
+          const resolvedAnswerKey = await resolveAnswerKeyDoc(
+            examId as string,
+            examData.createdAt?.toMillis?.(),
+          );
+
+          setAnswerKeyId(resolvedAnswerKey.id);
+
+          const initialAnswers = resolvedAnswerKey.data
+            ? parseAnswersFromAnswerKey(resolvedAnswerKey.data, numItems)
+            : Array.from({ length: numItems }, (_, i) => ({
+                questionNumber: i + 1,
+                answer: "",
+              }));
+
+          setAnswers(initialAnswers);
+          const loadedVersion = Number(resolvedAnswerKey.data?.version ?? 1);
+          setAnswerKeyVersion(loadedVersion);
+          setRemoteVersion(loadedVersion);
+          setConflictDetected(false);
+          setHasLocalChanges(false);
+          return;
+        } catch (onlineError) {
+          console.warn(
+            "Failed loading live answer key, attempting offline fallback:",
+            onlineError,
+          );
+        }
+      }
+
+      // Offline fallback
       const offlineExam = await OfflineStorageService.getDownloadedExam(
         examId as string,
       );
 
-      if (offlineExam) {
-        // We have offline data
-        const numItems = offlineExam.questions?.length || 20;
-        const choices = 4; // Default to 4 choices
-        setChoicesPerItem(choices);
-
-        const answerKeyIdStr = `ak_${examId}_offline`;
-        setAnswerKeyId(answerKeyIdStr);
-
-        // Load answers from offline exam
-        const initialAnswers: QuestionAnswer[] = Array.from(
-          { length: numItems },
-          (_, i) => ({
-            questionNumber: i + 1,
-            answer: offlineExam.answerKey?.answers?.[i] || "",
-          }),
-        );
-
-        setAnswers(initialAnswers);
-        setLoading(false);
-        return;
-      }
-
-      // No offline data - must be online
-      if (!online) {
+      if (!offlineExam) {
         setStatusModal({
           visible: true,
           type: "error",
@@ -111,65 +276,26 @@ export default function EditAnswerKeyScreen() {
         return;
       }
 
-      // Load exam data from Firebase
-      const examRef = doc(db, "exams", examId as string);
-      const examSnap = await getDoc(examRef);
-
-      if (!examSnap.exists()) {
-        setStatusModal({
-          visible: true,
-          type: "error",
-          title: "Error",
-          message: "Exam not found",
-          onClose: goToQuizzes,
-        });
-        return;
-      }
-
-      const examData = examSnap.data();
-
-      // Check if exam is in Draft status
-      if (examData.status !== "Draft") {
-        setStatusModal({
-          visible: true,
-          type: "error",
-          title: "Edit Restricted",
-          message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
-          onClose: goToQuizzes,
-        });
-        return;
-      }
-
-      const numItems = examData.num_items || 20;
-      const choices = examData.choices_per_item || 4;
+      const numItems = offlineExam.questions?.length || 20;
+      const choices = 4;
       setChoicesPerItem(choices);
 
-      // Try to find existing answer key
-      const answerKeyIdStr = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
+      const answerKeyIdStr = `ak_${examId}_offline`;
       setAnswerKeyId(answerKeyIdStr);
 
-      // Try to load existing answer key
-      const answerKeyRef = doc(db, "answerKeys", answerKeyIdStr);
-      const answerKeySnap = await getDoc(answerKeyRef);
-
-      let initialAnswers: QuestionAnswer[] = [];
-
-      if (answerKeySnap.exists()) {
-        // Load existing answers
-        const answerKeyData = answerKeySnap.data();
-        initialAnswers = Array.from({ length: numItems }, (_, i) => ({
+      const initialAnswers: QuestionAnswer[] = Array.from(
+        { length: numItems },
+        (_, i) => ({
           questionNumber: i + 1,
-          answer: answerKeyData[i.toString()] || "",
-        }));
-      } else {
-        // Initialize empty answers
-        initialAnswers = Array.from({ length: numItems }, (_, i) => ({
-          questionNumber: i + 1,
-          answer: "",
-        }));
-      }
+          answer: offlineExam.answerKey?.answers?.[i] || "",
+        }),
+      );
 
       setAnswers(initialAnswers);
+      setAnswerKeyVersion(Number(offlineExam.version ?? 1));
+      setRemoteVersion(Number(offlineExam.version ?? 1));
+      setConflictDetected(false);
+      setHasLocalChanges(false);
     } catch (error) {
       console.error("Error loading answer key:", error);
       setStatusModal({
@@ -184,6 +310,7 @@ export default function EditAnswerKeyScreen() {
   };
 
   const handleAnswerSelect = (questionNumber: number, answer: string) => {
+    setHasLocalChanges(true);
     setAnswers((prev) =>
       prev.map((item) =>
         item.questionNumber === questionNumber ? { ...item, answer } : item,
@@ -250,31 +377,77 @@ export default function EditAnswerKeyScreen() {
       }
 
       // Online - save to Firebase
-      // Prepare answer key data
-      const answerKeyData: any = {
-        examId: examId as string,
-        id: answerKeyId,
-        createdBy: auth.currentUser?.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        locked: false,
-        version: 1,
-        questionSettings: answers.map((item) => ({
-          questionNumber: item.questionNumber,
-          correctAnswer: item.answer,
-          points: 1,
-          choiceLabels: {},
-        })),
-      };
+      if (conflictDetected || remoteVersion > answerKeyVersion) {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Conflict Detected",
+          message:
+            "This answer key was updated on another device. We reloaded the latest version. Please review and save again.",
+          onClose: loadAnswerKey,
+        });
+        return;
+      }
 
-      // Add individual answer fields (0, 1, 2, etc.)
-      answers.forEach((item, index) => {
-        answerKeyData[index.toString()] = item.answer;
+      let nextVersion = 1;
+      const examRef = doc(db, "exams", examId as string);
+      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
+
+      await runTransaction(db, async (transaction) => {
+        const [examSnap, answerKeySnap] = await Promise.all([
+          transaction.get(examRef),
+          transaction.get(answerKeyRef),
+        ]);
+
+        if (!examSnap.exists()) {
+          throw new Error("Exam not found");
+        }
+
+        const examData = examSnap.data();
+        if (examData.status !== "Draft") {
+          throw new Error(
+            `Cannot edit answer key. Exam status is "${examData.status}".`,
+          );
+        }
+
+        const serverVersion = Number(answerKeySnap.data()?.version ?? 1);
+        if (answerKeySnap.exists() && serverVersion !== answerKeyVersion) {
+          throw new Error(
+            `Answer key version conflict. Current version is ${serverVersion}.`,
+          );
+        }
+
+        nextVersion = answerKeySnap.exists() ? serverVersion + 1 : 1;
+
+        const answerKeyData: Record<string, any> = {
+          examId: examId as string,
+          id: answerKeyId,
+          createdBy:
+            answerKeySnap.data()?.createdBy || auth.currentUser?.uid || null,
+          createdAt: answerKeySnap.data()?.createdAt || serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          locked: false,
+          version: nextVersion,
+          questionSettings: answers.map((item) => ({
+            questionNumber: item.questionNumber,
+            correctAnswer: item.answer,
+            points: 1,
+            choiceLabels: {},
+          })),
+          numItems: answers.length,
+        };
+
+        answers.forEach((item, index) => {
+          answerKeyData[index.toString()] = item.answer;
+        });
+
+        transaction.set(answerKeyRef, answerKeyData, { merge: true });
       });
 
-      // Save answer key document (create or update)
-      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
-      await setDoc(answerKeyRef, answerKeyData, { merge: true });
+      setAnswerKeyVersion(nextVersion);
+      setRemoteVersion(nextVersion);
+      setConflictDetected(false);
+      setHasLocalChanges(false);
 
       setStatusModal({
         visible: true,
@@ -285,11 +458,18 @@ export default function EditAnswerKeyScreen() {
       });
     } catch (error) {
       console.error("Error saving answer key:", error);
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to save answer key";
+      const isConflict = /conflict/i.test(errorMessage);
+
       setStatusModal({
         visible: true,
-        type: "error",
-        title: "Error",
-        message: "Failed to save answer key",
+        type: isConflict ? "info" : "error",
+        title: isConflict ? "Conflict Detected" : "Error",
+        message: isConflict
+          ? "Another device saved newer answer key changes. We loaded the latest data. Please re-apply your edits and save again."
+          : "Failed to save answer key",
+        onClose: isConflict ? loadAnswerKey : undefined,
       });
     } finally {
       setSaving(false);

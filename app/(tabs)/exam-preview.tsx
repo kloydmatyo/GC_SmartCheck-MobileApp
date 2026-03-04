@@ -50,72 +50,72 @@ export default function ExamPreviewScreen() {
       const online = await NetworkService.isOnline();
       setIsOffline(!online);
 
-      // Try to load from offline storage first
-      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
-
-      if (offlineExam) {
-        // We have offline data - use it
-        const examData: ExamPreviewData = {
-          metadata: {
-            examCode: examId,
-            title: offlineExam.title,
-            subject: "",
-            section: "",
-            date: offlineExam.createdAt,
-            status: "Active",
-            version: offlineExam.version,
-            createdAt: offlineExam.createdAt,
-          },
-          totalQuestions: offlineExam.questions?.length || 0,
-          choiceFormat: "A-D",
-          answerKey: {
-            answers: offlineExam.answerKey?.answers || [],
-            locked: true,
-          },
-          templateLayout: null,
-          lastModified: offlineExam.updatedAt,
-        };
-
-        setExam(examData);
-
-        // If online, try to sync in background
-        if (online) {
-          try {
-            const freshData = await ExamService.getExamById(examId);
-            if (freshData) {
-              setExam(freshData);
-            }
-          } catch (err) {
-            console.log("Could not fetch fresh data, using offline version");
+      // Prefer live data when online so recent edits are immediately reflected.
+      if (online) {
+        try {
+          const authorized = await ExamService.isAuthorized(
+            currentUser.uid,
+            examId,
+          );
+          if (!authorized) {
+            setError("You are not authorized to view this exam.");
+            return;
           }
-        }
 
-        return;
+          const examData = await ExamService.getExamById(examId);
+          if (!examData) {
+            setError("Exam not found. Please check the exam ID.");
+            return;
+          }
+
+          setExam(examData);
+          return;
+        } catch (liveError) {
+          console.warn(
+            "Failed to fetch live exam data, attempting offline fallback:",
+            liveError,
+          );
+        }
       }
 
-      // No offline data - must fetch from Firebase
-      if (!online) {
+      // Offline fallback
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+      if (!offlineExam) {
         setError(
           "This exam is not available offline. Please connect to the internet.",
         );
         return;
       }
 
-      // Check authorization
-      const authorized = await ExamService.isAuthorized(
-        currentUser.uid,
-        examId,
-      );
-      if (!authorized) {
-        setError("You are not authorized to view this exam.");
-        return;
-      }
-
-      const examData = await ExamService.getExamById(examId);
-      if (!examData) {
-        setError("Exam not found. Please check the exam ID.");
-        return;
-      }
+      const examData: ExamPreviewData = {
+        metadata: {
+          examId,
+          examCode: examId,
+          title: offlineExam.title,
+          subject: "",
+          section: "",
+          date: offlineExam.createdAt.toISOString(),
+          status: "Active",
+          version: offlineExam.version,
+          createdAt: offlineExam.createdAt,
+          updatedAt: offlineExam.updatedAt,
+          createdBy: offlineExam.createdBy || "",
+        },
+        totalQuestions: offlineExam.questions?.length || 0,
+        choiceFormat: "A-D",
+        answerKey: {
+          id: `ak_${examId}_offline`,
+          examId,
+          answers: offlineExam.answerKey?.answers || [],
+          questionSettings: [],
+          locked: true,
+          createdAt: offlineExam.createdAt,
+          updatedAt: offlineExam.updatedAt,
+          createdBy: offlineExam.createdBy || "",
+          version: offlineExam.version || 1,
+        },
+        lastModified: offlineExam.updatedAt,
+      };
 
       setExam(examData);
     } catch (err) {
@@ -166,7 +166,7 @@ export default function ExamPreviewScreen() {
           <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
           <Text style={styles.noAnswersText}>No answers set yet</Text>
           <Text style={styles.noAnswersSubtext}>
-            Click "Edit Answer Key" below to set the correct answers
+            Click Edit Answer Key below to set the correct answers
           </Text>
         </View>
       );
@@ -419,15 +419,17 @@ export default function ExamPreviewScreen() {
             <Text style={styles.editExamButtonText}>Edit Exam</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() =>
-            router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
-          }
-        >
-          <Ionicons name="create-outline" size={20} color="#fff" />
-          <Text style={styles.editButtonText}>Edit Answer Key</Text>
-        </TouchableOpacity>
+        {exam.metadata.status === "Draft" && (
+          <TouchableOpacity
+            style={styles.editButton}
+            onPress={() =>
+              router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
+            }
+          >
+            <Ionicons name="create-outline" size={20} color="#fff" />
+            <Text style={styles.editButtonText}>Edit Answer Key</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.printButton}
           onPress={() =>

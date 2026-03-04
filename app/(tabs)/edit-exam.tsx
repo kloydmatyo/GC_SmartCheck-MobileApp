@@ -308,9 +308,65 @@ export default function EditExamScreen() {
     setShowConfirmModal(true);
   };
 
+  const getErrorText = (error: any): string =>
+    [
+      error?.message ?? "",
+      error?.code ?? "",
+      error?.name ?? "",
+      String(error ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+  const isTransientNetworkError = (error: any): boolean => {
+    const text = getErrorText(error);
+    return (
+      text.includes("network") ||
+      text.includes("offline") ||
+      text.includes("unavailable") ||
+      text.includes("deadline-exceeded") ||
+      text.includes("loadbundlefromserverrequesterror") ||
+      text.includes("could not load bundle")
+    );
+  };
+
+  const updateExamWithRetry = async (
+    updateData: {
+      title?: string;
+      subject?: string | null;
+      section?: string | null;
+      date?: string | null;
+    },
+    expectedVersion: number,
+  ): Promise<number> => {
+    const maxAttempts = 2;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await ExamService.updateExamWithVersionCheck(
+          examId,
+          updateData,
+          expectedVersion,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!isTransientNetworkError(error) || attempt === maxAttempts) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+
+    throw lastError;
+  };
+
   const confirmSave = async () => {
     setShowConfirmModal(false);
     setSaving(true);
+
+    let updateApplied = false;
+    let persistedVersion: number | null = null;
 
     try {
       const currentUser = auth.currentUser;
@@ -358,11 +414,12 @@ export default function EditExamScreen() {
       }
 
       // Update exam with version check
-      const updatedVersion = await ExamService.updateExamWithVersionCheck(
-        examId,
+      const updatedVersion = await updateExamWithRetry(
         updateData,
         version, // Current version we're editing
       );
+      updateApplied = true;
+      persistedVersion = updatedVersion;
 
       // Log audit trail
       await AuditLogService.logExamEdit(
@@ -370,6 +427,7 @@ export default function EditExamScreen() {
         currentUser.uid,
         changes,
         updatedVersion,
+        true,
       );
 
       const endTime = Date.now();
@@ -405,11 +463,48 @@ export default function EditExamScreen() {
     } catch (error: any) {
       console.error("Error saving exam:", error);
 
+      // If the exam was already updated but a downstream step failed,
+      // automatically rollback to last persisted metadata.
+      if (updateApplied && persistedVersion && originalMetadata) {
+        try {
+          const rollbackData = {
+            title: originalMetadata.title,
+            subject: originalMetadata.subject ?? null,
+            section: originalMetadata.section ?? null,
+            date: originalMetadata.date ?? null,
+          };
+
+          const rolledBackVersion = await ExamService.updateExamWithVersionCheck(
+            examId,
+            rollbackData,
+            persistedVersion,
+          );
+
+          setVersion(rolledBackVersion);
+          setRemoteVersion(rolledBackVersion);
+          setTitle(originalMetadata.title);
+          setSubject(originalMetadata.subject || "");
+          setSection(originalMetadata.section || "");
+          setScheduleDate(
+            originalMetadata.date ? new Date(originalMetadata.date) : null,
+          );
+          setHasChanges(false);
+          setConflictDetected(false);
+        } catch (rollbackError) {
+          console.error("Rollback failed after save error:", rollbackError);
+          await loadExamData();
+        }
+      }
+
       // Enhanced error handling
       let errorTitle = "Save Failed";
-      let errorMessage = "Failed to save changes. Please try again.";
+      let errorMessage =
+        updateApplied && persistedVersion
+          ? "Failed to complete save. Your changes were rolled back to the last saved state."
+          : "Failed to save changes. Please try again.";
+      const errorText = getErrorText(error);
 
-      if (error.message?.includes("version conflict")) {
+      if (errorText.includes("version conflict")) {
         errorTitle = "Version Conflict";
         errorMessage =
           "This exam was modified by another user while you were editing. Please refresh and try again.";
@@ -423,7 +518,7 @@ export default function EditExamScreen() {
           },
           { text: "Cancel", style: "cancel" },
         ]);
-      } else if (error.message?.includes("conflict")) {
+      } else if (errorText.includes("conflict")) {
         errorTitle = "Sync Conflict";
         errorMessage =
           "This exam was modified by another user. Please refresh and try again.";
@@ -431,29 +526,17 @@ export default function EditExamScreen() {
           { text: "Refresh", onPress: loadExamData },
           { text: "Cancel", style: "cancel" },
         ]);
-      } else if (
-        error.message?.includes("network") ||
-        error.message?.includes("offline")
-      ) {
+      } else if (isTransientNetworkError(error)) {
         errorTitle = "Network Error";
         errorMessage =
-          "Unable to connect to the server. Please check your internet connection and try again.";
+          "Unable to save changes due to a weak or unstable connection. Please check your internet and try again.";
         Toast.show({
           type: "error",
           text1: errorTitle,
           text2: errorMessage,
           visibilityTime: 5000,
         });
-      } else if (error.message?.includes("LoadBundleFromServerRequestError")) {
-        errorTitle = "Connection Timeout";
-        errorMessage =
-          "The request took too long. Please check your connection and try again.";
-        Toast.show({
-          type: "error",
-          text1: errorTitle,
-          text2: errorMessage,
-          visibilityTime: 5000,
-        });
+        Alert.alert(errorTitle, errorMessage);
       } else {
         Toast.show({
           type: "error",

@@ -2,27 +2,57 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { UserService } from "@/services/userService";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
-    addDoc,
-    collection,
-    doc,
-    serverTimestamp,
-    setDoc,
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+
+const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
+
+interface ClassOption {
+  id: string;
+  class_name: string;
+  section_block?: string;
+  course_subject?: string;
+  isArchived?: boolean;
+}
+
+const formatDateForStorage = (date: Date): string =>
+  date.toISOString().split("T")[0];
+
+const formatDateForDisplay = (date: Date): string =>
+  date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+const toStartOfDay = (date: Date): Date => {
+  const normalized = new Date(date);
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+};
 
 export default function CreateQuizScreen() {
   const router = useRouter();
@@ -31,10 +61,17 @@ export default function CreateQuizScreen() {
 
   // Form state
   const [quizName, setQuizName] = useState("");
-  const [numQuestions, setNumQuestions] = useState("");
+  const [numQuestions, setNumQuestions] = useState<number | null>(null);
   const [subject, setSubject] = useState("");
-  const [examType, setExamType] = useState("Diagnostic Test");
-  const [choicesPerItem, setChoicesPerItem] = useState(4);
+  const [examType, setExamType] = useState<"board" | "diagnostic" | null>(
+    null,
+  );
+  const [choicesPerItem, setChoicesPerItem] = useState<number | null>(null);
+  const [examDate, setExamDate] = useState<Date | null>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [postSaveConfirmVisible, setPostSaveConfirmVisible] = useState(false);
   const [createdExamId, setCreatedExamId] = useState("");
   const [statusModal, setStatusModal] = useState<{
@@ -52,16 +89,59 @@ export default function CreateQuizScreen() {
   // Reset form when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      // Reset all form fields to initial state
       setQuizName("");
-      setNumQuestions("");
+      setNumQuestions(null);
       setSubject("");
-      setExamType("Diagnostic Test");
-      setChoicesPerItem(4);
+      setExamType(null);
+      setChoicesPerItem(null);
+      setExamDate(new Date());
+      setShowDatePicker(false);
+      setSelectedClassId(null);
       setCreatedExamId("");
       setLoading(false);
+
+      const loadClasses = async () => {
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          setClassOptions([]);
+          return;
+        }
+
+        try {
+          setClassesLoading(true);
+          const classesQuery = query(
+            collection(db, "classes"),
+            where("createdBy", "==", currentUser.uid),
+          );
+          const classesSnapshot = await getDocs(classesQuery);
+          const classes = classesSnapshot.docs
+            .map((classDoc) => ({
+              id: classDoc.id,
+              ...(classDoc.data() as Omit<ClassOption, "id">),
+            }))
+            .filter((cls) => !cls.isArchived);
+
+          setClassOptions(classes);
+        } catch (error) {
+          console.warn("Could not load classes:", error);
+          setClassOptions([]);
+        } finally {
+          setClassesLoading(false);
+        }
+      };
+
+      loadClasses();
     }, []),
   );
+
+  const handleDateChange = (_event: any, selectedDate?: Date) => {
+    setShowDatePicker(Platform.OS === "ios");
+    if (selectedDate) {
+      const today = toStartOfDay(new Date());
+      const picked = toStartOfDay(selectedDate);
+      setExamDate(picked < today ? today : selectedDate);
+    }
+  };
 
   const handleSave = async () => {
     // Validation
@@ -75,13 +155,64 @@ export default function CreateQuizScreen() {
       return;
     }
 
-    const questionsCount = parseInt(numQuestions);
-    if (!numQuestions || isNaN(questionsCount) || questionsCount <= 0) {
+    if (!numQuestions) {
       setStatusModal({
         visible: true,
         type: "error",
         title: "Error",
-        message: "Please enter a valid number of questions",
+        message: "Please select the number of questions",
+      });
+      return;
+    }
+
+    if (!selectedClassId) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select a class",
+      });
+      return;
+    }
+
+    if (!choicesPerItem) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select choices per item",
+      });
+      return;
+    }
+
+    if (!examType) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select an exam type",
+      });
+      return;
+    }
+
+    if (!examDate) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select an exam date",
+      });
+      return;
+    }
+
+    const today = toStartOfDay(new Date());
+    const selectedDate = toStartOfDay(examDate);
+    if (selectedDate < today) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Exam date cannot be in the past",
       });
       return;
     }
@@ -112,18 +243,18 @@ export default function CreateQuizScreen() {
       console.log("User profile:", userProfile);
       console.log("Instructor ID:", instructorId);
 
-      const currentDate = new Date().toISOString().split("T")[0];
+      const currentDate = formatDateForStorage(examDate);
+      const selectedClass =
+        classOptions.find((cls) => cls.id === selectedClassId) || null;
 
       // Generate exam code from quiz name and date
       const generateExamCode = (title: string, date: string): string => {
-        // Extract initials from title (e.g., "Midterm Exam" -> "ME")
         const words = title.trim().split(/\s+/);
         const initials = words
-          .slice(0, 3) // Take first 3 words max
+          .slice(0, 3)
           .map((word) => word.charAt(0).toUpperCase())
           .join("");
 
-        // Format: INITIALS-YYYYMMDD-XXX (e.g., ME-20260227-A1B)
         const dateCode = date.replace(/-/g, "");
         const randomSuffix = Math.random()
           .toString(36)
@@ -140,18 +271,17 @@ export default function CreateQuizScreen() {
         title: quizName.trim(),
         subject: subject.trim() || "General",
         examType: examType,
-        num_items: questionsCount,
+        num_items: numQuestions,
         choices_per_item: choicesPerItem,
-        status: "Draft", // Changed from "draft" to "Draft"
+        status: "Draft",
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         created_at: currentDate,
-        // Add missing fields from Firebase structure
-        classId: null,
-        className: null,
-        instructorId: instructorId, // Use actual instructor ID from user profile
-        examCode: examCode, // Generated exam code
+        classId: selectedClass?.id || null,
+        className: selectedClass?.class_name || null,
+        instructorId: instructorId,
+        examCode: examCode,
         version: 1,
         answer_keys: [],
         generated_sheets: [],
@@ -160,8 +290,6 @@ export default function CreateQuizScreen() {
 
       console.log("Creating exam with data:", examData);
       const examRef = await addDoc(collection(db, "exams"), examData);
-      console.log("Exam created with ID:", examRef.id);
-
       console.log("Exam created with ID:", examRef.id);
 
       // Create default answer key with specific ID
@@ -174,15 +302,14 @@ export default function CreateQuizScreen() {
         updatedAt: serverTimestamp(),
         locked: false,
         version: 1,
-        questionSettings: Array.from({ length: questionsCount }, (_, i) => ({
+        questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
           questionNumber: i + 1,
           correctAnswer: "",
           points: 1,
           choiceLabels: {},
         })),
-        // Initialize empty answers
         ...Object.fromEntries(
-          Array.from({ length: questionsCount }, (_, i) => [i.toString(), ""]),
+          Array.from({ length: numQuestions }, (_, i) => [i.toString(), ""]),
         ),
       };
 
@@ -245,7 +372,7 @@ export default function CreateQuizScreen() {
       >
         {/* Quiz Name */}
         <View style={styles.section}>
-          <Text style={styles.label}>QUIZ NAME</Text>
+          <Text style={styles.label}>QUIZ NAME *</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g., Midterm Exam - BSIT - 3B"
@@ -258,34 +385,35 @@ export default function CreateQuizScreen() {
 
         {/* Number of Questions */}
         <View style={styles.section}>
-          <Text style={styles.label}>NUMBER OF QUESTIONS</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 10, 50, 100"
-            placeholderTextColor="#8B9D8B"
-            keyboardType="number-pad"
-            value={numQuestions}
-            onChangeText={setNumQuestions}
-            editable={!loading}
-          />
+          <Text style={styles.label}>NUMBER OF QUESTIONS *</Text>
+          <View style={styles.choiceButtons}>
+            {NUM_QUESTIONS_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.choiceButton,
+                  numQuestions === option && styles.choiceButtonActive,
+                ]}
+                onPress={() => setNumQuestions(option)}
+                disabled={loading}
+              >
+                <Text
+                  style={[
+                    styles.choiceButtonText,
+                    numQuestions === option && styles.choiceButtonTextActive,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* Subject (Optional) */}
-        <View style={styles.section}>
-          <Text style={styles.label}>SUBJECT (OPTIONAL)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., Mathematics, Science"
-            placeholderTextColor="#8B9D8B"
-            value={subject}
-            onChangeText={setSubject}
-            editable={!loading}
-          />
-        </View>
-
         {/* Choices Per Item */}
         <View style={styles.section}>
-          <Text style={styles.label}>CHOICES PER ITEM</Text>
+          <Text style={styles.label}>CHOICES PER ITEM *</Text>
           <View style={styles.choiceButtons}>
             <TouchableOpacity
               style={[
@@ -322,6 +450,135 @@ export default function CreateQuizScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Class Selection */}
+        <View style={styles.section}>
+          <Text style={styles.label}>CLASS *</Text>
+          {classesLoading ? (
+            <View style={styles.loadingClassesRow}>
+              <ActivityIndicator size="small" color="#E8F5E9" />
+              <Text style={styles.loadingClassesText}>Loading classes...</Text>
+            </View>
+          ) : classOptions.length === 0 ? (
+            <View style={styles.emptyClassesBox}>
+              <Text style={styles.emptyClassesText}>No classes found</Text>
+            </View>
+          ) : (
+            <View style={styles.classButtons}>
+              {classOptions.map((cls) => {
+                const selected = selectedClassId === cls.id;
+                return (
+                  <TouchableOpacity
+                    key={cls.id}
+                    style={[
+                      styles.classButton,
+                      selected && styles.classButtonActive,
+                    ]}
+                    onPress={() => setSelectedClassId(cls.id)}
+                    disabled={loading}
+                  >
+                    <Text
+                      style={[
+                        styles.classButtonTitle,
+                        selected && styles.classButtonTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {cls.class_name}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.classButtonSubtitle,
+                        selected && styles.classButtonTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {cls.section_block || cls.course_subject || "Class"}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {/* Exam Type */}
+        <View style={styles.section}>
+          <Text style={styles.label}>EXAM TYPE *</Text>
+          <View style={styles.choiceButtons}>
+            <TouchableOpacity
+              style={[
+                styles.choiceButton,
+                examType === "board" && styles.choiceButtonActive,
+              ]}
+              onPress={() => setExamType("board")}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceButtonText,
+                  examType === "board" && styles.choiceButtonTextActive,
+                ]}
+              >
+                Board Exam
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.choiceButton,
+                examType === "diagnostic" && styles.choiceButtonActive,
+              ]}
+              onPress={() => setExamType("diagnostic")}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceButtonText,
+                  examType === "diagnostic" && styles.choiceButtonTextActive,
+                ]}
+              >
+                Diagnostic Test
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Exam Date */}
+        <View style={styles.section}>
+          <Text style={styles.label}>EXAM DATE *</Text>
+          <TouchableOpacity
+            style={styles.dateButton}
+            onPress={() => setShowDatePicker(true)}
+            disabled={loading}
+          >
+            <Ionicons name="calendar-outline" size={20} color="#E8F5E9" />
+            <Text style={styles.dateButtonText}>
+              {examDate ? formatDateForDisplay(examDate) : "Select exam date"}
+            </Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={examDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={handleDateChange}
+              minimumDate={new Date()}
+            />
+          )}
+        </View>
+
+        {/* Folder / Subject (Optional) */}
+        <View style={styles.section}>
+          <Text style={styles.label}>FOLDER / SUBJECT (OPTIONAL)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g., Mathematics, Science"
+            placeholderTextColor="#8B9D8B"
+            value={subject}
+            onChangeText={setSubject}
+            editable={!loading}
+          />
         </View>
 
         {/* Manual Editing Section */}
@@ -491,6 +748,69 @@ const styles = StyleSheet.create({
   choiceButtonTextActive: {
     color: "#4CAF50",
   },
+  classButtons: {
+    gap: 10,
+  },
+  classButton: {
+    backgroundColor: "#3d5a3d",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 2,
+    borderColor: "#3d5a3d",
+  },
+  classButtonActive: {
+    backgroundColor: "#2d4a2d",
+    borderColor: "#4CAF50",
+  },
+  classButtonTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#E8F5E9",
+    marginBottom: 3,
+  },
+  classButtonSubtitle: {
+    fontSize: 12,
+    color: "#B8D4B8",
+  },
+  classButtonTextActive: {
+    color: "#4CAF50",
+  },
+  loadingClassesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#3d5a3d",
+    borderRadius: 12,
+    padding: 14,
+  },
+  loadingClassesText: {
+    fontSize: 13,
+    color: "#B8D4B8",
+  },
+  emptyClassesBox: {
+    backgroundColor: "#3d5a3d",
+    borderRadius: 12,
+    padding: 14,
+  },
+  emptyClassesText: {
+    fontSize: 13,
+    color: "#B8D4B8",
+  },
+  dateButton: {
+    backgroundColor: "#3d5a3d",
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1.5,
+    borderColor: "#3d5a3d",
+  },
+  dateButtonText: {
+    fontSize: 15,
+    color: "#E8F5E9",
+    fontWeight: "600",
+  },
   manualSection: {
     backgroundColor: "#3d5a3d",
     borderRadius: 12,
@@ -512,18 +832,20 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   editButton: {
-    backgroundColor: "#2d7a5f",
+    backgroundColor: "#2d4a2d",
     borderRadius: 8,
     padding: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    borderWidth: 1.5,
+    borderColor: "#4CAF50",
   },
   editButtonText: {
     fontSize: 15,
     fontWeight: "600",
-    color: "#fff",
+    color: "#4CAF50",
   },
   scanButton: {
     backgroundColor: "#3d5a3d",
@@ -558,7 +880,7 @@ const styles = StyleSheet.create({
     borderTopColor: "#e0e0e0",
   },
   saveButton: {
-    backgroundColor: "#2d7a5f",
+    backgroundColor: "#3d5a3d",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",

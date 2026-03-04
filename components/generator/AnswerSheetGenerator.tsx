@@ -44,7 +44,7 @@ export default function AnswerSheetGenerator({
       setGeneratedSVG(svg);
       setSheetData({}); // Clear any previous data for blank sheet
       setShowPreview(true);
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to generate answer sheet");
     }
   };
@@ -62,7 +62,7 @@ export default function AnswerSheetGenerator({
         `Student ID: ${studentId}\nAnswers: ${Object.keys(answers).length} questions filled`,
         [{ text: "OK" }],
       );
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to generate test sheet");
     }
   };
@@ -77,7 +77,7 @@ export default function AnswerSheetGenerator({
         url: dataUrl,
         title: "Answer Sheet",
       });
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to share answer sheet");
     }
   };
@@ -92,14 +92,14 @@ export default function AnswerSheetGenerator({
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="arrow-back" size={24} color="#007AFF" />
+            <Ionicons name="arrow-back" size={24} color="#3d5a3d" />
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
 
           <Text style={styles.previewTitle}>Answer Sheet Preview</Text>
 
           <TouchableOpacity onPress={shareSheet} style={styles.shareButton}>
-            <Ionicons name="share" size={24} color="#007AFF" />
+            <Ionicons name="share" size={24} color="#3d5a3d" />
           </TouchableOpacity>
         </View>
 
@@ -148,7 +148,7 @@ export default function AnswerSheetGenerator({
                 </Text>
               </View>
               {selectedTemplate === key && (
-                <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+                <Ionicons name="checkmark-circle" size={24} color="#3d5a3d" />
               )}
             </TouchableOpacity>
           ))}
@@ -237,21 +237,21 @@ export default function AnswerSheetGenerator({
           <Text style={styles.sectionTitle}>Features</Text>
           <View style={styles.featuresList}>
             <View style={styles.feature}>
-              <Ionicons name="scan" size={20} color="#4CAF50" />
+              <Ionicons name="scan" size={20} color="#3d5a3d" />
               <Text style={styles.featureText}>Zipgrade compatible format</Text>
             </View>
             <View style={styles.feature}>
-              <Ionicons name="person" size={20} color="#4CAF50" />
+              <Ionicons name="person" size={20} color="#3d5a3d" />
               <Text style={styles.featureText}>8-digit student ID bubbles</Text>
             </View>
             <View style={styles.feature}>
-              <Ionicons name="grid" size={20} color="#4CAF50" />
+              <Ionicons name="grid" size={20} color="#3d5a3d" />
               <Text style={styles.featureText}>
                 Multiple choice A-D options
               </Text>
             </View>
             <View style={styles.feature}>
-              <Ionicons name="print" size={20} color="#4CAF50" />
+              <Ionicons name="print" size={20} color="#3d5a3d" />
               <Text style={styles.featureText}>Print-ready PDF format</Text>
             </View>
           </View>
@@ -264,16 +264,16 @@ export default function AnswerSheetGenerator({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     padding: 20,
-    backgroundColor: "white",
+    backgroundColor: "#f8faf9",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#d8dfda",
   },
   closeButton: {
     padding: 5,
@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: "bold",
-    color: "#333",
+    color: "#24362f",
   },
   placeholder: {
     width: 34,
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   section: {
-    backgroundColor: "white",
+    backgroundColor: "#f0ead6",
     borderRadius: 12,
     padding: 20,
     marginBottom: 20,
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 15,
   },
   templateOption: {
@@ -314,12 +314,13 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "#8cb09a",
     marginBottom: 10,
+    backgroundColor: "#f8faf9",
   },
   selectedTemplate: {
-    borderColor: "#4CAF50",
-    backgroundColor: "#f8fff8",
+    borderColor: "#3d5a3d",
+    backgroundColor: "#dbe7df",
   },
   templateInfo: {
     flex: 1,
@@ -327,12 +328,12 @@ const styles = StyleSheet.create({
   templateName: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 4,
   },
   templateDetails: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
   },
   configRow: {
     marginBottom: 20,
@@ -340,7 +341,7 @@ const styles = StyleSheet.create({
   configLabel: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#333",
+    color: "#24362f",
     marginBottom: 10,
   },
   examIdContainer: {
@@ -353,16 +354,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
-    backgroundColor: "white",
+    borderColor: "#8cb09a",
+    backgroundColor: "#f8faf9",
   },
   selectedExamId: {
-    borderColor: "#007AFF",
-    backgroundColor: "#007AFF",
+    borderColor: "#3d5a3d",
+    backgroundColor: "#3d5a3d",
   },
   examIdText: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
   },
   selectedExamIdText: {
     color: "white",
@@ -376,19 +377,19 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
-    backgroundColor: "white",
+    borderColor: "#8cb09a",
+    backgroundColor: "#f8faf9",
     alignItems: "center",
     justifyContent: "center",
   },
   selectedVersion: {
-    borderColor: "#007AFF",
-    backgroundColor: "#007AFF",
+    borderColor: "#3d5a3d",
+    backgroundColor: "#3d5a3d",
   },
   versionText: {
     fontSize: 16,
     fontWeight: "bold",
-    color: "#666",
+    color: "#4e6057",
   },
   selectedVersionText: {
     color: "white",
@@ -397,14 +398,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#007AFF",
+    backgroundColor: "#3d5a3d",
     padding: 15,
     borderRadius: 8,
     marginBottom: 10,
     gap: 10,
   },
   testButton: {
-    backgroundColor: "#FF9500",
+    backgroundColor: "#2f8a74",
   },
   generateButtonText: {
     color: "white",
@@ -421,20 +422,20 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 14,
-    color: "#666",
+    color: "#4e6057",
   },
   previewContainer: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#eef1ef",
   },
   previewHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     padding: 20,
-    backgroundColor: "white",
+    backgroundColor: "#f8faf9",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#d8dfda",
   },
   backButton: {
     flexDirection: "row",
@@ -443,12 +444,12 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 16,
-    color: "#007AFF",
+    color: "#3d5a3d",
   },
   previewTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: "#24362f",
   },
   shareButton: {
     padding: 5,

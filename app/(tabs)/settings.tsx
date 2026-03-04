@@ -1,6 +1,8 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import StatusModal from "@/components/common/StatusModal";
 import { auth } from "@/config/firebase";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -29,6 +31,36 @@ export default function SettingsScreen() {
     title: "",
     message: "",
   });
+
+  React.useEffect(() => {
+    let mounted = true;
+
+    const loadPreferences = async () => {
+      try {
+        const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+        if (mounted && savedDarkMode !== null) {
+          setDarkModeEnabled(savedDarkMode === "true");
+        }
+      } catch (error) {
+        console.warn("Could not load dark mode preference:", error);
+      }
+    };
+
+    loadPreferences();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleDarkModeToggle = async (value: boolean) => {
+    setDarkModeEnabled(value);
+    try {
+      await AsyncStorage.setItem(DARK_MODE_STORAGE_KEY, String(value));
+    } catch (error) {
+      console.warn("Could not save dark mode preference:", error);
+    }
+  };
 
   const handleLogout = () => {
     setLogoutConfirmVisible(true);
@@ -150,7 +182,7 @@ export default function SettingsScreen() {
             title="Dark Mode"
             subtitle="Switch to dark theme"
             value={darkModeEnabled}
-            onValueChange={setDarkModeEnabled}
+            onValueChange={handleDarkModeToggle}
           />
           <SettingItem
             icon="language"
