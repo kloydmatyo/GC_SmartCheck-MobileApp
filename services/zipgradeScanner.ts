@@ -334,6 +334,9 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
   ): Promise<ScanResult> {
+    // Track all Mat objects for cleanup
+    const matsToCleanup: any[] = [];
+
     try {
       // Load OpenCV
       loadOpenCV();
@@ -415,6 +418,7 @@ export class ZipgradeScanner {
 
       // ── 3. Best threshold ─────────────────────────────────────────────────
       const threshCandidates: { mat: any; label: string }[] = [];
+      const matsToCleanup: any[] = [srcMat, grayMat, blurMat]; // Track all Mats for cleanup
 
       const tOtsuInv = OpenCV.createObject(
         ObjectType.Mat,
@@ -431,6 +435,7 @@ export class ZipgradeScanner {
         ThresholdTypes.THRESH_BINARY_INV | ThresholdTypes.THRESH_OTSU,
       );
       threshCandidates.push({ mat: tOtsuInv, label: "Otsu-INV" });
+      matsToCleanup.push(tOtsuInv);
 
       const tOtsu = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
       OpenCV.invoke(
@@ -442,6 +447,7 @@ export class ZipgradeScanner {
         ThresholdTypes.THRESH_BINARY | ThresholdTypes.THRESH_OTSU,
       );
       threshCandidates.push({ mat: tOtsu, label: "Otsu" });
+      matsToCleanup.push(tOtsu);
 
       const tAdapt = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
       try {
@@ -457,6 +463,7 @@ export class ZipgradeScanner {
           12,
         );
         threshCandidates.push({ mat: tAdapt, label: `Adaptive-${bs}` });
+        matsToCleanup.push(tAdapt);
       } catch (_) {}
 
       const scoringMin = Math.pow(IMG_W * 0.02, 2);
@@ -513,6 +520,8 @@ export class ZipgradeScanner {
         0,
         DataTypes.CV_32S,
       );
+      matsToCleanup.push(contoursVec, hierMat);
+
       OpenCV.invoke(
         "findContoursWithHierarchy",
         bestThreshMat,
@@ -840,7 +849,28 @@ export class ZipgradeScanner {
       console.error("[OMR] Fatal error:", error);
       throw new Error("Failed to process Zipgrade answer sheet");
     } finally {
-      OpenCV.clearBuffers();
+      // Explicitly clear all OpenCV buffers and release memory
+      try {
+        // Delete all tracked Mat objects
+        for (const mat of matsToCleanup) {
+          try {
+            if (mat && typeof mat.delete === "function") {
+              mat.delete();
+            }
+          } catch (e) {
+            // Ignore individual deletion errors
+          }
+        }
+
+        // Clear OpenCV internal buffers
+        OpenCV.clearBuffers();
+
+        console.log(
+          `[OMR] Cleanup: Released ${matsToCleanup.length} Mat objects`,
+        );
+      } catch (e) {
+        console.warn("[OMR] Cleanup warning:", e);
+      }
     }
   }
 
@@ -851,6 +881,7 @@ export class ZipgradeScanner {
     detectedTemplate?: keyof ReturnType<typeof ZipgradeGenerator.getTemplates>;
   }> {
     const issues: string[] = [];
+    const matsToCleanup: any[] = [];
 
     try {
       // Load OpenCV
@@ -865,12 +896,16 @@ export class ZipgradeScanner {
       const base64Image = await fileObj.base64();
 
       const srcMat = OpenCV.base64ToMat(base64Image);
+      matsToCleanup.push(srcMat);
+
       const grayMat = OpenCV.createObject(
         ObjectType.Mat,
         0,
         0,
         DataTypes.CV_8U,
       );
+      matsToCleanup.push(grayMat);
+
       OpenCV.invoke(
         "cvtColor",
         srcMat,
@@ -885,6 +920,8 @@ export class ZipgradeScanner {
         0,
         DataTypes.CV_8U,
       );
+      matsToCleanup.push(edgesMat);
+
       OpenCV.invoke("Canny", grayMat, edgesMat, 50, 150);
 
       const res = OpenCV.invoke("countNonZero", edgesMat) as any;
@@ -905,10 +942,27 @@ export class ZipgradeScanner {
           "Image is too blurry. Ensure the camera is steadily focused and lighting is bright.",
         );
       }
-
-      OpenCV.clearBuffers();
     } catch (err) {
       console.error("[Validation] Blur detection check failed:", err);
+    } finally {
+      // Cleanup Mat objects
+      try {
+        for (const mat of matsToCleanup) {
+          try {
+            if (mat && typeof mat.delete === "function") {
+              mat.delete();
+            }
+          } catch (e) {
+            // Ignore individual deletion errors
+          }
+        }
+        OpenCV.clearBuffers();
+        console.log(
+          `[Validation] Cleanup: Released ${matsToCleanup.length} Mat objects`,
+        );
+      } catch (e) {
+        console.warn("[Validation] Cleanup warning:", e);
+      }
     }
 
     return {
