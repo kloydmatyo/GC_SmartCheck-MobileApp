@@ -2,10 +2,10 @@ import { db } from "@/config/firebase";
 import { addDoc, collection } from "firebase/firestore";
 import { AnswerKey, GradingResult, ScanResult } from "../types/scanning";
 import {
-    GradeStatus,
-    GradingResultExtended,
-    ValidationResult,
-    ValidationStatus,
+  GradeStatus,
+  GradingResultExtended,
+  ValidationResult,
+  ValidationStatus,
 } from "../types/student";
 import { StudentValidationService } from "./studentValidationService";
 
@@ -57,7 +57,7 @@ export class GradingService {
     scanResult: ScanResult,
     validationResult: ValidationResult,
     timestamp: string,
-  ): GradingResultExtended {
+  ): Promise<GradingResultExtended> {
     // REQ 14: Map validation status to grade status with status flag
     const gradeStatusMap: Record<ValidationStatus, GradeStatus> = {
       INVALID_ID: "NULL_INVALID_ID",
