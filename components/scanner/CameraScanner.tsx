@@ -45,17 +45,19 @@ export default function CameraScanner({
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
-    // Physical aspect ratios from actual templates
+    // Custom dimensions for 20q template
+    if (questionCount <= 20) {
+      return { width: 300, height: 400 };
+    }
+
+    // Physical aspect ratios for 50q and 100q templates
     const aspectRatios = {
-      20: 91 / 127.5, // ~0.71 (nearly square, slightly taller)
       50: 91 / 211, // ~0.43 (very tall/narrow)
       100: 197 / 215.5, // ~0.91 (nearly square, slightly wider)
     };
 
-    let aspectRatio = aspectRatios[20]; // default
-    if (questionCount <= 20) {
-      aspectRatio = aspectRatios[20];
-    } else if (questionCount <= 50) {
+    let aspectRatio = aspectRatios[50]; // default
+    if (questionCount <= 50) {
       aspectRatio = aspectRatios[50];
     } else {
       aspectRatio = aspectRatios[100];

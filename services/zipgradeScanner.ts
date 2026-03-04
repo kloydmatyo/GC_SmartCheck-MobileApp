@@ -235,46 +235,6 @@ function extractAnswersFromRegion(
     `[OMR] Q${startQ}+${numQ}: ${regionBubbles.length} bubbles, ${rows.length} rows (${fullRows.length} full)`,
   );
 
-  // If we have more rows than questions, filter out outliers
-  // This happens when Student ID bubbles or noise bleeds into the region
-  let filteredRows = allRows;
-
-  // First, filter by absolute Y position to remove Student ID bubbles
-  const rowYPositions = allRows.map((r) => {
-    const meanY = r.reduce((s, b) => s + b.y, 0) / r.length;
-    return meanY / paperH; // Convert to fraction of paper height
-  });
-
-  // Filter out rows outside the region's Y bounds (with 2% margin)
-  const yMargin = 0.02;
-  filteredRows = allRows.filter((row, idx) => {
-    const yPos = rowYPositions[idx];
-    return yPos >= yMin - yMargin && yPos <= yMax + yMargin;
-  });
-
-  if (filteredRows.length !== allRows.length) {
-    console.log(
-      `[OMR] Q${startQ}+ filtered ${allRows.length} rows → ${filteredRows.length} rows (removed out-of-bounds)`,
-    );
-  }
-
-  // If still more rows than questions, keep only the most central ones
-  if (filteredRows.length > numQ) {
-    const rowsWithY = filteredRows.map((row) => ({
-      row,
-      y: row.reduce((s, b) => s + b.y, 0) / row.length,
-    }));
-    rowsWithY.sort((a, b) => a.y - b.y);
-
-    // Keep the FIRST numQ rows (top rows = first questions)
-    // Don't skip top rows - Q1 should be the topmost row!
-    filteredRows = rowsWithY.slice(0, numQ).map((r) => r.row);
-
-    console.log(
-      `[OMR] Q${startQ}+ further filtered to ${filteredRows.length} rows (kept top ${numQ})`,
-    );
-  }
-
   // Derive centroids from full rows only (reliable A-E positions)
   const colCentroids = deriveColumnCentroids(fullRows, 5);
   console.log(
@@ -296,14 +256,14 @@ function extractAnswersFromRegion(
       fallbackCentroids.map((c) => Math.round(c)),
     );
     return extractWithCentroids(
-      filteredRows,
+      allRows,
       colCentroids.length >= 1 ? colCentroids : fallbackCentroids,
       startQ,
       numQ,
     );
   }
 
-  return extractWithCentroids(filteredRows, colCentroids, startQ, numQ);
+  return extractWithCentroids(allRows, colCentroids, startQ, numQ);
 }
 
 function extractWithCentroids(
@@ -413,8 +373,8 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // Both columns are at the same Y position (side-by-side layout)
     // Bubble density shows answers concentrated at y50-70%
     return [
-      { xMin: 0.08, xMax: 0.48, yMin: 0.48, yMax: 0.75, startQ: 1, numQ: 10 },
-      { xMin: 0.52, xMax: 0.92, yMin: 0.48, yMax: 0.75, startQ: 11, numQ: 10 },
+      { xMin: 0.26, xMax: 0.5, yMin: 0.28, yMax: 0.95, startQ: 1, numQ: 10 },
+      { xMin: 0.54, xMax: 0.84, yMin: 0.28, yMax: 0.95, startQ: 11, numQ: 10 },
     ];
   } else if (questionCount <= 30) {
     // ── 30-question layout (3 groups side by side, no Y split) ─────────────
@@ -621,55 +581,59 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
+      // Only for 50q/100q sheets - 20q sheets should not be rotated
       // 50q sheets should be portrait (tall), but camera may capture landscape
       // Check if rotation is needed based on question count and aspect ratio
       let workingMat = srcMat;
-      const imgAspect = srcJs.cols / srcJs.rows;
-      const isLandscape = imgAspect > 1.0;
 
-      // 50q sheets are very tall (aspect ~0.43), should be portrait
-      // If we have a 50q exam but image is landscape, rotate 90° clockwise
-      if (qCount === 50 && isLandscape) {
-        console.log(
-          `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
-        );
-        const rotatedMat = OpenCV.createObject(
-          ObjectType.Mat,
-          0,
-          0,
-          DataTypes.CV_8U,
-        );
-        matsToCleanup.push(rotatedMat);
+      if (qCount !== 20) {
+        const imgAspect = srcJs.cols / srcJs.rows;
+        const isLandscape = imgAspect > 1.0;
 
-        // Rotate 90° clockwise (ROTATE_90_CLOCKWISE = 0)
-        OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+        // 50q sheets are very tall (aspect ~0.43), should be portrait
+        // If we have a 50q exam but image is landscape, rotate 90° clockwise
+        if (qCount === 50 && isLandscape) {
+          console.log(
+            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
+          );
+          const rotatedMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(rotatedMat);
 
-        const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
-        console.log(
-          `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
-        );
-        workingMat = rotatedMat;
-      } else if (qCount === 100 && !isLandscape) {
-        // 100q sheets are wide (aspect ~0.91), should be landscape
-        // If we have a 100q exam but image is portrait, rotate 90° clockwise
-        console.log(
-          `[OMR] Image is portrait (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 100q sheet should be landscape. Rotating 90° clockwise...`,
-        );
-        const rotatedMat = OpenCV.createObject(
-          ObjectType.Mat,
-          0,
-          0,
-          DataTypes.CV_8U,
-        );
-        matsToCleanup.push(rotatedMat);
+          // Rotate 90° clockwise (ROTATE_90_CLOCKWISE = 0)
+          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
 
-        OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+          console.log(
+            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+          );
+          workingMat = rotatedMat;
+        } else if (qCount === 100 && !isLandscape) {
+          // 100q sheets are wide (aspect ~0.91), should be landscape
+          // If we have a 100q exam but image is portrait, rotate 90° clockwise
+          console.log(
+            `[OMR] Image is portrait (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 100q sheet should be landscape. Rotating 90° clockwise...`,
+          );
+          const rotatedMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(rotatedMat);
 
-        const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
-        console.log(
-          `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
-        );
-        workingMat = rotatedMat;
+          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+
+          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+          console.log(
+            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+          );
+          workingMat = rotatedMat;
+        }
       }
 
       const IMG_W: number = (OpenCV.toJSValue(workingMat) as any).cols;
@@ -832,9 +796,9 @@ export class ZipgradeScanner {
       }
 
       // ── 5. Collect bubble candidates ───────────────────────────────────────
-      // Be more lenient with size constraints to catch all bubbles
-      const minShapeArea = Math.pow(imgWidth / 100, 2); // Reduced from /80 to /100
-      const maxShapeArea = imgArea * 0.08; // Increased from 0.05 to 0.08
+      // Use stricter filtering for 20q (like Main), more lenient for 50q/100q
+      const minShapeArea = Math.pow(imgWidth / 80, 2);
+      const maxShapeArea = qCount <= 20 ? imgArea * 0.05 : imgArea * 0.08;
       const rawShapes: Bubble[] = [];
 
       for (let i = 0; i < numContours; i++) {
@@ -849,10 +813,15 @@ export class ZipgradeScanner {
             ? (OpenCV.invoke("contourArea", contour) as any).value / area
             : 0;
 
-        // Relaxed filtering criteria
+        // Stricter filtering for 20q (like Main), relaxed for 50q/100q
         if (area < minShapeArea || area > maxShapeArea) continue;
-        if (aspect < 0.3 || aspect > 3.0) continue; // More lenient aspect ratio
-        if (extent < 0.05) continue; // More lenient extent
+        if (qCount <= 20) {
+          if (aspect < 0.4 || aspect > 2.5) continue;
+          if (extent < 0.1) continue;
+        } else {
+          if (aspect < 0.3 || aspect > 3.0) continue;
+          if (extent < 0.05) continue;
+        }
 
         let fill = 0;
         try {
@@ -982,31 +951,36 @@ export class ZipgradeScanner {
       console.log(`[OMR] medianH: ${medianH}, medianW: ${medianW}`);
 
       // ── 7. Detect timing marks (block markers) ────────────────────────────
-      // Timing marks are the small black squares beside each question block
-      // They're larger than bubbles but smaller than registration marks
-      // Use them to dynamically locate question blocks
-      const timingMarks = rawShapes.filter(
-        (s) =>
-          s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
-          s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
-          s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
-          s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
-          s.w / s.h >= 0.4 && // More lenient aspect ratio
-          s.w / s.h <= 2.5,
-      );
-      console.log(
-        `[OMR] Timing marks detected: ${timingMarks.length} (bubbleRefArea=${Math.round(bubbleRefArea)})`,
-      );
+      // Only use timing marks for 50q/100q sheets
+      // 20q sheets use fixed regions (like Main)
+      const timingMarks =
+        qCount > 20
+          ? rawShapes.filter(
+              (s) =>
+                s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
+                s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
+                s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
+                s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
+                s.w / s.h >= 0.4 && // More lenient aspect ratio
+                s.w / s.h <= 2.5,
+            )
+          : [];
 
-      // Debug: log timing mark details
-      if (timingMarks.length > 0) {
-        timingMarks.forEach((m, idx) => {
-          console.log(
-            `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
-              `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
-              `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
-          );
-        });
+      if (qCount > 20) {
+        console.log(
+          `[OMR] Timing marks detected: ${timingMarks.length} (bubbleRefArea=${Math.round(bubbleRefArea)})`,
+        );
+
+        // Debug: log timing mark details
+        if (timingMarks.length > 0) {
+          timingMarks.forEach((m, idx) => {
+            console.log(
+              `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
+                `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
+                `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
+            );
+          });
+        }
       }
 
       // ── 8. Paper crop via registration marks ──────────────────────────────
@@ -1029,67 +1003,20 @@ export class ZipgradeScanner {
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      // TEMPORARILY DISABLED: Marker-based cropping is detecting wrong markers
-      // and creating tiny crop areas. Using full image with margins instead.
-      console.log(
-        `[OMR] Using full image with default margins (marker detection disabled)`,
-      );
-
-      /*
-      if (regMarks.length >= 2) {
-        // Sort marks to find corners
+      // Use registration marks for cropping when available (like Main)
+      if (regMarks.length >= 3) {
         const mxs = regMarks.map((m) => m.x).sort((a, b) => a - b);
         const mys = regMarks.map((m) => m.y).sort((a, b) => a - b);
-
-        // Find top-left and bottom-right markers
-        const topLeft = regMarks.find((m) => m.x === mxs[0] || m.y === mys[0]);
-        const bottomRight = regMarks.find(
-          (m) => m.x === mxs[mxs.length - 1] || m.y === mys[mys.length - 1],
+        paperLeft = Math.max(0, mxs[0] - medianW * 2);
+        paperRight = Math.min(imgWidth, mxs[mxs.length - 1] + medianW * 2);
+        paperTop = Math.max(0, mys[0] - medianH * 2);
+        paperBottom = Math.min(imgHeight, mys[mys.length - 1] + medianH * 2);
+        console.log(
+          `[OMR] crop from marks: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
         );
-
-        if (topLeft && bottomRight) {
-          // Calculate paper bounds from markers
-          paperLeft = Math.max(0, topLeft.x - medianW * 2);
-          paperRight = Math.min(imgWidth, bottomRight.x + medianW * 2);
-          paperTop = Math.max(0, topLeft.y - medianH * 2);
-          paperBottom = Math.min(imgHeight, bottomRight.y + medianH * 2);
-
-          // Calculate detected aspect ratio to identify sheet type
-          const detectedWidth = paperRight - paperLeft;
-          const detectedHeight = paperBottom - paperTop;
-          const detectedAspect = detectedWidth / detectedHeight;
-
-          console.log(
-            `[OMR] Detected paper aspect ratio: ${detectedAspect.toFixed(3)} (${Math.round(detectedWidth)}x${Math.round(detectedHeight)})`,
-          );
-
-          // Match to known sheet types by aspect ratio
-          const aspectDiffs = {
-            "20": Math.abs(detectedAspect - SHEET_SPECS["20"].aspectRatio),
-            "50": Math.abs(detectedAspect - SHEET_SPECS["50"].aspectRatio),
-            "100": Math.abs(detectedAspect - SHEET_SPECS["100"].aspectRatio),
-          };
-
-          const bestMatch = Object.entries(aspectDiffs).reduce((a, b) =>
-            a[1] < b[1] ? a : b,
-          )[0] as "20" | "50" | "100";
-
-          // Only accept match if aspect ratio is within 15% tolerance
-          if (aspectDiffs[bestMatch] < 0.15) {
-            detectedSheetType = bestMatch;
-            console.log(
-              `[OMR] Sheet type detected from markers: ${detectedSheetType}-question (aspect diff: ${aspectDiffs[bestMatch].toFixed(3)})`,
-            );
-          }
-
-          console.log(
-            `[OMR] crop from marks: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
-          );
-        }
       } else {
-        console.log(`[OMR] crop: using default margins (no markers detected)`);
+        console.log(`[OMR] crop: using default margins`);
       }
-      */
 
       const paperW = paperRight - paperLeft;
       const paperH = paperBottom - paperTop;
@@ -1130,45 +1057,40 @@ export class ZipgradeScanner {
       });
 
       // ── 8. Auto-detect sheet type if not explicitly set ──────────────────
-      // Priority order:
-      // 1. Registration marker aspect ratio (if detected)
-      // 2. Exam-specified question count (ALWAYS trust the database)
-      // Bubble count is NOT used for detection - it's unreliable
+      // For 20q: use simple bubble count heuristic (like Main)
+      // For 50q/100q: trust the exam-specified question count
       let detectedQ = qCount;
 
-      console.log(
-        `[OMR] Input qCount: ${qCount}, detectedSheetType: ${detectedSheetType || "none"}, bubbles: ${bubbles.length}`,
-      );
+      if (qCount <= 20) {
+        // A 20-question sheet has exactly 100 bubbles (20 * 5).
+        // A 50-question sheet has 250 answer bubbles + 50 ID bubbles = 300 bubbles.
+        // Therefore, any sheet with > 160 bubbles is definitively a 50+ question sheet.
+        const looksLike50q = bubbles.length > 160;
 
-      // If markers detected a specific type, use that (highest priority)
-      if (detectedSheetType === "50") {
-        detectedQ = 50;
-        console.log(
-          `[OMR] Sheet type confirmed by markers: 50q (overriding input qCount=${qCount})`,
-        );
-      } else if (detectedSheetType === "100") {
-        detectedQ = 100;
-        console.log(
-          `[OMR] Sheet type confirmed by markers: 100q (overriding input qCount=${qCount})`,
-        );
-      } else if (detectedSheetType === "20") {
-        detectedQ = 20;
-        console.log(`[OMR] Sheet type confirmed by markers: 20q`);
+        if (looksLike50q) {
+          detectedQ = 50;
+          console.log(
+            `[OMR] AUTO-DETECTED 50q sheet (totalBubbles=${bubbles.length}) — overriding qCount from ${qCount} to 50`,
+          );
+        } else {
+          console.log(
+            `[OMR] Confirmed 20q sheet (totalBubbles=${bubbles.length})`,
+          );
+        }
       } else {
-        // No markers detected - ALWAYS trust the exam-specified question count
-        // The exam data from Firestore is the source of truth
-        detectedQ = qCount;
+        // For 50q/100q, always trust the exam-specified question count
         console.log(
           `[OMR] Using exam-specified question count: ${qCount}q (bubbles=${bubbles.length})`,
         );
       }
 
       // ── 9. Extract answers using timing mark-based or fallback regions ────
-      // Try to use timing marks to dynamically locate question blocks
+      // For 20q: use fixed regions (like Main)
+      // For 50q/100q: try to use timing marks to dynamically locate question blocks
       let regions = getLayoutRegions(detectedQ);
 
-      // If we have timing marks, use them to refine region positions
-      if (timingMarks.length >= 3) {
+      // Only use timing marks for 50q/100q sheets
+      if (detectedQ > 20 && timingMarks.length >= 3) {
         console.log(
           `[OMR] Using timing marks to refine ${regions.length} regions`,
         );
