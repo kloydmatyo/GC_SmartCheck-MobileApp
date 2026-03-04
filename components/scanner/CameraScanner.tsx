@@ -43,6 +43,192 @@ export default function CameraScanner({
     setFacing((current) => (current === "back" ? "front" : "back"));
   };
 
+  // Calculate frame dimensions based on template aspect ratio
+  const getFrameDimensions = () => {
+    // Physical aspect ratios from actual templates
+    const aspectRatios = {
+      20: 91 / 127.5, // ~0.71 (nearly square, slightly taller)
+      50: 91 / 211, // ~0.43 (very tall/narrow)
+      100: 197 / 215.5, // ~0.91 (nearly square, slightly wider)
+    };
+
+    let aspectRatio = aspectRatios[20]; // default
+    if (questionCount <= 20) {
+      aspectRatio = aspectRatios[20];
+    } else if (questionCount <= 50) {
+      aspectRatio = aspectRatios[50];
+    } else {
+      aspectRatio = aspectRatios[100];
+    }
+
+    // Base height on screen size, calculate width from aspect ratio
+    const frameHeight = 500; // Taller frame for better visibility
+    const frameWidth = frameHeight * aspectRatio;
+
+    return { width: frameWidth, height: frameHeight };
+  };
+
+  const frameDimensions = getFrameDimensions();
+
+  // Get scanning regions for visual debugging
+  const getDebugRegions = () => {
+    const { width, height } = frameDimensions;
+
+    if (questionCount <= 20) {
+      // 20q: 2 columns side-by-side
+      return [
+        {
+          x: 0.08,
+          xEnd: 0.48,
+          y: 0.48,
+          yEnd: 0.75,
+          label: "Q1-10",
+          color: "rgba(255,0,0,0.3)",
+        },
+        {
+          x: 0.52,
+          xEnd: 0.92,
+          y: 0.48,
+          yEnd: 0.75,
+          label: "Q11-20",
+          color: "rgba(0,255,0,0.3)",
+        },
+      ];
+    } else if (questionCount <= 50) {
+      // 50q: LEFT and RIGHT columns
+      return [
+        {
+          x: 0.25,
+          xEnd: 0.52,
+          y: 0.28,
+          yEnd: 0.5,
+          label: "Q1-10",
+          color: "rgba(255,0,0,0.3)",
+        },
+        {
+          x: 0.25,
+          xEnd: 0.52,
+          y: 0.45,
+          yEnd: 0.65,
+          label: "Q11-20",
+          color: "rgba(0,255,0,0.3)",
+        },
+        {
+          x: 0.25,
+          xEnd: 0.52,
+          y: 0.6,
+          yEnd: 0.8,
+          label: "Q21-30",
+          color: "rgba(255,200,0,0.3)",
+        },
+        {
+          x: 0.48,
+          xEnd: 0.72,
+          y: 0.28,
+          yEnd: 0.5,
+          label: "Q31-40",
+          color: "rgba(0,200,255,0.3)",
+        },
+        {
+          x: 0.48,
+          xEnd: 0.72,
+          y: 0.45,
+          yEnd: 0.65,
+          label: "Q41-50",
+          color: "rgba(200,0,255,0.3)",
+        },
+      ];
+    } else {
+      // 100q: 2 rows × 5 columns
+      return [
+        // Top row
+        {
+          x: 0.066,
+          xEnd: 0.203,
+          y: 0.269,
+          yEnd: 0.478,
+          label: "Q1-10",
+          color: "rgba(255,0,0,0.3)",
+        },
+        {
+          x: 0.216,
+          xEnd: 0.353,
+          y: 0.269,
+          yEnd: 0.478,
+          label: "Q11-20",
+          color: "rgba(255,100,0,0.3)",
+        },
+        {
+          x: 0.365,
+          xEnd: 0.503,
+          y: 0.269,
+          yEnd: 0.478,
+          label: "Q21-30",
+          color: "rgba(255,200,0,0.3)",
+        },
+        {
+          x: 0.515,
+          xEnd: 0.652,
+          y: 0.269,
+          yEnd: 0.478,
+          label: "Q31-40",
+          color: "rgba(0,255,0,0.3)",
+        },
+        {
+          x: 0.665,
+          xEnd: 0.802,
+          y: 0.269,
+          yEnd: 0.478,
+          label: "Q41-50",
+          color: "rgba(0,255,200,0.3)",
+        },
+        // Bottom row
+        {
+          x: 0.066,
+          xEnd: 0.203,
+          y: 0.52,
+          yEnd: 0.729,
+          label: "Q51-60",
+          color: "rgba(0,100,255,0.3)",
+        },
+        {
+          x: 0.216,
+          xEnd: 0.353,
+          y: 0.52,
+          yEnd: 0.729,
+          label: "Q61-70",
+          color: "rgba(100,0,255,0.3)",
+        },
+        {
+          x: 0.365,
+          xEnd: 0.503,
+          y: 0.52,
+          yEnd: 0.729,
+          label: "Q71-80",
+          color: "rgba(200,0,255,0.3)",
+        },
+        {
+          x: 0.515,
+          xEnd: 0.652,
+          y: 0.52,
+          yEnd: 0.729,
+          label: "Q81-90",
+          color: "rgba(255,0,100,0.3)",
+        },
+        {
+          x: 0.665,
+          xEnd: 0.802,
+          y: 0.52,
+          yEnd: 0.729,
+          label: "Q91-100",
+          color: "rgba(255,0,200,0.3)",
+        },
+      ];
+    }
+  };
+
+  const debugRegions = getDebugRegions();
+
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
 
@@ -106,12 +292,53 @@ export default function CameraScanner({
       >
         {/* Overlay for Zipgrade answer sheet alignment */}
         <View style={styles.overlay}>
-          <View style={styles.scanFrame} />
+          <View
+            style={[
+              styles.scanFrame,
+              {
+                width: frameDimensions.width,
+                height: frameDimensions.height,
+              },
+            ]}
+          >
+            {/* Debug regions overlay - shows where scanner looks for bubbles */}
+            {debugRegions.map((region, idx) => (
+              <View
+                key={idx}
+                style={{
+                  position: "absolute",
+                  left: region.x * frameDimensions.width,
+                  top: region.y * frameDimensions.height,
+                  width: (region.xEnd - region.x) * frameDimensions.width,
+                  height: (region.yEnd - region.y) * frameDimensions.height,
+                  backgroundColor: region.color,
+                  borderWidth: 1,
+                  borderColor: region.color.replace("0.3", "0.8"),
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontSize: 10,
+                    fontWeight: "bold",
+                    backgroundColor: "rgba(0,0,0,0.7)",
+                    paddingHorizontal: 4,
+                    paddingVertical: 2,
+                    borderRadius: 3,
+                  }}
+                >
+                  {region.label}
+                </Text>
+              </View>
+            ))}
+          </View>
           <Text style={styles.instructionText}>
             Align Zipgrade answer sheet within the frame
           </Text>
           <Text style={styles.tipText}>
-            Ensure all bubbles and student ID are visible
+            Colored boxes show scanning regions for {questionCount} questions
           </Text>
         </View>
 
@@ -179,8 +406,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   scanFrame: {
-    width: 300,
-    height: 400,
+    // Base dimensions - will be overridden by inline styles
     borderWidth: 2,
     borderColor: "#00ff00",
     borderRadius: 10,

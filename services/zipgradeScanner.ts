@@ -245,8 +245,8 @@ function extractAnswersFromRegion(
     return meanY / paperH; // Convert to fraction of paper height
   });
 
-  // Filter out rows outside the region's Y bounds (with 5% margin)
-  const yMargin = 0.05;
+  // Filter out rows outside the region's Y bounds (with 2% margin)
+  const yMargin = 0.02;
   filteredRows = allRows.filter((row, idx) => {
     const yPos = rowYPositions[idx];
     return yPos >= yMin - yMargin && yPos <= yMax + yMargin;
@@ -266,12 +266,12 @@ function extractAnswersFromRegion(
     }));
     rowsWithY.sort((a, b) => a.y - b.y);
 
-    // Skip outliers at top/bottom, keep middle numQ rows
-    const skipTop = Math.floor((rowsWithY.length - numQ) / 2);
-    filteredRows = rowsWithY.slice(skipTop, skipTop + numQ).map((r) => r.row);
+    // Keep the FIRST numQ rows (top rows = first questions)
+    // Don't skip top rows - Q1 should be the topmost row!
+    filteredRows = rowsWithY.slice(0, numQ).map((r) => r.row);
 
     console.log(
-      `[OMR] Q${startQ}+ further filtered to ${filteredRows.length} rows (kept central)`,
+      `[OMR] Q${startQ}+ further filtered to ${filteredRows.length} rows (kept top ${numQ})`,
     );
   }
 
@@ -371,27 +371,27 @@ function extractWithCentroids(
 //
 // PHYSICAL SPECIFICATIONS:
 // ────────────────────────────────────────────────────────────────────────────
-// 20-item: Frame 91 × 127.5 mm (markers at TL: 7,19 and BR: 98,126)
+// 20-item: Frame 91 × 107 mm (markers at TL: 7,19 and BR: 98,126)
 //   - Block 1 (Q1-10):  X: 13-40mm,    Y: 58-103mm
 //   - Block 2 (Q11-20): X: 55.5-82.5mm, Y: 58-103mm
-//   - Bubble diameter: 4mm, spacing: 4.5mm
+//   - Bubble diameter: 3.2mm, spacing: 4.5mm
 //
 // 50-item: Frame 91 × 211 mm (markers at TL: 7,19 and BR: 98,230)
-//   - LEFT column (Q1-30): X starts at 13mm, 3 vertical blocks
-//     * Block 1 (Q1-10):   X: 13-40mm,    Y: 58-103mm
-//     * Block 2 (Q11-20):  X: 13-40mm,    Y: 112-157mm
-//     * Block 3 (Q21-30):  X: 13-40mm,    Y: 166-211mm
-//   - RIGHT column (Q31-50): X starts at 55.5mm, 2 vertical blocks
-//     * Block 4 (Q31-40):  X: 55.5-82.5mm, Y: 58-103mm
-//     * Block 5 (Q41-50):  X: 55.5-82.5mm, Y: 112-157mm
-//   - Bubble diameter: 4mm, spacing: 4.5mm
+//   - LEFT column (Q1-30): X: 13-40mm, 3 vertical blocks
+//     * Block 1 (Q1-10):   Y: 58-103mm
+//     * Block 2 (Q11-20):  Y: 112-157mm
+//     * Block 3 (Q21-30):  Y: 166-211mm
+//   - RIGHT column (Q31-50): X: 55.5-82.5mm, 2 vertical blocks
+//     * Block 4 (Q31-40):  Y: 58-103mm
+//     * Block 5 (Q41-50):  Y: 112-157mm
+//   - Bubble diameter: 3.2mm, spacing: 4.5mm
 //
 // 100-item: Frame 197 × 215.5 mm (markers at TL: 6.5,6.5 and BR: 203.5,222)
 //   - 10 blocks in 2 rows × 5 columns grid
 //   - Top row (Q1-50): Y: 58-103mm
 //   - Bottom row (Q51-100): Y: 112-157mm
 //   - Column positions: 13mm, 42.5mm, 72mm, 101.5mm, 131mm (each ~27mm wide)
-//   - Bubble diameter: 4mm, spacing: 4.5mm
+//   - Bubble diameter: 3.8mm, spacing: 4.5mm
 //
 // COORDINATE SYSTEM:
 // ────────────────────────────────────────────────────────────────────────────
@@ -403,18 +403,18 @@ function extractWithCentroids(
 function getLayoutRegions(questionCount: number): AnswerRegion[] {
   if (questionCount <= 20) {
     // ── 20-question layout ──────────────────────────────────────────────────
-    // Physical frame: 91 × 127.5 mm
-    // Block 1 (Q1-10):  X: 13-40mm (14.3%-44.0%), Y: 58-103mm (45.5%-80.8%)
-    // Block 2 (Q11-20): X: 55.5-82.5mm (61.0%-90.7%), Y: 58-103mm (45.5%-80.8%)
+    // Physical frame: 91 × 107 mm
     //
-    // Adjusted based on actual bubble density observations:
-    // - Student ID section is at y0-20%, must avoid it
-    // - Answer bubbles concentrated at y40-70% (main cluster at y50-60%)
-    // - Left column (Q1-10): x30-40%, Right column (Q11-20): x50-60%
-    // Starting Y at 40% to capture Q1, ending at 70% to avoid bottom noise
+    // ADJUSTED based on visual debugger alignment:
+    // Looking at actual sheet photos, bubbles are wider and more centered
+    // Block 1 (Q1-10):  LEFT column, wider coverage
+    // Block 2 (Q11-20): RIGHT column, wider coverage
+    //
+    // Both columns are at the same Y position (side-by-side layout)
+    // Bubble density shows answers concentrated at y50-70%
     return [
-      { xMin: 0.28, xMax: 0.48, yMin: 0.4, yMax: 0.7, startQ: 1, numQ: 10 },
-      { xMin: 0.52, xMax: 0.72, yMin: 0.4, yMax: 0.7, startQ: 11, numQ: 10 },
+      { xMin: 0.08, xMax: 0.48, yMin: 0.48, yMax: 0.75, startQ: 1, numQ: 10 },
+      { xMin: 0.52, xMax: 0.92, yMin: 0.48, yMax: 0.75, startQ: 11, numQ: 10 },
     ];
   } else if (questionCount <= 30) {
     // ── 30-question layout (3 groups side by side, no Y split) ─────────────
@@ -428,60 +428,130 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // ── 50-question layout ──────────────────────────────────────────────────
     // Physical frame: 91 × 211 mm
     //
-    // CRITICAL: This is a LEFT + RIGHT column layout, NOT all on right side!
-    // LEFT column (Q1-30): 3 vertical blocks at X: 13-40mm (14.3%-44.0%)
-    // RIGHT column (Q31-50): 2 vertical blocks at X: 55.5-82.5mm (61.0%-90.7%)
+    // CORRECTED based on bubble density analysis:
+    // The sheet has LEFT and RIGHT columns
     //
-    // LEFT COLUMN (Q1-30):
-    //   Block 1 (Q1-10):  Y: 58-103mm   (27.5%-48.8%)
-    //   Block 2 (Q11-20): Y: 112-157mm  (53.1%-74.4%)
-    //   Block 3 (Q21-30): Y: 166-211mm  (78.7%-100%)
+    // Bubble density shows:
+    // - LEFT column at x30-40% (bubbles at x30, x40)
+    // - RIGHT column at x50-60% (bubbles at x50, x60)
     //
-    // RIGHT COLUMN (Q31-50):
-    //   Block 4 (Q31-40): Y: 58-103mm   (27.5%-48.8%)
-    //   Block 5 (Q41-50): Y: 112-157mm  (53.1%-74.4%)
+    // Layout pattern based on actual bubble positions:
+    // - Q1-10:  LEFT,  Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q1)
+    // - Q11-20: LEFT,  Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
+    // - Q21-30: LEFT,  Y: 60%-80%  (y60-70% in density grid, starts after Q11-20 ends)
+    // - Q31-40: RIGHT, Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q31)
+    // - Q41-50: RIGHT, Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
     //
-    // Using slightly wider margins to catch edge bubbles
+    // Student ID is at top (Y: 0%-20%), skip it
     return [
-      // LEFT column - Q1-30
-      { xMin: 0.12, xMax: 0.46, yMin: 0.25, yMax: 0.5, startQ: 1, numQ: 10 },
-      { xMin: 0.12, xMax: 0.46, yMin: 0.51, yMax: 0.76, startQ: 11, numQ: 10 },
-      { xMin: 0.12, xMax: 0.46, yMin: 0.77, yMax: 1.0, startQ: 21, numQ: 10 },
-
-      // RIGHT column - Q31-50
-      { xMin: 0.59, xMax: 0.92, yMin: 0.25, yMax: 0.5, startQ: 31, numQ: 10 },
-      { xMin: 0.59, xMax: 0.92, yMin: 0.51, yMax: 0.76, startQ: 41, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
     // Physical frame: 197 × 215.5 mm
     //
-    // 10 blocks in 2 rows × 5 columns grid:
-    // Top row (Q1-50):    Y: 58-103mm   (26.9%-47.8%)
-    // Bottom row (Q51-100): Y: 112-157mm (52.0%-72.9%)
+    // EXACT PHYSICAL MEASUREMENTS from template:
+    // 10 blocks in 2 rows × 5 columns grid
     //
-    // Column X positions (each ~27mm wide):
-    //   Col 1 (Q1-10, Q51-60):   X: 13-40mm     (6.6%-20.3%)
-    //   Col 2 (Q11-20, Q61-70):  X: 42.5-69.5mm (21.6%-35.3%)
-    //   Col 3 (Q21-30, Q71-80):  X: 72-99mm     (36.5%-50.3%)
-    //   Col 4 (Q31-40, Q81-90):  X: 101.5-128.5mm (51.5%-65.2%)
-    //   Col 5 (Q41-50, Q91-100): X: 131-158mm   (66.5%-80.2%)
+    // Top row (Q1-50):    Y: 58-103mm  = 26.9%-47.8% of 215.5mm
+    // Bottom row (Q51-100): Y: 112-157mm = 52.0%-72.9% of 215.5mm
     //
-    // Using slightly wider margins to catch edge bubbles
+    // Column X positions (each block ~27mm wide):
+    //   Col 1: X: 13-40mm     = 6.6%-20.3% of 197mm
+    //   Col 2: X: 42.5-69.5mm = 21.6%-35.3% of 197mm
+    //   Col 3: X: 72-99mm     = 36.5%-50.3% of 197mm
+    //   Col 4: X: 101.5-128.5mm = 51.5%-65.2% of 197mm
+    //   Col 5: X: 131-158mm   = 66.5%-80.2% of 197mm
+    //
+    // Each column contains 10 questions (Q1-10, Q11-20, etc.)
     return [
       // Top row (Q1-50)
-      { xMin: 0.05, xMax: 0.21, yMin: 0.25, yMax: 0.49, startQ: 1, numQ: 10 },
-      { xMin: 0.2, xMax: 0.36, yMin: 0.25, yMax: 0.49, startQ: 11, numQ: 10 },
-      { xMin: 0.35, xMax: 0.51, yMin: 0.25, yMax: 0.49, startQ: 21, numQ: 10 },
-      { xMin: 0.5, xMax: 0.66, yMin: 0.25, yMax: 0.49, startQ: 31, numQ: 10 },
-      { xMin: 0.65, xMax: 0.81, yMin: 0.25, yMax: 0.49, startQ: 41, numQ: 10 },
+      {
+        xMin: 0.066,
+        xMax: 0.203,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 1,
+        numQ: 10,
+      },
+      {
+        xMin: 0.216,
+        xMax: 0.353,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 11,
+        numQ: 10,
+      },
+      {
+        xMin: 0.365,
+        xMax: 0.503,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 21,
+        numQ: 10,
+      },
+      {
+        xMin: 0.515,
+        xMax: 0.652,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 31,
+        numQ: 10,
+      },
+      {
+        xMin: 0.665,
+        xMax: 0.802,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 41,
+        numQ: 10,
+      },
 
       // Bottom row (Q51-100)
-      { xMin: 0.05, xMax: 0.21, yMin: 0.5, yMax: 0.74, startQ: 51, numQ: 10 },
-      { xMin: 0.2, xMax: 0.36, yMin: 0.5, yMax: 0.74, startQ: 61, numQ: 10 },
-      { xMin: 0.35, xMax: 0.51, yMin: 0.5, yMax: 0.74, startQ: 71, numQ: 10 },
-      { xMin: 0.5, xMax: 0.66, yMin: 0.5, yMax: 0.74, startQ: 81, numQ: 10 },
-      { xMin: 0.65, xMax: 0.81, yMin: 0.5, yMax: 0.74, startQ: 91, numQ: 10 },
+      {
+        xMin: 0.066,
+        xMax: 0.203,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 51,
+        numQ: 10,
+      },
+      {
+        xMin: 0.216,
+        xMax: 0.353,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 61,
+        numQ: 10,
+      },
+      {
+        xMin: 0.365,
+        xMax: 0.503,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 71,
+        numQ: 10,
+      },
+      {
+        xMin: 0.515,
+        xMax: 0.652,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 81,
+        numQ: 10,
+      },
+      {
+        xMin: 0.665,
+        xMax: 0.802,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 91,
+        numQ: 10,
+      },
     ];
   }
 }
@@ -911,7 +981,35 @@ export class ZipgradeScanner {
         ] || 20;
       console.log(`[OMR] medianH: ${medianH}, medianW: ${medianW}`);
 
-      // ── 7. Paper crop via registration marks ──────────────────────────────
+      // ── 7. Detect timing marks (block markers) ────────────────────────────
+      // Timing marks are the small black squares beside each question block
+      // They're larger than bubbles but smaller than registration marks
+      // Use them to dynamically locate question blocks
+      const timingMarks = rawShapes.filter(
+        (s) =>
+          s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
+          s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
+          s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
+          s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
+          s.w / s.h >= 0.4 && // More lenient aspect ratio
+          s.w / s.h <= 2.5,
+      );
+      console.log(
+        `[OMR] Timing marks detected: ${timingMarks.length} (bubbleRefArea=${Math.round(bubbleRefArea)})`,
+      );
+
+      // Debug: log timing mark details
+      if (timingMarks.length > 0) {
+        timingMarks.forEach((m, idx) => {
+          console.log(
+            `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
+              `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
+              `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
+          );
+        });
+      }
+
+      // ── 8. Paper crop via registration marks ──────────────────────────────
       // Registration marks are square black markers at corners
       // They should be significantly larger than bubbles (3-25x bubble area)
       // and have high extent (filled ratio) and square aspect ratio
@@ -1065,18 +1163,92 @@ export class ZipgradeScanner {
         );
       }
 
-      // ── 9. Extract answers using explicit layout profile ───────────────────
-      const regions = getLayoutRegions(detectedQ);
+      // ── 9. Extract answers using timing mark-based or fallback regions ────
+      // Try to use timing marks to dynamically locate question blocks
+      let regions = getLayoutRegions(detectedQ);
+
+      // If we have timing marks, use them to refine region positions
+      if (timingMarks.length >= 3) {
+        console.log(
+          `[OMR] Using timing marks to refine ${regions.length} regions`,
+        );
+
+        // Translate timing marks to paper space
+        const paperTimingMarks = timingMarks
+          .map((m) => ({
+            ...m,
+            x: m.x - paperLeft,
+            y: m.y - paperTop,
+          }))
+          .filter(
+            (m) => m.x >= 0 && m.x <= paperW && m.y >= 0 && m.y <= paperH,
+          );
+
+        // Sort timing marks by Y position (top to bottom)
+        paperTimingMarks.sort((a, b) => a.y - b.y);
+
+        // Group timing marks by Y position (same row = same block)
+        const markRows: (typeof paperTimingMarks)[] = [];
+        let currentRow: typeof paperTimingMarks = [];
+        const rowGap = medianH * 3; // Marks in same row should be within 3 bubble heights
+
+        for (const mark of paperTimingMarks) {
+          if (currentRow.length === 0) {
+            currentRow.push(mark);
+          } else {
+            const rowMeanY =
+              currentRow.reduce((s, m) => s + m.y, 0) / currentRow.length;
+            if (Math.abs(mark.y - rowMeanY) < rowGap) {
+              currentRow.push(mark);
+            } else {
+              if (currentRow.length > 0) markRows.push([...currentRow]);
+              currentRow = [mark];
+            }
+          }
+        }
+        if (currentRow.length > 0) markRows.push(currentRow);
+
+        console.log(`[OMR] Found ${markRows.length} timing mark rows`);
+
+        // Use timing marks to adjust region Y positions
+        if (markRows.length >= regions.length) {
+          regions = regions.map((region, idx) => {
+            if (idx < markRows.length) {
+              const marks = markRows[idx];
+              const minY = Math.min(...marks.map((m) => m.y));
+              const maxY = Math.max(...marks.map((m) => m.y));
+              const blockHeight = medianH * 11; // 10 questions + spacing
+
+              return {
+                ...region,
+                yMin: Math.max(0, (minY - medianH) / paperH),
+                yMax: Math.min(1, (minY + blockHeight) / paperH),
+              };
+            }
+            return region;
+          });
+          console.log(`[OMR] Adjusted regions using timing marks`);
+        }
+      } else {
+        console.log(
+          `[OMR] Using fixed layout regions (timing marks: ${timingMarks.length})`,
+        );
+      }
+
       console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
-      console.log(
-        `[OMR] Region details:`,
-        regions
-          .map(
-            (r) =>
-              `Q${r.startQ}-${r.startQ + r.numQ - 1}: X[${(r.xMin * 100).toFixed(0)}%-${(r.xMax * 100).toFixed(0)}%] Y[${(r.yMin * 100).toFixed(0)}%-${(r.yMax * 100).toFixed(0)}%]`,
-          )
-          .join(", "),
-      );
+
+      // Log detailed region information for debugging
+      regions.forEach((r, idx) => {
+        const xMinPx = Math.round(r.xMin * paperW);
+        const xMaxPx = Math.round(r.xMax * paperW);
+        const yMinPx = Math.round(r.yMin * paperH);
+        const yMaxPx = Math.round(r.yMax * paperH);
+        console.log(
+          `[OMR] Region ${idx + 1} (Q${r.startQ}-${r.startQ + r.numQ - 1}): ` +
+            `X[${(r.xMin * 100).toFixed(1)}%-${(r.xMax * 100).toFixed(1)}%] (${xMinPx}-${xMaxPx}px) ` +
+            `Y[${(r.yMin * 100).toFixed(1)}%-${(r.yMax * 100).toFixed(1)}%] (${yMinPx}-${yMaxPx}px)`,
+        );
+      });
 
       const allAnswers: StudentAnswer[] = [];
       for (const region of regions) {
