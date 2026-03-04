@@ -6,11 +6,13 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
+  questionCount?: number; // Number of questions in the exam
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
 }
 
 export default function CameraScanner({
+  questionCount = 20, // Default to 20 if not provided
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
@@ -73,9 +75,11 @@ export default function CameraScanner({
 
       // Process the Zipgrade answer sheet
       const templateName = qualityCheck.detectedTemplate || "standard20";
+      console.log(`[CameraScanner] Processing with ${questionCount} questions`);
+
       const scanResult = await ZipgradeScanner.processZipgradeSheet(
         photo.uri,
-        20,
+        questionCount,
         templateName,
       );
 
