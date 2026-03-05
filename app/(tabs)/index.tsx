@@ -359,9 +359,11 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/(tabs)/create-quiz")}
             >
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>
-                Create New Exam
-              </Text>
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Create Exam</Text>
+              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Start a new quiz setup</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -374,9 +376,11 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/(tabs)/students")}
             >
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>
-                Manage Students
-              </Text>
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons name="people-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Students</Text>
+              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Manage class rosters</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -389,9 +393,11 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/(tabs)/generator")}
             >
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>
-                Generate Answer Sheet
-              </Text>
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Answer Sheets</Text>
+              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Generate sheet templates</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -404,9 +410,26 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/(tabs)/quizzes")}
             >
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>
-                View All Exams
-              </Text>
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons name="book-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>All Exams</Text>
+              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Browse saved quizzes</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.quickActionCard,
+                styles.quickActionCardWide,
+                styles.quickActionCenterCard,
+                {
+                  backgroundColor: colors.quickActionBg,
+                  borderColor: colors.quickActionBorder,
+                },
+              ]}
+              onPress={() => router.push("/(tabs)/batch-history")}
+            >
+              <Text style={[styles.quickActionCenterText, { color: colors.quickActionText }]}>Batch History</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -521,7 +544,12 @@ export default function HomeScreen() {
       <TouchableOpacity
         style={[
           styles.fab,
-          { backgroundColor: colors.primary, shadowColor: colors.primary },
+          {
+            backgroundColor: darkModeEnabled ? "#1f3a2f" : colors.primary,
+            shadowColor: darkModeEnabled ? "#000" : colors.primary,
+            borderWidth: darkModeEnabled ? 1 : 0,
+            borderColor: darkModeEnabled ? "#4f7a67" : "transparent",
+          },
         ]}
         onPress={() => router.push("/(tabs)/create-quiz")}
       >
@@ -653,26 +681,56 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   quickActions: {
-    flexDirection: "column",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
     gap: 8,
     marginTop: 10,
   },
   quickActionCard: {
-    width: "100%",
+    width: "48.5%",
     backgroundColor: "#f0ead6",
     borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     alignItems: "flex-start",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     borderWidth: 1,
     borderColor: "#8cb09a",
+    minHeight: 96,
+  },
+  quickActionCardWide: {
+    width: "100%",
+  },
+  quickActionCenterCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 56,
   },
   quickActionText: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: "700",
     color: "#3d5a3d",
     textAlign: "left",
+  },
+  quickActionSubtext: {
+    fontSize: 11,
+    marginTop: 4,
+    opacity: 0.85,
+  },
+  quickActionCenterText: {
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  quickActionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#dbe7df",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
   },
 
   // Section header
@@ -785,7 +843,7 @@ const styles = StyleSheet.create({
   // FAB
   fab: {
     position: "absolute",
-    bottom: 74,
+    bottom: 66,
     right: 14,
     flexDirection: "row",
     backgroundColor: "#3d5a3d",

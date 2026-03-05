@@ -1,10 +1,12 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
   doc,
@@ -45,6 +47,7 @@ export default function EditAnswerKeyScreen() {
   const [conflictDetected, setConflictDetected] = useState(false);
   const [hasLocalChanges, setHasLocalChanges] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [incompleteConfirmVisible, setIncompleteConfirmVisible] =
     useState(false);
   const [incompleteCount, setIncompleteCount] = useState(0);
@@ -80,6 +83,37 @@ export default function EditAnswerKeyScreen() {
       }
     };
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+    }, []),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+      }
+    : {
+        bg: "#f5f5f5",
+        headerBg: "#3d5a3d",
+        cardBg: "#ffffff",
+        border: "#e0e0e0",
+        title: "#333333",
+      };
 
   useEffect(() => {
     if (!answerKeyId || isOffline) return;
@@ -488,27 +522,40 @@ export default function EditAnswerKeyScreen() {
     const choices = getChoiceOptions();
 
     return (
-      <View style={styles.questionCard}>
-        <Text style={styles.questionNumber}>
+      <View
+        style={[
+          styles.questionCard,
+          {
+            backgroundColor: darkModeEnabled ? "#1f2b26" : "#fff",
+            borderColor: darkModeEnabled ? "#34483f" : "#e0e0e0",
+          },
+        ]}
+      >
+        <Text style={[styles.questionNumber, { color: darkModeEnabled ? "#e7f1eb" : "#333" }]}>
           Question {item.questionNumber}
         </Text>
         <View style={styles.choicesContainer}>
           {choices.map((choice) => (
             <TouchableOpacity
               key={choice}
-              style={[
-                styles.choiceButton,
-                item.answer === choice && styles.choiceButtonSelected,
-              ]}
+                style={[
+                  styles.choiceButton,
+                  darkModeEnabled && {
+                    backgroundColor: "#2a3a33",
+                    borderColor: "#34483f",
+                  },
+                  item.answer === choice && styles.choiceButtonSelected,
+                ]}
               onPress={() => handleAnswerSelect(item.questionNumber, choice)}
               disabled={loading || saving}
             >
-              <Text
-                style={[
-                  styles.choiceText,
-                  item.answer === choice && styles.choiceTextSelected,
-                ]}
-              >
+                <Text
+                  style={[
+                    styles.choiceText,
+                    darkModeEnabled && { color: "#9db1a6" },
+                    item.answer === choice && styles.choiceTextSelected,
+                  ]}
+                >
                 {choice}
               </Text>
             </TouchableOpacity>
@@ -520,8 +567,8 @@ export default function EditAnswerKeyScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: colors.bg }]}>
+        <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
           <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
@@ -537,9 +584,9 @@ export default function EditAnswerKeyScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
         <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -563,7 +610,15 @@ export default function EditAnswerKeyScreen() {
       />
 
       {/* Save Button */}
-      <View style={styles.footer}>
+      <View
+        style={[
+          styles.footer,
+          {
+            backgroundColor: colors.bg,
+            borderTopColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSave}

@@ -17,12 +17,14 @@ interface StatusManagerProps {
   examId: string;
   currentStatus: "Draft" | "Scheduled" | "Active" | "Completed";
   onStatusChanged: () => void;
+  darkModeEnabled?: boolean;
 }
 
 export default function StatusManager({
   examId,
   currentStatus,
   onStatusChanged,
+  darkModeEnabled = false,
 }: StatusManagerProps) {
   const [loading, setLoading] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
@@ -44,6 +46,24 @@ export default function StatusManager({
 
   const availableTransitions =
     ExamService.getAvailableStatusTransitions(currentStatus);
+
+  const colors = darkModeEnabled
+    ? {
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+        modalBg: "#1f2b26",
+        modalText: "#b9c9c0",
+        inputBg: "#2a3a33",
+      }
+    : {
+        cardBg: "#f3f7f4",
+        border: "#cad9cf",
+        title: "#2b4337",
+        modalBg: "#fff",
+        modalText: "#4f6b5a",
+        inputBg: "#f3f7f4",
+      };
 
   const handleStatusChange = async (
     newStatus: "Draft" | "Scheduled" | "Active" | "Completed",
@@ -148,8 +168,13 @@ export default function StatusManager({
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Status Actions</Text>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: colors.cardBg, borderColor: colors.border },
+      ]}
+    >
+      <Text style={[styles.title, { color: colors.title }]}>Status Actions</Text>
       <View style={styles.buttonContainer}>
         {availableTransitions.map((transition) => (
           <TouchableOpacity
@@ -186,19 +211,22 @@ export default function StatusManager({
         onRequestClose={handleModalClose}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { backgroundColor: colors.modalBg }]}>
             <Ionicons name="calendar-outline" size={48} color="#ff9800" />
-            <Text style={styles.modalTitle}>Schedule Exam</Text>
-            <Text style={styles.modalMessage}>
+            <Text style={[styles.modalTitle, { color: colors.title }]}>Schedule Exam</Text>
+            <Text style={[styles.modalMessage, { color: colors.modalText }]}>
               Select the date and time when this exam should become active.
             </Text>
 
             <TouchableOpacity
-              style={styles.dateButton}
+              style={[
+                styles.dateButton,
+                { backgroundColor: colors.inputBg, borderColor: colors.border },
+              ]}
               onPress={openDatePicker}
             >
               <Ionicons name="calendar-outline" size={20} color="#3d5a3d" />
-              <Text style={styles.dateButtonText}>
+              <Text style={[styles.dateButtonText, { color: colors.title }]}>
                 {scheduleDate.toLocaleDateString("en-US", {
                   weekday: "long",
                   year: "numeric",
@@ -212,7 +240,7 @@ export default function StatusManager({
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
-                style={styles.modalCancelButton}
+                style={[styles.modalCancelButton, { backgroundColor: colors.modalBg, borderColor: colors.border }]}
                 onPress={handleModalClose}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>

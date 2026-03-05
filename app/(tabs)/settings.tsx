@@ -8,6 +8,7 @@ import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import React from "react";
 import {
+    DeviceEventEmitter,
     Image,
     ScrollView,
     StyleSheet,
@@ -57,6 +58,7 @@ export default function SettingsScreen() {
     setDarkModeEnabled(value);
     try {
       await AsyncStorage.setItem(DARK_MODE_STORAGE_KEY, String(value));
+      DeviceEventEmitter.emit("darkModeChanged", value);
     } catch (error) {
       console.warn("Could not save dark mode preference:", error);
     }

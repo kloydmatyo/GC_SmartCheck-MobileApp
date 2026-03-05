@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -16,12 +17,14 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
 
 export default function ClassesScreen() {
   const router = useRouter();
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,8 +83,40 @@ export default function ClassesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadClasses();
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
     }, []),
   );
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+      }
+    : {
+        screenBg: "#eef1ef",
+        headerBg: "#fff",
+        headerBorder: "#d8dfda",
+        title: "#24362f",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardBorder: "#2f4a38",
+      };
 
   // Create new class
   const handleCreateClass = async () => {
@@ -169,7 +204,10 @@ export default function ClassesScreen() {
 
   const renderClassCard = ({ item }: { item: Class }) => (
     <TouchableOpacity
-      style={styles.classCard}
+      style={[
+        styles.classCard,
+        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+      ]}
       onPress={() => openClassList(item.id)}
       activeOpacity={0.9}
     >
@@ -223,10 +261,13 @@ export default function ClassesScreen() {
         </View>
       </View>
 
-      <TouchableOpacity
-        style={styles.viewButton}
-        onPress={() => openClassList(item.id)}
-      >
+        <TouchableOpacity
+          style={[
+            styles.viewButton,
+            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
+          ]}
+          onPress={() => openClassList(item.id)}
+        >
         <Ionicons name="people-outline" size={14} color={COLORS.white} />
         <Text style={styles.viewButtonText}>View Class List</Text>
       </TouchableOpacity>
@@ -277,13 +318,23 @@ export default function ClassesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.headerBg,
+              borderBottomColor: colors.headerBorder,
+            },
+          ]}
+        >
           <View>
-            <Text style={styles.headerTitle}>Classes</Text>
+            <Text style={[styles.headerTitle, { color: colors.title }]}>
+              Classes
+            </Text>
           </View>
           <TouchableOpacity
-            style={styles.addButton}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
             onPress={() => setModalVisible(true)}
           >
             <Ionicons name="add" size={22} color={COLORS.white} />
@@ -298,21 +349,29 @@ export default function ClassesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
         <View>
-          <Text style={styles.headerTitle}>Classes</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>Classes</Text>
         </View>
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => setModalVisible(true)}
         >
           <Ionicons name="add" size={22} color={COLORS.white} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
         <Ionicons
           name="search"
           size={16}
@@ -579,7 +638,7 @@ export default function ClassesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#edf1ee",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
@@ -616,7 +675,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     marginHorizontal: 10,
     marginTop: 8,
     marginBottom: 10,
@@ -653,12 +712,12 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   classCard: {
-    backgroundColor: "#4f715f",
+    backgroundColor: "#3d5a3d",
     borderRadius: RADIUS.medium,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#3f5f4f",
+    borderColor: "#2f4a38",
   },
   classHeader: {
     flexDirection: "row",
@@ -736,11 +795,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#2e7d68",
+    backgroundColor: "#3d5a3d",
     paddingVertical: 10,
     borderRadius: RADIUS.small,
     borderWidth: 1,
-    borderColor: "#2a725f",
+    borderColor: "#2f4a38",
     marginBottom: 12,
   },
   viewButtonText: {

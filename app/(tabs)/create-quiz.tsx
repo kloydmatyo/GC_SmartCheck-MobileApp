@@ -1,7 +1,9 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
 import { UserService } from "@/services/userService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -58,6 +60,7 @@ export default function CreateQuizScreen() {
   const router = useRouter();
   const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const [loading, setLoading] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
   // Form state
   const [quizName, setQuizName] = useState("");
@@ -89,6 +92,17 @@ export default function CreateQuizScreen() {
   // Reset form when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+
       setQuizName("");
       setNumQuestions(null);
       setSubject("");
@@ -133,6 +147,24 @@ export default function CreateQuizScreen() {
       loadClasses();
     }, []),
   );
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        text: "#e7f1eb",
+        subtext: "#9db1a6",
+      }
+    : {
+        screenBg: "#f5f5f5",
+        headerBg: "#3d5a3d",
+        cardBg: "#3d5a3d",
+        border: "#e0e0e0",
+        text: "#E8F5E9",
+        subtext: "#B8D4B8",
+      };
 
   const handleDateChange = (_event: any, selectedDate?: Date) => {
     setShowDatePicker(Platform.OS === "ios");
@@ -353,15 +385,15 @@ export default function CreateQuizScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.screenBg }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
         <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create New Quiz</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Create New Quiz</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -372,11 +404,19 @@ export default function CreateQuizScreen() {
       >
         {/* Quiz Name */}
         <View style={styles.section}>
-          <Text style={styles.label}>QUIZ NAME *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>QUIZ NAME *</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              darkModeEnabled && {
+                backgroundColor: "#2a3a33",
+                borderWidth: 1,
+                borderColor: "#34483f",
+                color: "#e7f1eb",
+              },
+            ]}
             placeholder="e.g., Midterm Exam - BSIT - 3B"
-            placeholderTextColor="#8B9D8B"
+            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#8B9D8B"}
             value={quizName}
             onChangeText={setQuizName}
             editable={!loading}
@@ -385,14 +425,23 @@ export default function CreateQuizScreen() {
 
         {/* Number of Questions */}
         <View style={styles.section}>
-          <Text style={styles.label}>NUMBER OF QUESTIONS *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>NUMBER OF QUESTIONS *</Text>
           <View style={styles.choiceButtons}>
             {NUM_QUESTIONS_OPTIONS.map((option) => (
               <TouchableOpacity
                 key={option}
                 style={[
                   styles.choiceButton,
+                  darkModeEnabled && {
+                    backgroundColor: "#2a3a33",
+                    borderColor: "#34483f",
+                  },
                   numQuestions === option && styles.choiceButtonActive,
+                  darkModeEnabled &&
+                    numQuestions === option && {
+                      backgroundColor: "#1f3a2f",
+                      borderColor: "#8fd1ad",
+                    },
                 ]}
                 onPress={() => setNumQuestions(option)}
                 disabled={loading}
@@ -400,7 +449,10 @@ export default function CreateQuizScreen() {
                 <Text
                   style={[
                     styles.choiceButtonText,
+                    darkModeEnabled && { color: "#dbe8e1" },
                     numQuestions === option && styles.choiceButtonTextActive,
+                    darkModeEnabled &&
+                      numQuestions === option && { color: "#8fd1ad" },
                   ]}
                 >
                   {option}
@@ -413,12 +465,21 @@ export default function CreateQuizScreen() {
         {/* Subject (Optional) */}
         {/* Choices Per Item */}
         <View style={styles.section}>
-          <Text style={styles.label}>CHOICES PER ITEM *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CHOICES PER ITEM *</Text>
           <View style={styles.choiceButtons}>
             <TouchableOpacity
               style={[
                 styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
                 choicesPerItem === 4 && styles.choiceButtonActive,
+                darkModeEnabled &&
+                  choicesPerItem === 4 && {
+                    backgroundColor: "#1f3a2f",
+                    borderColor: "#8fd1ad",
+                  },
               ]}
               onPress={() => setChoicesPerItem(4)}
               disabled={loading}
@@ -426,7 +487,10 @@ export default function CreateQuizScreen() {
               <Text
                 style={[
                   styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
                   choicesPerItem === 4 && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                    choicesPerItem === 4 && { color: "#8fd1ad" },
                 ]}
               >
                 A-D (4 choices)
@@ -435,7 +499,16 @@ export default function CreateQuizScreen() {
             <TouchableOpacity
               style={[
                 styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
                 choicesPerItem === 5 && styles.choiceButtonActive,
+                darkModeEnabled &&
+                  choicesPerItem === 5 && {
+                    backgroundColor: "#1f3a2f",
+                    borderColor: "#8fd1ad",
+                  },
               ]}
               onPress={() => setChoicesPerItem(5)}
               disabled={loading}
@@ -443,7 +516,10 @@ export default function CreateQuizScreen() {
               <Text
                 style={[
                   styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
                   choicesPerItem === 5 && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                    choicesPerItem === 5 && { color: "#8fd1ad" },
                 ]}
               >
                 A-E (5 choices)
@@ -454,15 +530,15 @@ export default function CreateQuizScreen() {
 
         {/* Class Selection */}
         <View style={styles.section}>
-          <Text style={styles.label}>CLASS *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CLASS *</Text>
           {classesLoading ? (
             <View style={styles.loadingClassesRow}>
               <ActivityIndicator size="small" color="#E8F5E9" />
-              <Text style={styles.loadingClassesText}>Loading classes...</Text>
+              <Text style={[styles.loadingClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>Loading classes...</Text>
             </View>
           ) : classOptions.length === 0 ? (
             <View style={styles.emptyClassesBox}>
-              <Text style={styles.emptyClassesText}>No classes found</Text>
+              <Text style={[styles.emptyClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>No classes found</Text>
             </View>
           ) : (
             <View style={styles.classButtons}>
@@ -481,7 +557,9 @@ export default function CreateQuizScreen() {
                     <Text
                       style={[
                         styles.classButtonTitle,
+                        darkModeEnabled && { color: "#e7f1eb" },
                         selected && styles.classButtonTextActive,
+                        darkModeEnabled && selected && { color: "#8fd1ad" },
                       ]}
                       numberOfLines={1}
                     >
@@ -490,7 +568,9 @@ export default function CreateQuizScreen() {
                     <Text
                       style={[
                         styles.classButtonSubtitle,
+                        darkModeEnabled && { color: "#b9c9c0" },
                         selected && styles.classButtonTextActive,
+                        darkModeEnabled && selected && { color: "#8fd1ad" },
                       ]}
                       numberOfLines={1}
                     >
@@ -505,12 +585,21 @@ export default function CreateQuizScreen() {
 
         {/* Exam Type */}
         <View style={styles.section}>
-          <Text style={styles.label}>EXAM TYPE *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>EXAM TYPE *</Text>
           <View style={styles.choiceButtons}>
             <TouchableOpacity
               style={[
                 styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
                 examType === "board" && styles.choiceButtonActive,
+                darkModeEnabled &&
+                  examType === "board" && {
+                    backgroundColor: "#1f3a2f",
+                    borderColor: "#8fd1ad",
+                  },
               ]}
               onPress={() => setExamType("board")}
               disabled={loading}
@@ -518,7 +607,10 @@ export default function CreateQuizScreen() {
               <Text
                 style={[
                   styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
                   examType === "board" && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                    examType === "board" && { color: "#8fd1ad" },
                 ]}
               >
                 Board Exam
@@ -527,7 +619,16 @@ export default function CreateQuizScreen() {
             <TouchableOpacity
               style={[
                 styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
                 examType === "diagnostic" && styles.choiceButtonActive,
+                darkModeEnabled &&
+                  examType === "diagnostic" && {
+                    backgroundColor: "#1f3a2f",
+                    borderColor: "#8fd1ad",
+                  },
               ]}
               onPress={() => setExamType("diagnostic")}
               disabled={loading}
@@ -535,7 +636,10 @@ export default function CreateQuizScreen() {
               <Text
                 style={[
                   styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
                   examType === "diagnostic" && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                    examType === "diagnostic" && { color: "#8fd1ad" },
                 ]}
               >
                 Diagnostic Test
@@ -546,14 +650,20 @@ export default function CreateQuizScreen() {
 
         {/* Exam Date */}
         <View style={styles.section}>
-          <Text style={styles.label}>EXAM DATE *</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>EXAM DATE *</Text>
           <TouchableOpacity
-            style={styles.dateButton}
+            style={[
+              styles.dateButton,
+              darkModeEnabled && {
+                backgroundColor: "#2a3a33",
+                borderColor: "#34483f",
+              },
+            ]}
             onPress={() => setShowDatePicker(true)}
             disabled={loading}
           >
-            <Ionicons name="calendar-outline" size={20} color="#E8F5E9" />
-            <Text style={styles.dateButtonText}>
+            <Ionicons name="calendar-outline" size={20} color={darkModeEnabled ? "#8fd1ad" : "#E8F5E9"} />
+            <Text style={[styles.dateButtonText, darkModeEnabled && { color: "#e7f1eb" }]}>
               {examDate ? formatDateForDisplay(examDate) : "Select exam date"}
             </Text>
           </TouchableOpacity>
@@ -570,11 +680,19 @@ export default function CreateQuizScreen() {
 
         {/* Folder / Subject (Optional) */}
         <View style={styles.section}>
-          <Text style={styles.label}>FOLDER / SUBJECT (OPTIONAL)</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>FOLDER / SUBJECT (OPTIONAL)</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              darkModeEnabled && {
+                backgroundColor: "#2a3a33",
+                borderWidth: 1,
+                borderColor: "#34483f",
+                color: "#e7f1eb",
+              },
+            ]}
             placeholder="e.g., Mathematics, Science"
-            placeholderTextColor="#8B9D8B"
+            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#8B9D8B"}
             value={subject}
             onChangeText={setSubject}
             editable={!loading}
@@ -584,8 +702,8 @@ export default function CreateQuizScreen() {
         {/* Manual Editing Section */}
         <View style={styles.manualSection}>
           <View style={styles.manualHeader}>
-            <Text style={styles.manualTitle}>Manual Editing</Text>
-            <Text style={styles.manualSubtitle}>
+            <Text style={[styles.manualTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Manual Editing</Text>
+            <Text style={[styles.manualSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
               Set the correct options for each question to enable automatic
               grading.
             </Text>
@@ -596,13 +714,13 @@ export default function CreateQuizScreen() {
             disabled={loading}
           >
             <Ionicons name="create-outline" size={20} color="#fff" />
-            <Text style={styles.editButtonText}>Edit Answer Key</Text>
+            <Text style={[styles.editButtonText, darkModeEnabled && { color: "#8fd1ad" }]}>Edit Answer Key</Text>
           </TouchableOpacity>
         </View>
 
         {/* Answer Key Section */}
         <View style={styles.section}>
-          <Text style={styles.label}>ANSWER KEY</Text>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>ANSWER KEY</Text>
           <TouchableOpacity
             style={styles.scanButton}
             onPress={handleScanAnswerKey}
@@ -610,8 +728,8 @@ export default function CreateQuizScreen() {
           >
             <Ionicons name="camera-outline" size={32} color="#E8F5E9" />
             <View style={styles.scanTextContainer}>
-              <Text style={styles.scanTitle}>Scan Answer Key</Text>
-              <Text style={styles.scanSubtitle}>
+              <Text style={[styles.scanTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Scan Answer Key</Text>
+              <Text style={[styles.scanSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
                 Use the camera scanner to scan the answer key
               </Text>
             </View>
@@ -620,7 +738,15 @@ export default function CreateQuizScreen() {
       </ScrollView>
 
       {/* Save Button */}
-      <View style={styles.footer}>
+        <View
+          style={[
+            styles.footer,
+            {
+              backgroundColor: colors.screenBg,
+              borderTopColor: darkModeEnabled ? colors.border : "#e0e0e0",
+            },
+          ]}
+        >
         <TouchableOpacity
           style={[styles.saveButton, loading && styles.saveButtonDisabled]}
           onPress={handleSave}

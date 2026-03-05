@@ -6,10 +6,12 @@ import {
     rp,
     rs,
 } from "@/utils/responsive";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, { useMemo, useState } from "react";
 import {
@@ -673,7 +675,14 @@ async function createPdfFromHtml(
 
 export default function PrintAnswerSheetScreen() {
   const router = useRouter();
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const goToQuizzes = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/(tabs)/index");
+  };
 
   const [templateKey, setTemplateKey] = useState<TemplateKey>("standard50");
   const [examName, setExamName] = useState("");
@@ -713,6 +722,41 @@ export default function PrintAnswerSheetScreen() {
     () => TEMPLATES.find((t) => t.key === templateKey)!,
     [templateKey],
   );
+
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+    }, []),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+        text: "#b9c9c0",
+        primary: "#1f3a2f",
+      }
+    : {
+        bg: COLORS.bg,
+        headerBg: COLORS.white,
+        cardBg: COLORS.white,
+        border: COLORS.border,
+        title: COLORS.textDark,
+        text: COLORS.textMid,
+        primary: COLORS.primaryMid,
+      };
 
   // Check for duplicate batches
   async function checkForDuplicates() {
@@ -936,18 +980,23 @@ export default function PrintAnswerSheetScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}>
       <StatusBar
-        barStyle="dark-content"
-        backgroundColor={COLORS.white}
+        barStyle={darkModeEnabled ? "light-content" : "dark-content"}
+        backgroundColor={colors.headerBg}
         translucent={false}
       />
 
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.headerBg, borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity onPress={goToQuizzes} style={styles.headerBack}>
-          <Ionicons name="chevron-back" size={rs(24)} color={COLORS.textDark} />
+          <Ionicons name="chevron-back" size={rs(24)} color={colors.title} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>OMR PDF Preview</Text>
+        <Text style={[styles.headerTitle, { color: colors.title }]}>OMR PDF Preview</Text>
         <View style={styles.headerBack} />
       </View>
 
@@ -957,8 +1006,8 @@ export default function PrintAnswerSheetScreen() {
           { paddingHorizontal: horizontalPadding },
         ]}
       >
-        <View style={styles.stepCard}>
-          <Text style={styles.stepTitle}>Template</Text>
+        <View style={[styles.stepCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <Text style={[styles.stepTitle, { color: colors.title }]}>Template</Text>
           <View style={styles.templateRow}>
             {TEMPLATES.map((t) => {
               const active = t.key === templateKey;
@@ -967,7 +1016,12 @@ export default function PrintAnswerSheetScreen() {
                   key={t.key}
                   style={[
                     styles.templateBtn,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: darkModeEnabled ? "#2a3a33" : "#f3f7f4",
+                    },
                     active && styles.templateBtnActive,
+                    active && { backgroundColor: colors.primary, borderColor: colors.primary },
                   ]}
                   onPress={() => setTemplateKey(t.key)}
                 >
@@ -975,6 +1029,7 @@ export default function PrintAnswerSheetScreen() {
                     style={[
                       styles.templateText,
                       active && styles.templateTextActive,
+                      { color: active ? "#fff" : colors.title },
                     ]}
                   >
                     {t.label}
@@ -984,36 +1039,61 @@ export default function PrintAnswerSheetScreen() {
             })}
           </View>
 
-          <Text style={styles.fieldLabel}>Exam Title</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>Exam Title</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                borderColor: colors.border,
+                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+                color: colors.title,
+              },
+            ]}
             value={examName}
             onChangeText={setExamName}
             placeholder="Exam title"
+            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ca3af"}
           />
 
-          <Text style={styles.fieldLabel}>Section/Block</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>Section/Block</Text>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              {
+                borderColor: colors.border,
+                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+                color: colors.title,
+              },
+            ]}
             value={section}
             onChangeText={setSection}
             placeholder="e.g., BSIT-3B"
+            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ca3af"}
           />
 
-          <Text style={styles.fieldLabel}>Version</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>Version</Text>
           <View style={styles.versionRow}>
             {VERSIONS.map((v) => {
               const active = version === v;
               return (
                 <TouchableOpacity
                   key={v}
-                  style={[styles.versionBtn, active && styles.versionBtnActive]}
+                  style={[
+                    styles.versionBtn,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: darkModeEnabled ? "#2a3a33" : "#f3f7f4",
+                    },
+                    active && styles.versionBtnActive,
+                    active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                  ]}
                   onPress={() => setVersion(v)}
                 >
                   <Text
                     style={[
                       styles.versionText,
                       active && styles.versionTextActive,
+                      { color: active ? "#fff" : colors.title },
                     ]}
                   >
                     {v}
@@ -1024,7 +1104,7 @@ export default function PrintAnswerSheetScreen() {
           </View>
 
           <TouchableOpacity
-            style={styles.previewBtn}
+            style={[styles.previewBtn, { backgroundColor: colors.primary }]}
             onPress={handleGeneratePreview}
             disabled={loading}
           >
@@ -1035,31 +1115,47 @@ export default function PrintAnswerSheetScreen() {
             )}
           </TouchableOpacity>
 
-          <Text style={styles.infoText}>
+          <Text style={[styles.infoText, { color: colors.text }]}>
             Expected load: within 5 seconds (normal connection).
           </Text>
-          <Text style={styles.infoText}>
+          <Text style={[styles.infoText, { color: colors.text }]}>
             Questions: {selected.totalQuestions} • Includes exam code + ID
             bubble grid + logo
           </Text>
 
           <TouchableOpacity
-            style={styles.batchHistoryBtn}
+            style={[
+              styles.batchHistoryBtn,
+              {
+                borderColor: colors.primary,
+                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+              },
+            ]}
             onPress={navigateToBatchHistory}
           >
             <Ionicons
               name="time-outline"
               size={rs(18)}
-              color={COLORS.primaryMid}
+              color={colors.primary}
             />
-            <Text style={styles.batchHistoryText}>View Batch History</Text>
+            <Text style={[styles.batchHistoryText, { color: colors.primary }]}>View Batch History</Text>
           </TouchableOpacity>
         </View>
 
         {errorText ? (
-          <View style={styles.errorBox}>
+          <View
+            style={[
+              styles.errorBox,
+              darkModeEnabled && {
+                backgroundColor: "#3a2626",
+                borderColor: "#7a4a4a",
+              },
+            ]}
+          >
             <Text style={styles.errorTitle}>PDF Preview Failed</Text>
-            <Text style={styles.errorText}>{errorText}</Text>
+            <Text style={[styles.errorText, { color: darkModeEnabled ? "#f1c6c6" : COLORS.textMid }]}>
+              {errorText}
+            </Text>
             <TouchableOpacity
               style={styles.retryBtn}
               onPress={handleGeneratePreview}
@@ -1070,11 +1166,11 @@ export default function PrintAnswerSheetScreen() {
         ) : null}
 
         {htmlContent ? (
-          <View style={styles.viewerCard}>
-            <View style={styles.viewerHeader}>
-              <Text style={styles.viewerTitle}>Answer Sheet Preview</Text>
+          <View style={[styles.viewerCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+            <View style={[styles.viewerHeader, { backgroundColor: darkModeEnabled ? "#2a3a33" : "#f5f9f6", borderBottomColor: colors.border }]}>
+              <Text style={[styles.viewerTitle, { color: colors.title }]}>Answer Sheet Preview</Text>
               <TouchableOpacity
-                style={styles.downloadBtn}
+                style={[styles.downloadBtn, { backgroundColor: colors.primary }]}
                 onPress={handleDownload}
               >
                 <Ionicons
@@ -1087,7 +1183,15 @@ export default function PrintAnswerSheetScreen() {
             </View>
 
             {pdfMetrics && (
-              <View style={styles.metricsBar}>
+              <View
+                style={[
+                  styles.metricsBar,
+                  {
+                    backgroundColor: darkModeEnabled ? "#22302a" : "#f9fafb",
+                    borderBottomColor: colors.border,
+                  },
+                ]}
+              >
                 <View style={styles.metricItem}>
                   <Ionicons
                     name="time-outline"
@@ -1101,6 +1205,7 @@ export default function PrintAnswerSheetScreen() {
                   <Text
                     style={[
                       styles.metricText,
+                      { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid },
                       pdfMetrics.loadTime <= 5000 && styles.metricSuccess,
                     ]}
                   >
@@ -1120,6 +1225,7 @@ export default function PrintAnswerSheetScreen() {
                   <Text
                     style={[
                       styles.metricText,
+                      { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid },
                       pdfMetrics.fileSize <= 1500 && styles.metricSuccess,
                     ]}
                   >
@@ -1132,7 +1238,7 @@ export default function PrintAnswerSheetScreen() {
                     size={rs(14)}
                     color={COLORS.success}
                   />
-                  <Text style={styles.metricText}>
+                  <Text style={[styles.metricText, { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid }]}>
                     {pdfMetrics.resolution.width}×{pdfMetrics.resolution.height}
                   </Text>
                 </View>
@@ -1155,9 +1261,25 @@ export default function PrintAnswerSheetScreen() {
             />
 
             {loading && (
-              <View style={styles.webviewLoader}>
+              <View
+                style={[
+                  styles.webviewLoader,
+                  {
+                    backgroundColor: darkModeEnabled
+                      ? "rgba(17,24,21,0.88)"
+                      : "rgba(255,255,255,0.9)",
+                  },
+                ]}
+              >
                 <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.loadingText}>Loading Preview...</Text>
+                <Text
+                  style={[
+                    styles.loadingText,
+                    { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid },
+                  ]}
+                >
+                  Loading Preview...
+                </Text>
               </View>
             )}
           </View>

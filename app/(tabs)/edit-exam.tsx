@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -8,7 +9,9 @@ import {
     Alert,
     Modal,
     Platform,
+    SafeAreaView,
     ScrollView,
+    StatusBar,
     StyleSheet,
     Text,
     TextInput,
@@ -17,6 +20,7 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth, db } from "../../config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "../../constants/preferences";
 import { AuditLogService } from "../../services/auditLogService";
 import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
@@ -60,6 +64,45 @@ export default function EditExamScreen() {
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [headerTopPadding, setHeaderTopPadding] = useState(56);
+
+  useEffect(() => {
+    const top =
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 16 : 56;
+    setHeaderTopPadding(top);
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+    }, []),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+      }
+    : {
+        bg: "#edf3ee",
+        headerBg: "#3d5a3d",
+        cardBg: "#f3f7f4",
+        border: "#cad9cf",
+        title: "#eef7f0",
+      };
 
   useEffect(() => {
     loadExamData();
@@ -559,7 +602,7 @@ export default function EditExamScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
         <Text style={styles.loadingText}>Loading exam data...</Text>
       </View>
@@ -567,13 +610,22 @@ export default function EditExamScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: headerTopPadding,
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#eef7f0" />
+          <Ionicons name="arrow-back" size={24} color={colors.title} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Exam</Text>
+        <Text style={[styles.headerTitle, { color: colors.title }]}>Edit Exam</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -617,7 +669,7 @@ export default function EditExamScreen() {
         </View>
 
         {/* Editable Fields Section */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <Text style={styles.sectionTitle}>Editable Fields</Text>
 
           {/* Title */}
@@ -704,7 +756,7 @@ export default function EditExamScreen() {
         </View>
 
         {/* Locked Fields Section */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Locked Fields</Text>
             <View style={styles.lockedBadge}>
@@ -736,7 +788,12 @@ export default function EditExamScreen() {
       </ScrollView>
 
       {/* Action Buttons */}
-      <View style={styles.actionButtons}>
+      <View
+        style={[
+          styles.actionButtons,
+          { backgroundColor: darkModeEnabled ? "#1a2520" : "#e5efe8", borderTopColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           style={styles.cancelButton}
           onPress={() => router.back()}
@@ -801,7 +858,7 @@ export default function EditExamScreen() {
       </Modal>
 
       <Toast />
-    </View>
+    </SafeAreaView>
   );
 }
 
