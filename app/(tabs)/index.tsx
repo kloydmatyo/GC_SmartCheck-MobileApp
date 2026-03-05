@@ -60,6 +60,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [examsError, setExamsError] = useState<string | null>(null);
+  const [showAllExams, setShowAllExams] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   // ── Resolve faculty full name from Firestore ──────────────────────────
@@ -126,7 +127,7 @@ export default function HomeScreen() {
         orderBy("created_at", "desc"),
       );
       const snap = await getDocs(q);
-      const exams: RecentExam[] = snap.docs.slice(0, 5).map((d) => {
+      const exams: RecentExam[] = snap.docs.map((d) => {
         const data = d.data();
         return {
           id: d.id,
@@ -390,9 +391,13 @@ export default function HomeScreen() {
         {/* Recent Exams Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Exams</Text>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/quizzes" as any)}>
-            <Text style={styles.viewAllText}>View All</Text>
-          </TouchableOpacity>
+          {recentExams.length > 5 && (
+            <TouchableOpacity onPress={() => setShowAllExams((prev) => !prev)}>
+              <Text style={styles.viewAllText}>
+                {showAllExams ? "Show Less" : `View All (${recentExams.length})`}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.examsContainer}>
@@ -432,7 +437,7 @@ export default function HomeScreen() {
               </Text>
             </View>
           ) : (
-            recentExams.map((exam) => (
+            (showAllExams ? recentExams : recentExams.slice(0, 5)).map((exam) => (
               <TouchableOpacity
                 key={exam.id}
                 style={styles.examCard}
