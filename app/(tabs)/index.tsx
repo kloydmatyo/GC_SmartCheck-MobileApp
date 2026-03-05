@@ -3,30 +3,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    orderBy,
-    query,
-    where,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    Image,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Image,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from "react-native";
 
 import HistoryList from "@/components/scanner/HistoryList";
 import ScannerScreen from "@/components/scanner/ScannerScreen";
 import {
-    DashboardService,
-    HomeDashboardStats,
+  DashboardService,
+  HomeDashboardStats,
 } from "@/services/dashboardService";
 
 interface RecentExam {
@@ -72,9 +72,9 @@ export default function HomeScreen() {
           const data = userDoc.data();
           setUserName(
             data.fullName ??
-              user.displayName ??
-              user.email?.split("@")[0] ??
-              "Faculty",
+            user.displayName ??
+            user.email?.split("@")[0] ??
+            "Faculty",
           );
         } else {
           setUserName(
@@ -134,10 +134,10 @@ export default function HomeScreen() {
           subject: data.subject ?? data.course_subject ?? "—",
           date: data.created_at
             ? new Date(data.created_at).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
             : "—",
           papers: data.scanned_papers ?? null,
           status: data.status ?? "Draft",
@@ -354,12 +354,12 @@ export default function HomeScreen() {
               key: keyof typeof dist;
               color: string;
             }[] = [
-              { label: "A (≥90%)", key: "A", color: "#00a550" },
-              { label: "B (80–89%)", key: "B", color: "#4a90e2" },
-              { label: "C (70–79%)", key: "C", color: "#f5a623" },
-              { label: "D (60–69%)", key: "D", color: "#e67e22" },
-              { label: "F (<60%)", key: "F", color: "#e74c3c" },
-            ];
+                { label: "A (≥90%)", key: "A", color: "#00a550" },
+                { label: "B (80–89%)", key: "B", color: "#4a90e2" },
+                { label: "C (70–79%)", key: "C", color: "#f5a623" },
+                { label: "D (60–69%)", key: "D", color: "#e67e22" },
+                { label: "F (<60%)", key: "F", color: "#e74c3c" },
+              ];
             return (
               <View style={styles.distSection}>
                 <Text style={styles.distTitle}>Score Distribution</Text>
@@ -390,7 +390,7 @@ export default function HomeScreen() {
         {/* Recent Exams Section */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Exams</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push("/(tabs)/quizzes" as any)}>
             <Text style={styles.viewAllText}>View All</Text>
           </TouchableOpacity>
         </View>
