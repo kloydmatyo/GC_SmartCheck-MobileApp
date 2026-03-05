@@ -450,23 +450,44 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Gordon College 100q template - actual layout based on bubble density analysis
+    // Gordon College 100q template - 10 blocks in a grid layout
     //
-    // From bubble density grid analysis (FINAL CORRECTION):
-    // y80-90%: x10:13 x20:15 x30:13 x40:15  ← Q1-10 is HERE (bottom-left)
-    // y60-70%: x10:9 x20:12 x30:11 x40:12    ← Q11-20 is HERE (middle-left)
+    // From bubble density analysis, the template has:
+    // - 10 blocks total (Q1-10, Q11-20, ..., Q91-100)
+    // - Arranged in 2 rows × 5 columns
+    // - Each block has 10 questions × 5 choices = 50 bubbles
+    // - Block markers (black squares) beside each block
     //
-    // Layout structure:
-    // - Student ID: Top-left corner (y: 0-10%)
-    // - Q1-10: BOTTOM-left block (x: 5-45%, y: 78-98%)
-    // - Q11-20: MIDDLE-left block (x: 5-45%, y: 58-78%)
+    // Bubble density shows blocks at:
+    // Row 1 (top): y10-40%
+    //   - Column 1: x20-40% (Q41-50 or Q1-10)
+    //   - Column 2: x40-60% (Q51-60 or Q11-20)
+    //   - Column 3: x60-80% (Q61-70 or Q21-30)
+    //   - Column 4: x80-100% (Q71-80 or Q31-40)
     //
-    // CURRENT STATUS: Testing with Q1-20 first for calibration
+    // Row 2 (bottom): y40-90%
+    //   - Column 1: x20-40% (Q1-10 or Q41-50)
+    //   - Column 2: x40-60% (Q11-20 or Q51-60)
+    //   - Column 3: x60-80% (Q21-30 or Q61-70)
+    //   - Column 4: x80-100% (Q31-40 or Q71-80)
+    //
+    // STRATEGY: Define all 10 blocks, let block markers refine positions
     return [
-      // Q1-10: Bottom-left block (lowest on the page)
-      { xMin: 0.05, xMax: 0.45, yMin: 0.58, yMax: 0.78, startQ: 1, numQ: 10 },
-      // Q11-20: Middle-left block (above Q1-10)
-      { xMin: 0.05, xMax: 0.45, yMin: 0.78, yMax: 0.98, startQ: 11, numQ: 10 },
+      // Top row (y: 10-40%)
+      { xMin: 0.18, xMax: 0.42, yMin: 0.10, yMax: 0.40, startQ: 41, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.10, yMax: 0.40, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.10, yMax: 0.40, startQ: 61, numQ: 10 },
+      { xMin: 0.78, xMax: 0.98, yMin: 0.10, yMax: 0.40, startQ: 71, numQ: 10 },
+      
+      // Bottom row (y: 40-90%)
+      { xMin: 0.18, xMax: 0.42, yMin: 0.40, yMax: 0.90, startQ: 1, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.40, yMax: 0.90, startQ: 11, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.40, yMax: 0.90, startQ: 21, numQ: 10 },
+      { xMin: 0.78, xMax: 0.98, yMin: 0.40, yMax: 0.90, startQ: 31, numQ: 10 },
+      
+      // Additional blocks (if needed)
+      { xMin: 0.05, xMax: 0.25, yMin: 0.10, yMax: 0.40, startQ: 81, numQ: 10 },
+      { xMin: 0.05, xMax: 0.25, yMin: 0.40, yMax: 0.90, startQ: 91, numQ: 10 },
     ];
   }
 }
@@ -1219,6 +1240,90 @@ export class ZipgradeScanner {
 
       console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
 
+      // ── 9. Extract answers ────────────────────────────────────────────────
+      let allAnswers: StudentAnswer[] = [];
+
+      // For 100-item templates, use brightness-based scanning (Skia)
+      if (detectedQ === 100 && regMarks.length >= 3) {
+        console.log('[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)');
+        
+        // Import the brightness scanner
+        const { scan100ItemWithBrightness } = require('./brightnessScannerFor100Item');
+        
+        // Extract corner markers (sorted by position)
+        const sortedMarks = [...regMarks].sort((a, b) => a.y - b.y || a.x - b.x);
+        
+        let markers;
+        if (regMarks.length >= 4) {
+          // Use all 4 corners
+          const topMarks = sortedMarks.slice(0, 2).sort((a, b) => a.x - b.x);
+          const bottomMarks = sortedMarks.slice(-2).sort((a, b) => a.x - b.x);
+          
+          markers = {
+            topLeft: { x: topMarks[0].x, y: topMarks[0].y },
+            topRight: { x: topMarks[1].x, y: topMarks[1].y },
+            bottomLeft: { x: bottomMarks[0].x, y: bottomMarks[0].y },
+            bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
+          };
+        } else {
+          // Only 3 markers: estimate the missing corner
+          // Sort by Y first, then X
+          const topMark = sortedMarks[0]; // Topmost
+          const bottomMarks = sortedMarks.slice(1).sort((a, b) => a.x - b.x);
+          
+          // Assume topMark is top-left, estimate top-right
+          const paperWidth = bottomMarks[1].x - bottomMarks[0].x;
+          
+          markers = {
+            topLeft: { x: topMark.x, y: topMark.y },
+            topRight: { x: topMark.x + paperWidth, y: topMark.y },
+            bottomLeft: { x: bottomMarks[0].x, y: bottomMarks[0].y },
+            bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
+          };
+          
+          console.log('[OMR] Only 3 markers detected, estimating 4th corner');
+        }
+        
+        console.log('[OMR] Corner markers:',
+          `TL=(${Math.round(markers.topLeft.x)},${Math.round(markers.topLeft.y)})`,
+          `TR=(${Math.round(markers.topRight.x)},${Math.round(markers.topRight.y)})`,
+          `BL=(${Math.round(markers.bottomLeft.x)},${Math.round(markers.bottomLeft.y)})`,
+          `BR=(${Math.round(markers.bottomRight.x)},${Math.round(markers.bottomRight.y)})`
+        );
+        
+        // Call brightness scanner with image URI and markers
+        allAnswers = await scan100ItemWithBrightness(imageUri, markers);
+        
+        console.log(`[OMR] Brightness scanner detected ${allAnswers.filter(a => a.selectedAnswer).length}/100 answers`);
+      } else if (detectedQ === 100) {
+        // Fallback: not enough markers for hybrid scanning
+        console.warn('[OMR] Not enough corner markers for hybrid scanning, falling back to region-based detection');
+        
+        // Use region-based contour detection (existing code)
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
+      } else {
+        // 20q/50q templates: use existing region-based detection (UNCHANGED)
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
+      }
+
       // Log detailed region information for debugging
       regions.forEach((r, idx) => {
         const xMinPx = Math.round(r.xMin * paperW);
@@ -1231,18 +1336,6 @@ export class ZipgradeScanner {
             `Y[${(r.yMin * 100).toFixed(1)}%-${(r.yMax * 100).toFixed(1)}%] (${yMinPx}-${yMaxPx}px)`,
         );
       });
-
-      const allAnswers: StudentAnswer[] = [];
-      for (const region of regions) {
-        const regionAnswers = extractAnswersFromRegion(
-          bubbles,
-          region,
-          paperW,
-          paperH,
-          medianH,
-        );
-        allAnswers.push(...regionAnswers);
-      }
 
       // Sort by question number
       allAnswers.sort((a, b) => a.questionNumber - b.questionNumber);
