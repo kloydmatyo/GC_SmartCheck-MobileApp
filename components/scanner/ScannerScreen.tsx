@@ -2,19 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import {
-  DuplicateScoreDetectionService,
-  DuplicateScoreMatch,
+    DuplicateScoreDetectionService,
+    DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
@@ -33,6 +33,7 @@ interface ScannerScreenProps {
 export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
+  const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
   const [examIdInput, setExamIdInput] = useState("");
   const [isValidatingExam, setIsValidatingExam] = useState(false);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
@@ -154,14 +155,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           );
           // Fallback to default pattern
           answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-            (ak) => ak.answer,
+            (ak) => ak.correctAnswer,
           );
         }
       } catch (error) {
         console.error(`[ScannerScreen] Error fetching answer key:`, error);
         // Fallback to default pattern
         answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.answer,
+          (ak) => ak.correctAnswer,
         );
       }
 
@@ -308,6 +309,11 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           `[ScannerScreen] Found exam by code: ${inputValue} -> ${examDocId}`,
         );
         console.log(`[ScannerScreen] Exam title: ${examData.title}`);
+
+        // Store question count for scanner
+        const questionCount = examData.num_items || 20;
+        setExamQuestionCount(questionCount);
+        console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
       } else {
         console.log(
           `[ScannerScreen] No exam found with examCode: ${inputValue}, trying as document ID`,
@@ -319,9 +325,15 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
         if (examDocSnap.exists()) {
           examDocId = examDocSnap.id;
+          const examData = examDocSnap.data();
           console.log(
             `[ScannerScreen] Found exam by document ID: ${examDocId}`,
           );
+
+          // Store question count for scanner
+          const questionCount = examData.num_items || 20;
+          setExamQuestionCount(questionCount);
+          console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
         } else {
           console.log(
             `[ScannerScreen] No exam found with document ID: ${inputValue}`,
@@ -474,6 +486,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       {currentState === "camera" && (
         <CameraScanner
           key={`camera-${scanCount}`}
+          questionCount={examQuestionCount}
           onScanComplete={handleScanComplete}
           onCancel={handleClose}
         />
