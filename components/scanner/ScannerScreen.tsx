@@ -607,7 +607,6 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         />
       )}
 
-      <Toast />
     </View>
   );
 }
