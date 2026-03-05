@@ -16,6 +16,7 @@ import {
   DuplicateScoreDetectionService,
   DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
+import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
 import { GradingResult, ScanResult } from "../../types/scanning";
@@ -154,14 +155,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           );
           // Fallback to default pattern
           answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-            (ak) => ak.answer,
+            (ak) => ak.correctAnswer,
           );
         }
       } catch (error) {
         console.error(`[ScannerScreen] Error fetching answer key:`, error);
         // Fallback to default pattern
         answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.answer,
+          (ak) => ak.correctAnswer,
         );
       }
 
@@ -233,10 +234,53 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         });
       }
 
-      // Store result and image
+      // 1. Save scan image + local history (StorageService — always runs)
       const savedResult = await StorageService.saveScanResult(result, imageUri);
 
-      // Show success toast
+      // 2. Save to Firestore via GradeStorageService — dynamic result binding (#2)
+      GradeStorageService.saveGradingResult(result, activeExamId).then(
+        (saveResult) => {
+          if (saveResult.status === "saved") {
+            // ── Success: show score summary (#3)
+            Toast.show({
+              type: "save_result",
+              text1: `Saved — ${result.score}/${result.totalPoints} (${result.percentage}%)`,
+              text2: `Student ${result.studentId} · Grade ${result.gradeEquivalent}`,
+              visibilityTime: 4000,
+            });
+          } else if (saveResult.status === "duplicate") {
+            // ── Duplicate: informational (#3)
+            Toast.show({
+              type: "info",
+              text1: "Already Saved",
+              text2: saveResult.message,
+              visibilityTime: 4000,
+            });
+          } else if (saveResult.status === "pending") {
+            // ── Offline queued (#3)
+            Toast.show({
+              type: "save_offline",
+              text1: "Saved Offline",
+              text2: "No connection — will sync automatically when online.",
+              visibilityTime: 5000,
+            });
+          } else {
+            // ── Error: show retry button with pulse animation (#3, #4, #5)
+            Toast.show({
+              type: "save_retry",
+              text1: "Save Failed",
+              text2: saveResult.message,
+              visibilityTime: 8000,
+              props: {
+                onRetry: () =>
+                  handleFirestoreRetrySave(result, activeExamId),
+              },
+            });
+          }
+        },
+      );
+
+      // Show scan-complete toast immediately (doesn't wait for Firestore)
       Toast.show({
         type: "success",
         text1: `Sheet Scanned: ${rawCount} Questions`,
@@ -253,23 +297,58 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     }
   };
 
-  // Retry save from results screen
+  // Retry save from results screen — uses GradeStorageService (#5)
   const handleRetrySave = async () => {
     if (!gradingResult || !scannedImage) return;
+    await handleFirestoreRetrySave(gradingResult, activeExamId);
+  };
+
+  // Core retry logic (also called from save_retry toast button) (#5)
+  const handleFirestoreRetrySave = async (
+    result: GradingResult,
+    examId: string,
+  ) => {
     try {
-      await StorageService.saveScanResult(gradingResult, scannedImage);
+      const saveResult = await GradeStorageService.saveGradingResult(
+        result,
+        examId,
+      );
+
+      if (saveResult.status === "saved") {
+        Toast.show({
+          type: "save_result",
+          text1: "Saved Successfully",
+          text2: `Student ${result.studentId} · ${result.score}/${result.totalPoints}`,
+          visibilityTime: 4000,
+        });
+      } else if (saveResult.status === "pending") {
+        Toast.show({
+          type: "save_offline",
+          text1: "Saved Offline",
+          text2: "Will sync when connection is restored.",
+          visibilityTime: 5000,
+        });
+      } else {
+        // Still failing — show retry again (#5)
+        Toast.show({
+          type: "save_retry",
+          text1: "Save Failed Again",
+          text2: saveResult.message,
+          visibilityTime: 8000,
+          props: {
+            onRetry: () => handleFirestoreRetrySave(result, examId),
+          },
+        });
+      }
+    } catch (error: any) {
       Toast.show({
-        type: "success",
-        text1: "Saved Successfully",
-        text2: "Result has been saved",
-        visibilityTime: 4000,
-      });
-    } catch (error) {
-      Toast.show({
-        type: "error",
-        text1: "Save Failed",
-        text2: "Could not save result",
-        visibilityTime: 4000,
+        type: "save_retry",
+        text1: "Save Error",
+        text2: error.message ?? "Could not save. Tap Retry.",
+        visibilityTime: 8000,
+        props: {
+          onRetry: () => handleFirestoreRetrySave(result, examId),
+        },
       });
     }
   };
@@ -450,7 +529,7 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
               style={[
                 styles.confirmButton,
                 (!examIdInput.trim() || isValidatingExam) &&
-                  styles.confirmButtonDisabled,
+                styles.confirmButtonDisabled,
               ]}
               onPress={handleConfirmExam}
               disabled={!examIdInput.trim() || isValidatingExam}
