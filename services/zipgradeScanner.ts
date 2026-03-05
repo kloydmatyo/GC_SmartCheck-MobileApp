@@ -263,6 +263,36 @@ function extractAnswersFromRegion(
     );
   }
 
+  // CRITICAL FIX: For sparse rows (only filled bubbles detected), centroids may be wrong
+  // Verify centroids are evenly spaced, otherwise use fallback
+  if (colCentroids.length === 5) {
+    const gaps = [
+      colCentroids[1] - colCentroids[0],
+      colCentroids[2] - colCentroids[1],
+      colCentroids[3] - colCentroids[2],
+      colCentroids[4] - colCentroids[3],
+    ];
+    const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const maxDeviation = Math.max(...gaps.map((g) => Math.abs(g - avgGap)));
+
+    // If gaps vary by more than 40%, centroids are unreliable
+    if (maxDeviation > avgGap * 0.4) {
+      console.warn(
+        `[OMR] Q${startQ}+ centroid gaps inconsistent (max deviation: ${maxDeviation.toFixed(1)}px vs avg: ${avgGap.toFixed(1)}px), using fallback`,
+      );
+      const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
+      const xSpanMin = allXs[0];
+      const xSpanMax = allXs[allXs.length - 1];
+      const step = (xSpanMax - xSpanMin) / 4;
+      const fallbackCentroids = [0, 1, 2, 3, 4].map((i) => xSpanMin + step * i);
+      console.log(
+        `[OMR] Q${startQ}+ fallback centroids:`,
+        fallbackCentroids.map((c) => Math.round(c)),
+      );
+      return extractWithCentroids(allRows, fallbackCentroids, startQ, numQ);
+    }
+  }
+
   return extractWithCentroids(allRows, colCentroids, startQ, numQ);
 }
 
@@ -288,13 +318,21 @@ function extractWithCentroids(
   qRows.forEach((row, rowIdx) => {
     const qNum = startQ + rowIdx;
 
+    // Log all bubbles in this row for debugging
+    const rowBubbles = row
+      .map((b) => `x=${Math.round(b.x)} fill=${b.fill.toFixed(2)}`)
+      .join(", ");
+    console.log(`[OMR] Q${qNum} row bubbles: ${rowBubbles}`);
+
     // Find the highest-fill bubble in this row
     let best: Bubble | null = null;
     for (const b of row) {
       if (!best || b.fill > best.fill) best = b;
     }
 
-    if (!best || best.fill < 0.38) {
+    // Lower threshold for 100q templates (0.35 vs 0.38)
+    const fillThreshold = 0.35;
+    if (!best || best.fill < fillThreshold) {
       answers.push({ questionNumber: qNum, selectedAnswer: "" });
       return;
     }
@@ -412,109 +450,23 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Physical frame: 197 × 215.5 mm
+    // Gordon College 100q template - actual layout based on bubble density analysis
     //
-    // LAYOUT BASED ON GORDON COLLEGE ANSWER SHEET:
-    // Student ID Grid (Top-Left): 10x10 grid at Y: 7%-20%
+    // From bubble density grid analysis (FINAL CORRECTION):
+    // y80-90%: x10:13 x20:15 x30:13 x40:15  ← Q1-10 is HERE (bottom-left)
+    // y60-70%: x10:9 x20:12 x30:11 x40:12    ← Q11-20 is HERE (middle-left)
     //
-    // Main Answer Grid: 100 questions in 2 rows × 5 columns
-    // Top Row:    Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
-    // Bottom Row: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
+    // Layout structure:
+    // - Student ID: Top-left corner (y: 0-10%)
+    // - Q1-10: BOTTOM-left block (x: 5-45%, y: 78-98%)
+    // - Q11-20: MIDDLE-left block (x: 5-45%, y: 58-78%)
     //
-    // Column positions (5 columns, each ~18% wide):
-    //   Col 1: X: 8%-21%   (Q1-10 top, Q11-20 bottom)
-    //   Col 2: X: 22%-35%  (Q21-30 top, Q31-40 bottom)
-    //   Col 3: X: 37%-50%  (Q41-50 top, Q51-60 bottom)
-    //   Col 4: X: 52%-65%  (Q61-70 top, Q71-80 bottom)
-    //   Col 5: X: 67%-80%  (Q81-90 top, Q91-100 bottom)
-    //
-    // Row positions:
-    //   Top Row:    Y: 30%-50%
-    //   Bottom Row: Y: 52%-73%
+    // CURRENT STATUS: Testing with Q1-20 first for calibration
     return [
-      // Top row: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
-      {
-        xMin: 0.076,
-        xMax: 0.21,
-        yMin: 0.3,
-        yMax: 0.5,
-        startQ: 1,
-        numQ: 10,
-      },
-      {
-        xMin: 0.216,
-        xMax: 0.353,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 21,
-        numQ: 10,
-      },
-      {
-        xMin: 0.365,
-        xMax: 0.502,
-        yMin: 0.069,
-        yMax: 0.278,
-        startQ: 41,
-        numQ: 10,
-      },
-      {
-        xMin: 0.515,
-        xMax: 0.652,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 61,
-        numQ: 10,
-      },
-      {
-        xMin: 0.665,
-        xMax: 0.802,
-        yMin: 0.069,
-        yMax: 0.278,
-        startQ: 81,
-        numQ: 10,
-      },
-
-      // Bottom row: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
-      {
-        xMin: 0.066,
-        xMax: 0.203,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 11,
-        numQ: 10,
-      },
-      {
-        xMin: 0.216,
-        xMax: 0.353,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 31,
-        numQ: 10,
-      },
-      {
-        xMin: 0.365,
-        xMax: 0.503,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 51,
-        numQ: 10,
-      },
-      {
-        xMin: 0.515,
-        xMax: 0.652,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 71,
-        numQ: 10,
-      },
-      {
-        xMin: 0.665,
-        xMax: 0.802,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 91,
-        numQ: 10,
-      },
+      // Q1-10: Bottom-left block (lowest on the page)
+      { xMin: 0.05, xMax: 0.45, yMin: 0.58, yMax: 0.78, startQ: 1, numQ: 10 },
+      // Q11-20: Middle-left block (above Q1-10)
+      { xMin: 0.05, xMax: 0.45, yMin: 0.78, yMax: 0.98, startQ: 11, numQ: 10 },
     ];
   }
 }
@@ -584,18 +536,18 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q/100q sheets - 20q sheets should not be rotated
+      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
       // 50q sheets should be portrait (tall), but camera may capture landscape
-      // Check if rotation is needed based on question count and aspect ratio
+      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
       let workingMat = srcMat;
 
-      if (qCount !== 20) {
+      if (qCount === 50) {
         const imgAspect = srcJs.cols / srcJs.rows;
         const isLandscape = imgAspect > 1.0;
 
         // 50q sheets are very tall (aspect ~0.43), should be portrait
         // If we have a 50q exam but image is landscape, rotate 90° clockwise
-        if (qCount === 50 && isLandscape) {
+        if (isLandscape) {
           console.log(
             `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
           );
@@ -608,27 +560,6 @@ export class ZipgradeScanner {
           matsToCleanup.push(rotatedMat);
 
           // Rotate 90° clockwise (ROTATE_90_CLOCKWISE = 0)
-          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
-
-          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
-          console.log(
-            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
-          );
-          workingMat = rotatedMat;
-        } else if (qCount === 100 && !isLandscape) {
-          // 100q sheets are wide (aspect ~0.91), should be landscape
-          // If we have a 100q exam but image is portrait, rotate 90° clockwise
-          console.log(
-            `[OMR] Image is portrait (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 100q sheet should be landscape. Rotating 90° clockwise...`,
-          );
-          const rotatedMat = OpenCV.createObject(
-            ObjectType.Mat,
-            0,
-            0,
-            DataTypes.CV_8U,
-          );
-          matsToCleanup.push(rotatedMat);
-
           OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
 
           const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
@@ -799,9 +730,37 @@ export class ZipgradeScanner {
       }
 
       // ── 5. Collect bubble candidates ───────────────────────────────────────
-      // Use stricter filtering for 20q (like Main), more lenient for 50q/100q
-      const minShapeArea = Math.pow(imgWidth / 80, 2);
-      const maxShapeArea = qCount <= 20 ? imgArea * 0.05 : imgArea * 0.08;
+      // Different filtering criteria for each template type
+      // 100q has smaller bubbles (3.8mm) and needs more lenient filtering
+      let minShapeArea: number;
+      let maxShapeArea: number;
+      let minAspect: number;
+      let maxAspect: number;
+      let minExtent: number;
+
+      if (qCount <= 20) {
+        // 20q: moderate filtering
+        minShapeArea = Math.pow(imgWidth / 100, 2);
+        maxShapeArea = imgArea * 0.05;
+        minAspect = 0.4;
+        maxAspect = 2.5;
+        minExtent = 0.1;
+      } else if (qCount <= 50) {
+        // 50q: relaxed filtering
+        minShapeArea = Math.pow(imgWidth / 120, 2);
+        maxShapeArea = imgArea * 0.1;
+        minAspect = 0.25;
+        maxAspect = 4.0;
+        minExtent = 0.03;
+      } else {
+        // 100q: EXTREMELY relaxed filtering (smallest bubbles, most of them)
+        minShapeArea = Math.pow(imgWidth / 200, 2); // Very small minimum
+        maxShapeArea = imgArea * 0.15; // Very large maximum
+        minAspect = 0.1; // Accept almost any aspect ratio
+        maxAspect = 10.0;
+        minExtent = 0.01; // Accept almost any extent
+      }
+
       const rawShapes: Bubble[] = [];
 
       for (let i = 0; i < numContours; i++) {
@@ -816,15 +775,10 @@ export class ZipgradeScanner {
             ? (OpenCV.invoke("contourArea", contour) as any).value / area
             : 0;
 
-        // Stricter filtering for 20q (like Main), relaxed for 50q/100q
+        // Apply template-specific filtering
         if (area < minShapeArea || area > maxShapeArea) continue;
-        if (qCount <= 20) {
-          if (aspect < 0.4 || aspect > 2.5) continue;
-          if (extent < 0.1) continue;
-        } else {
-          if (aspect < 0.3 || aspect > 3.0) continue;
-          if (extent < 0.05) continue;
-        }
+        if (aspect < minAspect || aspect > maxAspect) continue;
+        if (extent < minExtent) continue;
 
         let fill = 0;
         try {
@@ -956,16 +910,26 @@ export class ZipgradeScanner {
       // ── 7. Detect timing marks (block markers) ────────────────────────────
       // Only use timing marks for 50q/100q sheets
       // 20q sheets use fixed regions (like Main)
+      // For 100q: block markers are smaller squares beside each question block
       const timingMarks =
         qCount > 20
           ? rawShapes.filter(
-              (s) =>
-                s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
-                s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
-                s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
-                s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
-                s.w / s.h >= 0.4 && // More lenient aspect ratio
-                s.w / s.h <= 2.5,
+              (s) => {
+                const isBlockMarker = qCount === 100
+                  ? s.area >= bubbleRefArea * 1.3 && // Even more relaxed for 100q
+                    s.area <= bubbleRefArea * 12 &&
+                    s.extent >= 0.55 && // More lenient
+                    s.fill >= 0.60 && // More lenient
+                    s.w / s.h >= 0.3 && // More lenient aspect ratio
+                    s.w / s.h <= 3.0
+                  : s.area >= bubbleRefArea * 1.5 &&
+                    s.area <= bubbleRefArea * 10 &&
+                    s.extent >= 0.6 &&
+                    s.fill >= 0.65 &&
+                    s.w / s.h >= 0.4 &&
+                    s.w / s.h <= 2.5;
+                return isBlockMarker;
+              }
             )
           : [];
 
@@ -1089,11 +1053,12 @@ export class ZipgradeScanner {
 
       // ── 9. Extract answers using timing mark-based or fallback regions ────
       // For 20q: use fixed regions (like Main)
-      // For 50q/100q: try to use timing marks to dynamically locate question blocks
+      // For 50q: try to use timing marks to dynamically locate question blocks
+      // For 100q: use fixed regions (timing marks are unreliable)
       let regions = getLayoutRegions(detectedQ);
 
-      // Only use timing marks for 50q/100q sheets
-      if (detectedQ > 20 && timingMarks.length >= 3) {
+      // Only use timing marks for 50q sheets (not 20q or 100q)
+      if (detectedQ === 50 && timingMarks.length >= 3) {
         console.log(
           `[OMR] Using timing marks to refine ${regions.length} regions`,
         );
@@ -1153,6 +1118,98 @@ export class ZipgradeScanner {
             return region;
           });
           console.log(`[OMR] Adjusted regions using timing marks`);
+        }
+      } else if (detectedQ === 100) {
+        // ── 100q: Use bubble density to automatically identify question blocks ────
+        console.log(
+          `[OMR] Using bubble density analysis to identify regions for 100q`,
+        );
+
+        // Analyze bubble density to find question blocks
+        // Each block has ~50 bubbles (10 questions × 5 choices)
+        // Blocks are arranged in a grid pattern
+        
+        // Group bubbles by X position (columns) and Y position (rows)
+        const xBands = 10;
+        const yBands = 10;
+        const densityGrid: number[][] = Array.from({ length: yBands }, () =>
+          new Array(xBands).fill(0),
+        );
+        
+        for (const b of bubbles) {
+          const xi = Math.min(Math.floor((b.x / paperW) * xBands), xBands - 1);
+          const yi = Math.min(Math.floor((b.y / paperH) * yBands), yBands - 1);
+          densityGrid[yi][xi]++;
+        }
+
+        // Find dense regions (blocks with many bubbles)
+        const denseRegions: Array<{ xMin: number; xMax: number; yMin: number; yMax: number; density: number }> = [];
+        
+        for (let yi = 0; yi < yBands - 1; yi++) {
+          for (let xi = 0; xi < xBands - 2; xi++) {
+            // Check if this 3×2 grid cell has high bubble density
+            const density = 
+              densityGrid[yi][xi] + densityGrid[yi][xi + 1] + densityGrid[yi][xi + 2] +
+              (yi + 1 < yBands ? densityGrid[yi + 1][xi] + densityGrid[yi + 1][xi + 1] + densityGrid[yi + 1][xi + 2] : 0);
+            
+            if (density >= 15) { // At least 15 bubbles in this region
+              denseRegions.push({
+                xMin: xi / xBands,
+                xMax: (xi + 3) / xBands,
+                yMin: yi / yBands,
+                yMax: (yi + 2) / yBands,
+                density,
+              });
+            }
+          }
+        }
+
+        // Sort regions by position (top-to-bottom, left-to-right)
+        denseRegions.sort((a, b) => {
+          const rowDiff = Math.floor(a.yMin * 5) - Math.floor(b.yMin * 5);
+          if (rowDiff !== 0) return rowDiff;
+          return a.xMin - b.xMin;
+        });
+
+        // Merge overlapping regions
+        const mergedRegions: typeof denseRegions = [];
+        for (const region of denseRegions) {
+          const overlapping = mergedRegions.find(
+            (r) =>
+              Math.abs(r.xMin - region.xMin) < 0.2 &&
+              Math.abs(r.yMin - region.yMin) < 0.2,
+          );
+          if (overlapping) {
+            // Merge by expanding bounds
+            overlapping.xMin = Math.min(overlapping.xMin, region.xMin);
+            overlapping.xMax = Math.max(overlapping.xMax, region.xMax);
+            overlapping.yMin = Math.min(overlapping.yMin, region.yMin);
+            overlapping.yMax = Math.max(overlapping.yMax, region.yMax);
+            overlapping.density += region.density;
+          } else {
+            mergedRegions.push({ ...region });
+          }
+        }
+
+        console.log(`[OMR] Found ${mergedRegions.length} dense regions via bubble density`);
+        mergedRegions.forEach((r, idx) => {
+          console.log(
+            `[OMR] Dense region ${idx + 1}: X[${(r.xMin * 100).toFixed(0)}%-${(r.xMax * 100).toFixed(0)}%] ` +
+            `Y[${(r.yMin * 100).toFixed(0)}%-${(r.yMax * 100).toFixed(0)}%] density=${r.density}`,
+          );
+        });
+
+        // Use detected regions if we found at least 2
+        if (mergedRegions.length >= 2) {
+          regions = mergedRegions.slice(0, 10).map((r, idx) => ({
+            xMin: Math.max(0, r.xMin - 0.02),
+            xMax: Math.min(1, r.xMax + 0.02),
+            yMin: Math.max(0, r.yMin - 0.02),
+            yMax: Math.min(1, r.yMax + 0.02),
+            startQ: idx * 10 + 1,
+            numQ: 10,
+          }));
+          console.log(`[OMR] Using ${regions.length} density-based regions`);
         }
       } else {
         console.log(
