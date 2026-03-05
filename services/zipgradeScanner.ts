@@ -414,27 +414,30 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // ── 100-question layout ─────────────────────────────────────────────────
     // Physical frame: 197 × 215.5 mm
     //
-    // EXACT PHYSICAL MEASUREMENTS from template:
-    // 10 blocks in 2 rows × 5 columns grid
+    // LAYOUT BASED ON GORDON COLLEGE ANSWER SHEET:
+    // Student ID Grid (Top-Left): 10x10 grid at Y: 7%-20%
     //
-    // Top row (Q1-50):    Y: 58-103mm  = 26.9%-47.8% of 215.5mm
-    // Bottom row (Q51-100): Y: 112-157mm = 52.0%-72.9% of 215.5mm
+    // Main Answer Grid: 100 questions in 2 rows × 5 columns
+    // Top Row:    Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
+    // Bottom Row: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
     //
-    // Column X positions (each block ~27mm wide):
-    //   Col 1: X: 13-40mm     = 6.6%-20.3% of 197mm
-    //   Col 2: X: 42.5-69.5mm = 21.6%-35.3% of 197mm
-    //   Col 3: X: 72-99mm     = 36.5%-50.3% of 197mm
-    //   Col 4: X: 101.5-128.5mm = 51.5%-65.2% of 197mm
-    //   Col 5: X: 131-158mm   = 66.5%-80.2% of 197mm
+    // Column positions (5 columns, each ~18% wide):
+    //   Col 1: X: 8%-21%   (Q1-10 top, Q11-20 bottom)
+    //   Col 2: X: 22%-35%  (Q21-30 top, Q31-40 bottom)
+    //   Col 3: X: 37%-50%  (Q41-50 top, Q51-60 bottom)
+    //   Col 4: X: 52%-65%  (Q61-70 top, Q71-80 bottom)
+    //   Col 5: X: 67%-80%  (Q81-90 top, Q91-100 bottom)
     //
-    // Each column contains 10 questions (Q1-10, Q11-20, etc.)
+    // Row positions:
+    //   Top Row:    Y: 30%-50%
+    //   Bottom Row: Y: 52%-73%
     return [
-      // Top row (Q1-50)
+      // Top row: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
       {
-        xMin: 0.066,
-        xMax: 0.203,
-        yMin: 0.269,
-        yMax: 0.478,
+        xMin: 0.076,
+        xMax: 0.21,
+        yMin: 0.3,
+        yMax: 0.5,
         startQ: 1,
         numQ: 10,
       },
@@ -443,15 +446,15 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
         xMax: 0.353,
         yMin: 0.269,
         yMax: 0.478,
-        startQ: 11,
+        startQ: 21,
         numQ: 10,
       },
       {
         xMin: 0.365,
-        xMax: 0.503,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 21,
+        xMax: 0.502,
+        yMin: 0.069,
+        yMax: 0.278,
+        startQ: 41,
         numQ: 10,
       },
       {
@@ -459,25 +462,25 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
         xMax: 0.652,
         yMin: 0.269,
         yMax: 0.478,
-        startQ: 31,
+        startQ: 61,
         numQ: 10,
       },
       {
         xMin: 0.665,
         xMax: 0.802,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 41,
+        yMin: 0.069,
+        yMax: 0.278,
+        startQ: 81,
         numQ: 10,
       },
 
-      // Bottom row (Q51-100)
+      // Bottom row: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
       {
         xMin: 0.066,
         xMax: 0.203,
         yMin: 0.52,
         yMax: 0.729,
-        startQ: 51,
+        startQ: 11,
         numQ: 10,
       },
       {
@@ -485,7 +488,7 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
         xMax: 0.353,
         yMin: 0.52,
         yMax: 0.729,
-        startQ: 61,
+        startQ: 31,
         numQ: 10,
       },
       {
@@ -493,7 +496,7 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
         xMax: 0.503,
         yMin: 0.52,
         yMax: 0.729,
-        startQ: 71,
+        startQ: 51,
         numQ: 10,
       },
       {
@@ -501,7 +504,7 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
         xMax: 0.652,
         yMin: 0.52,
         yMax: 0.729,
-        startQ: 81,
+        startQ: 71,
         numQ: 10,
       },
       {

@@ -141,14 +141,26 @@ export default function CameraScanner({
         },
       ];
     } else {
-      // 100q: 2 rows × 5 columns
+      // 100q: Gordon College format - 2 rows × 5 columns
+      // Student ID Grid at top-left (10x10 grid)
+      // Top Row: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
+      // Bottom Row: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
       return [
+        // Student ID Grid (top-left)
+        {
+          x: 0.05,
+          xEnd: 0.18,
+          y: 0.07,
+          yEnd: 0.2,
+          label: "ID Grid",
+          color: "rgba(0,200,255,0.3)",
+        },
         // Top row
         {
-          x: 0.066,
-          xEnd: 0.203,
-          y: 0.269,
-          yEnd: 0.478,
+          x: 0.076,
+          xEnd: 0.21,
+          y: 0.3,
+          yEnd: 0.5,
           label: "Q1-10",
           color: "rgba(255,0,0,0.3)",
         },
@@ -157,32 +169,32 @@ export default function CameraScanner({
           xEnd: 0.353,
           y: 0.269,
           yEnd: 0.478,
-          label: "Q11-20",
-          color: "rgba(255,100,0,0.3)",
+          label: "Q21-30",
+          color: "rgba(255,200,0,0.3)",
         },
         {
           x: 0.365,
-          xEnd: 0.503,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q21-30",
-          color: "rgba(255,200,0,0.3)",
+          xEnd: 0.502,
+          y: 0.069,
+          yEnd: 0.278,
+          label: "Q41-50",
+          color: "rgba(0,255,200,0.3)",
         },
         {
           x: 0.515,
           xEnd: 0.652,
           y: 0.269,
           yEnd: 0.478,
-          label: "Q31-40",
-          color: "rgba(0,255,0,0.3)",
+          label: "Q61-70",
+          color: "rgba(100,0,255,0.3)",
         },
         {
           x: 0.665,
           xEnd: 0.802,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q41-50",
-          color: "rgba(0,255,200,0.3)",
+          y: 0.069,
+          yEnd: 0.278,
+          label: "Q81-90",
+          color: "rgba(255,0,100,0.3)",
         },
         // Bottom row
         {
@@ -190,32 +202,32 @@ export default function CameraScanner({
           xEnd: 0.203,
           y: 0.52,
           yEnd: 0.729,
-          label: "Q51-60",
-          color: "rgba(0,100,255,0.3)",
+          label: "Q11-20",
+          color: "rgba(255,100,0,0.3)",
         },
         {
           x: 0.216,
           xEnd: 0.353,
           y: 0.52,
           yEnd: 0.729,
-          label: "Q61-70",
-          color: "rgba(100,0,255,0.3)",
+          label: "Q31-40",
+          color: "rgba(0,255,0,0.3)",
         },
         {
           x: 0.365,
           xEnd: 0.503,
           y: 0.52,
           yEnd: 0.729,
-          label: "Q71-80",
-          color: "rgba(200,0,255,0.3)",
+          label: "Q51-60",
+          color: "rgba(0,100,255,0.3)",
         },
         {
           x: 0.515,
           xEnd: 0.652,
           y: 0.52,
           yEnd: 0.729,
-          label: "Q81-90",
-          color: "rgba(255,0,100,0.3)",
+          label: "Q71-80",
+          color: "rgba(200,0,255,0.3)",
         },
         {
           x: 0.665,
