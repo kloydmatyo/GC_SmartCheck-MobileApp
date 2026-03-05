@@ -239,6 +239,7 @@ function detectAnswersFromImage(
       const sorted = [...fills].sort((a, b) => a.brightness - b.brightness);
       const darkest = sorted[0].brightness;
       const secondDark = sorted.length >= 2 ? sorted[1].brightness : 255;
+      const thirdDark = sorted.length >= 3 ? sorted[2].brightness : 255;
       const brightest = sorted[sorted.length - 1].brightness;
 
       let selectedChoice = '';
@@ -248,19 +249,34 @@ function detectAnswersFromImage(
       const darkRatio = ref > 20 ? darkest / ref : 1;
       const gapFromSecond = secondDark - darkest;
       const gapRatio = ref > 20 ? gapFromSecond / ref : 0;
+      const absoluteGap = secondDark - darkest;
+      const gapFromThird = thirdDark - darkest;
 
-      // Detection with 70% threshold:
+      // Detection with adaptive thresholds:
       // Primary: darkest must be < 70% of brightest (30%+ drop)
-      // Secondary: darkest < 85% of brightest AND strong gap from 2nd (15%+)
+      // Secondary: darkest < 90% of brightest AND strong gap from 2nd (10%+)
+      // Tertiary: darkest < 95% of brightest AND moderate gap (5%+) - for light fills
+      // Quaternary: darkest is clearly darker than at least 3 other bubbles (handles ties)
+      // Quinary: darkest is darker than median brightness (last resort for extreme ties)
+      const median = sorted[Math.floor(sorted.length / 2)].brightness;
+      
       if (darkRatio < 0.70) {
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.85 && gapRatio > 0.15) {
+      } else if (darkRatio < 0.90 && gapRatio > 0.10) {
+        selectedChoice = sorted[0].choice;
+      } else if (darkRatio < 0.95 && gapRatio > 0.05) {
+        selectedChoice = sorted[0].choice;
+      } else if (gapFromThird >= 2 && darkest < brightest) {
+        // If darkest is at least 2 units darker than the 3rd darkest
+        selectedChoice = sorted[0].choice;
+      } else if (darkest < median && darkest < brightest) {
+        // Last resort: darkest is below median (darker than at least half the bubbles)
         selectedChoice = sorted[0].choice;
       }
 
       // Log first few questions per block for debugging
-      if (q <= block.startQ + 2 || q === block.endQ) {
-        console.log(`[100Q-BRIGHTNESS] Q${q}: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} ref=${ref.toFixed(0)})`);
+      if (q <= block.startQ + 2 || q === block.endQ || !selectedChoice) {
+        console.log(`[100Q-BRIGHTNESS] Q${q}: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`);
       }
 
       answers.push({

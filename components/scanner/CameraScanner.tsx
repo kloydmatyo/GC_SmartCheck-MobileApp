@@ -132,28 +132,8 @@ export default function CameraScanner({
         },
       ];
     } else {
-      // 100-item: 10 blocks in complex grid layout
-      // Based on actual bubble density analysis from scanner logs:
-      // Q1-10 at: x5-45%, y78-98% (BOTTOM-LEFT block, lowest on page)
-      // Q11-20 at: x5-45%, y58-78% (MIDDLE-LEFT block, above Q1-10)
-      return [
-        {
-          x: 0.05,
-          xEnd: 0.45,
-          y: 0.58,
-          yEnd: 0.78,
-          label: "Q1-10",
-          color: "rgba(255,0,0,0.3)",
-        },
-        {
-          x: 0.05,
-          xEnd: 0.45,
-          y: 0.78,
-          yEnd: 0.98,
-          label: "Q11-20",
-          color: "rgba(0,255,0,0.3)",
-        },
-      ];
+      // 100-item: No debug regions shown
+      return [];
     }
   };
 
