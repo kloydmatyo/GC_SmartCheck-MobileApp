@@ -249,7 +249,7 @@ export default function ScanResults({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F2F4F7" },
   header: {
-    padding: 20,
+    padding: 30,
     backgroundColor: "#3B5943",
     flexDirection: "row",
     justifyContent: "space-between",
