@@ -311,8 +311,29 @@ function extractWithCentroids(
     return ay - by;
   });
 
+  // CRITICAL FIX: Filter out rows with bubbles far from centroids (artifacts/timing marks)
+  // A valid answer row should have bubbles near the expected column positions
+  const maxDistanceFromCentroid =
+    colCentroids.length > 1
+      ? Math.abs(colCentroids[1] - colCentroids[0]) * 0.6 // 60% of column spacing
+      : 100; // fallback if centroids are unreliable
+
+  const validRows = sortedRows.filter((row) => {
+    // Check if at least one bubble in this row is near a centroid
+    return row.some((bubble) => {
+      const nearestCentroidDist = Math.min(
+        ...colCentroids.map((c) => Math.abs(bubble.x - c)),
+      );
+      return nearestCentroidDist <= maxDistanceFromCentroid;
+    });
+  });
+
+  console.log(
+    `[OMR] Q${startQ}+: Filtered ${sortedRows.length} rows → ${validRows.length} valid rows (removed ${sortedRows.length - validRows.length} outliers)`,
+  );
+
   // Take exactly numQ rows (the actual question rows)
-  const qRows = sortedRows.slice(0, numQ);
+  const qRows = validRows.slice(0, numQ);
   const answers: StudentAnswer[] = [];
 
   qRows.forEach((row, rowIdx) => {
@@ -409,10 +430,10 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // Block 2 (Q11-20): RIGHT column, wider coverage
     //
     // Both columns are at the same Y position (side-by-side layout)
-    // Bubble density shows answers concentrated at y50-70%
+    // Bubble density shows answers concentrated at y40-70%
     return [
-      { xMin: 0.26, xMax: 0.5, yMin: 0.28, yMax: 0.95, startQ: 1, numQ: 10 },
-      { xMin: 0.54, xMax: 0.84, yMin: 0.28, yMax: 0.95, startQ: 11, numQ: 10 },
+      { xMin: 0.26, xMax: 0.5, yMin: 0.38, yMax: 0.95, startQ: 1, numQ: 10 },
+      { xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95, startQ: 11, numQ: 10 },
     ];
   } else if (questionCount <= 30) {
     // ── 30-question layout (3 groups side by side, no Y split) ─────────────
