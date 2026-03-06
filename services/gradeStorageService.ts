@@ -1,5 +1,4 @@
 import { auth, db } from "@/config/firebase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   collection,
   doc,
@@ -11,11 +10,59 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
+// @ts-ignore
+import Realm from "realm";
 import { GradeStorageRecord, GradingResult } from "../types/scanning";
 import { LogService } from "./logService";
 
 const GRADE_RESULTS_COLLECTION = "scannedResults";
-const OFFLINE_QUEUE_KEY = "gcsc-grade-queue";
+
+export class OfflineGrade extends Realm.Object<OfflineGrade> {
+  _id!: Realm.BSON.ObjectId;
+  studentId!: string;
+  examId!: string;
+  score!: number;
+  totalPoints!: number;
+  percentage!: number;
+  gradeEquivalent!: string;
+  correctAnswers!: number;
+  totalQuestions!: number;
+  dateScanned!: string;
+  status!: string;
+  scannedBy!: string;
+  createdAt!: Date;
+
+  static schema: Realm.ObjectSchema = {
+    name: "OfflineGrade",
+    primaryKey: "_id",
+    properties: {
+      _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
+      studentId: "string",
+      examId: "string",
+      score: "int",
+      totalPoints: "int",
+      percentage: "double",
+      gradeEquivalent: "string",
+      correctAnswers: "int",
+      totalQuestions: "int",
+      dateScanned: "string",
+      status: "string",
+      scannedBy: "string",
+      createdAt: "date",
+    },
+  };
+}
+
+let realmInstance: Realm | null = null;
+async function getRealm(): Promise<Realm> {
+  if (!realmInstance) {
+    realmInstance = await Realm.open({
+      schema: [OfflineGrade],
+      schemaVersion: 1,
+    });
+  }
+  return realmInstance;
+}
 
 export interface SaveResult {
   success: boolean;
@@ -208,6 +255,7 @@ export class GradeStorageService {
     }
 
     const resolvedExamId = examId || result.examId;
+    console.log(`[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`);
 
     await LogService.info(
       "SCAN_SUCCESS",
@@ -260,6 +308,8 @@ export class GradeStorageService {
       };
     }
 
+    console.log(`[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`);
+
     // Build Firestore record
     const record: GradeStorageRecord = {
       studentId: result.studentId,
@@ -290,6 +340,8 @@ export class GradeStorageService {
     const batch = writeBatch(db);
     batch.set(gradeRef, { ...lean, createdAt: Timestamp.now() });
 
+    console.log(`[GradeStorageService] Attempting Firestore write to doc ${gradeRef.id}...`);
+
     try {
       // Enforce 2-second SLA for the Firestore commit
       await withTimeout(batch.commit(), 2000);
@@ -299,6 +351,8 @@ export class GradeStorageService {
         studentId: record.studentId,
         examId: record.examId,
       });
+
+      console.log(`[GradeStorageService] Successfully saved to Firestore! Doc: ${gradeRef.id}`);
 
       return {
         success: true,
@@ -315,6 +369,7 @@ export class GradeStorageService {
 
       if (isOffline) {
         // Rollback is implicit (batch never committed); queue offline
+        console.warn(`[GradeStorageService] Network unavailable (${msg}). Handing off to RealmDB for offline queueing.`);
         return GradeStorageService.queueOffline(record);
       }
 
@@ -339,18 +394,36 @@ export class GradeStorageService {
     record: GradeStorageRecord,
   ): Promise<SaveResult> {
     try {
-      const raw = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
-      const queue: GradeStorageRecord[] = raw ? JSON.parse(raw) : [];
-      queue.push(record);
-      await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+      console.log(`[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`);
+      const realm = await getRealm();
+
+      realm.write(() => {
+        realm.create("OfflineGrade", {
+          studentId: record.studentId,
+          examId: record.examId,
+          score: record.score,
+          totalPoints: record.totalPoints,
+          percentage: record.percentage,
+          gradeEquivalent: record.gradeEquivalent,
+          correctAnswers: record.correctAnswers,
+          totalQuestions: record.totalQuestions,
+          dateScanned: record.dateScanned,
+          status: "pending",
+          scannedBy: record.scannedBy,
+          createdAt: record.createdAt,
+        });
+      });
+
+      const queueLength = realm.objects("OfflineGrade").length;
+      console.log(`[GradeStorageService] Record successfully queued in RealmDB. Total offline items: ${queueLength}`);
 
       await LogService.info(
         "SAVE_OFFLINE_QUEUED",
-        "No network — grade queued for sync",
+        "No network — grade queued for sync in RealmDB",
         {
           studentId: record.studentId,
           examId: record.examId,
-          queueLength: queue.length,
+          queueLength,
         },
       );
 
@@ -358,12 +431,12 @@ export class GradeStorageService {
         success: true,
         status: "pending",
         message:
-          "No internet connection. Result saved locally and will sync automatically.",
+          "No internet connection. Result saved locally to Realm and will sync automatically.",
       };
     } catch (error) {
       await LogService.error(
         "SAVE_FAILED",
-        "Failed to queue grade result offline",
+        "Failed to queue grade result in RealmDB",
         {
           studentId: record.studentId,
           error: error instanceof Error ? error.message : String(error),
@@ -382,26 +455,35 @@ export class GradeStorageService {
 
   static async syncOfflineQueue(): Promise<void> {
     try {
-      const raw = await AsyncStorage.getItem(OFFLINE_QUEUE_KEY);
-      if (!raw) return;
+      const realm = await getRealm();
+      const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade");
 
-      const queue: GradeStorageRecord[] = JSON.parse(raw);
-      if (queue.length === 0) return;
+      if (offlineGrades.length === 0) {
+        console.log("[GradeStorageService] No offline grades found in RealmDB. Skipping sync.");
+        return;
+      }
+
+      console.log(`[GradeStorageService] Found ${offlineGrades.length} offline grades to sync.`);
 
       await LogService.info(
         "OFFLINE_SYNC_STARTED",
-        `Syncing ${queue.length} offline grade(s)`,
+        `Syncing ${offlineGrades.length} offline grade(s) from RealmDB via atomic batch transaction`,
       );
 
-      const remaining: GradeStorageRecord[] = [];
+      const batch = writeBatch(db);
 
-      for (const record of queue) {
+      // Limit to max 400 for safety, as Firestore batch limit is 500 operations
+      const recordsToSync = Array.from(offlineGrades as unknown as OfflineGrade[]).slice(0, 400);
+      let validRecordsToSyncCount = 0;
+
+      for (const record of recordsToSync) {
         // Re-check duplicate before syncing
         const duplicate = await GradeStorageService.isDuplicate(
           record.studentId,
           record.examId,
           record.scannedBy || GradeStorageService.requireAuth(),
         );
+
         if (duplicate) {
           await LogService.warn(
             "SAVE_DUPLICATE",
@@ -411,29 +493,58 @@ export class GradeStorageService {
               examId: record.examId,
             },
           );
+          // Duplicate won't be synced but will be deleted from local Realm 
           continue;
         }
 
-        const result = await GradeStorageService.writeToFirestore(record);
-        if (result.status !== "saved") {
-          remaining.push(record); // Keep failed records for next sync attempt
-        }
+        const gradeRef = doc(collection(db, GRADE_RESULTS_COLLECTION));
+
+        batch.set(gradeRef, {
+          studentId: record.studentId,
+          examId: record.examId,
+          score: record.score,
+          totalPoints: record.totalPoints,
+          percentage: record.percentage,
+          gradeEquivalent: record.gradeEquivalent,
+          correctAnswers: record.correctAnswers,
+          totalQuestions: record.totalQuestions,
+          dateScanned: record.dateScanned,
+          status: "saved",
+          scannedBy: record.scannedBy,
+          createdAt: Timestamp.now(), // Source of truth sync time
+        });
+
+        validRecordsToSyncCount++;
       }
 
-      await AsyncStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+      // ── Transactionally commit all or nothing ──
+      if (validRecordsToSyncCount > 0) {
+        console.log(`[GradeStorageService] Committing atomic batch of ${validRecordsToSyncCount} records to Firestore...`);
+        await withTimeout(batch.commit(), 5000); // 5 sec SLA for batch
+        console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
+      }
 
-      await LogService.info("OFFLINE_SYNC_SUCCESS", "Offline sync complete", {
-        synced: queue.length - remaining.length,
-        remaining: remaining.length,
+      // If we reach here, batch successfully committed (or there were only duplicates)
+      // Now it's safe to clear ONLY the synchronized records from Realm
+      console.log(`[GradeStorageService] Cleaning up ${recordsToSync.length} records from RealmDB...`);
+      realm.write(() => {
+        realm.delete(recordsToSync);
+      });
+      console.log("[GradeStorageService] RealmDB cleanup complete.");
+
+      await LogService.info("OFFLINE_SYNC_SUCCESS", "Offline sync batch complete", {
+        synced: validRecordsToSyncCount,
+        clearedFromRealm: recordsToSync.length,
       });
     } catch (error) {
+      // Intentionally DO NOT clear Realm on error
       await LogService.error(
         "OFFLINE_SYNC_FAILED",
-        "Offline sync encountered an error",
+        "Offline sync batch failed. Realm DB kept intact for future re-try.",
         {
           error: error instanceof Error ? error.message : String(error),
         },
       );
     }
   }
-}
+} 

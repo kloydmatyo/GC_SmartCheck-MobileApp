@@ -23,8 +23,8 @@ import { authService } from "@/services/authService";
 
 export default function SignInScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("user1@gordoncollege.edu.ph");
+  const [password, setPassword] = useState("ccs123");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [useFirebase, setUseFirebase] = useState(true);
@@ -183,7 +183,7 @@ export default function SignInScreen() {
                   />
                   <TextInput
                     style={styles.input}
-                    placeholder="Enter your password"
+                    placeholder="enter password"
                     placeholderTextColor="#999"
                     value={password}
                     onChangeText={setPassword}
