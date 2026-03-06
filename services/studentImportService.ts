@@ -5,7 +5,7 @@
  */
 
 import { auth, db } from "@/config/firebase";
-import { collection, addDoc, query, where, getDocs, writeBatch } from "firebase/firestore";
+import { collection, addDoc, doc, query, where, getDocs, writeBatch } from "firebase/firestore";
 import { 
   ImportRow, 
   ImportValidationError, 
@@ -275,6 +275,52 @@ export class StudentImportService {
   }
 
   /**
+   * REQ 25: Validate CSV headers for required columns before parsing
+   */
+  static validateCSVHeaders(fileContent: string): ImportValidationError[] {
+    const errors: ImportValidationError[] = [];
+    // Strip UTF-8 BOM (\uFEFF) that Excel-exported CSV files prepend
+    const stripped = fileContent.replace(/^\uFEFF/, '');
+    const firstLine = stripped.trim().split('\n')[0] || '';
+    const headers = firstLine.split(',').map(h => h.trim().toLowerCase().replace(/["']/g, ''));
+    const headerSet = new Set(headers);
+
+    const hasStudentId = headerSet.has('student_id') || headerSet.has('studentid') || headerSet.has('id');
+    const hasFirstName = headerSet.has('first_name') || headerSet.has('firstname');
+    const hasLastName = headerSet.has('last_name') || headerSet.has('lastname');
+
+    if (!hasStudentId) {
+      errors.push({
+        rowNumber: 0,
+        field: 'header',
+        value: firstLine,
+        error: 'Missing required column: student_id (accepted: student_id, studentid, id)',
+        severity: 'error'
+      });
+    }
+    if (!hasFirstName) {
+      errors.push({
+        rowNumber: 0,
+        field: 'header',
+        value: firstLine,
+        error: 'Missing required column: first_name (accepted: first_name, firstname)',
+        severity: 'error'
+      });
+    }
+    if (!hasLastName) {
+      errors.push({
+        rowNumber: 0,
+        field: 'header',
+        value: firstLine,
+        error: 'Missing required column: last_name (accepted: last_name, lastname)',
+        severity: 'error'
+      });
+    }
+
+    return errors;
+  }
+
+  /**
    * REQ 22-32: Process import with full validation and error handling
    */
   static async processImport(
@@ -308,6 +354,22 @@ export class StudentImportService {
           warningCount: 0,
           duplicateCount: 0,
           errors: fileErrors,
+          processedRows: [],
+          sessionId,
+          timestamp
+        };
+      }
+
+      // REQ 25: Validate headers before parsing
+      const headerErrors = this.validateCSVHeaders(fileContent);
+      if (headerErrors.length > 0) {
+        return {
+          totalRows: 0,
+          successCount: 0,
+          errorCount: headerErrors.length,
+          warningCount: 0,
+          duplicateCount: 0,
+          errors: headerErrors,
           processedRows: [],
           sessionId,
           timestamp
@@ -434,7 +496,8 @@ export class StudentImportService {
             updated_at: new Date().toISOString()
           };
 
-          const docRef = addDoc(studentsRef, studentData);
+          const newDocRef = doc(studentsRef); // auto-generate Firestore doc ID
+          firestoreBatch.set(newDocRef, studentData);
         });
 
         await firestoreBatch.commit();
