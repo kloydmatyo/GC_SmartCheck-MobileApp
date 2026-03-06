@@ -299,6 +299,14 @@ export default function HomeScreen() {
           <Text style={styles.scanButtonText}>Start Scanning Papers</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={() => setShowHistory(true)}
+        >
+          <Ionicons name="time-outline" size={20} color="#fff" />
+          <Text style={styles.scanButtonText}>History</Text>
+        </TouchableOpacity>
+
         {/* Stats error banner */}
         {statsError && !loadingStats && (
           <View style={styles.errorBanner}>
@@ -534,23 +542,16 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* New History Button */}
-        <TouchableOpacity
-          style={styles.newQuizButton}
-          onPress={() => setShowHistory(true)}
-        >
-          <Ionicons name="add-circle" size={24} color="#fff" />
-          <Text style={styles.newQuizButtonText}>History</Text>
-        </TouchableOpacity>
-
-        {/* New Quiz Button */}
-        <TouchableOpacity
-          style={styles.newQuizButton}
-          onPress={() => router.push("/(tabs)/generator")}
-        >
-          <Ionicons name="add-circle" size={24} color="#fff" />
-          <Text style={styles.newQuizButtonText}>New Quiz</Text>
-        </TouchableOpacity>
+        <View style={styles.buttonRow}>
+          {/* New Quiz Button */}
+          <TouchableOpacity
+            style={styles.newQuizButton}
+            onPress={() => router.push("/(tabs)/generator")}
+          >
+            <Ionicons name="add-circle" size={24} color="#fff" />
+            <Text style={styles.newQuizButtonText}>New Quiz</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={{ height: 20 }} />
       </ScrollView>
@@ -615,6 +616,18 @@ const styles = StyleSheet.create({
     color: "#6c7d74",
   },
   scanButton: {
+    flexDirection: "row",
+    backgroundColor: "#3d5a3d",
+    marginHorizontal: 10,
+    paddingVertical: 14,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+    elevation: 3,
+  },
+  historyButton: {
     flexDirection: "row",
     backgroundColor: "#3d5a3d",
     marginHorizontal: 10,
@@ -739,12 +752,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginHorizontal: 20,
+    marginTop: 18,
+    marginBottom: 20,
+  },
   newQuizButton: {
     flexDirection: "row",
     backgroundColor: "#2f8a74",
-    alignSelf: "flex-end",
-    marginRight: 10,
-    marginTop: 18,
     paddingHorizontal: 18,
     paddingVertical: 14,
     borderRadius: 12,
@@ -752,6 +769,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     elevation: 3,
+    flex: 1,
   },
   newQuizButtonText: {
     color: "#fff",
