@@ -260,7 +260,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     percentageText: {
-        color: "#1A237E",
+        color: "#2E7D32",
         fontWeight: "bold",
         fontSize: 12,
     },
