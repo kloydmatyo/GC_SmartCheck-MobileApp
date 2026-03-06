@@ -1267,19 +1267,65 @@ export class ZipgradeScanner {
           };
         } else {
           // Only 3 markers: estimate the missing corner
-          // Sort by Y first, then X
-          const topMark = sortedMarks[0]; // Topmost
-          const bottomMarks = sortedMarks.slice(1).sort((a, b) => a.x - b.x);
+          // Identify which corner is missing by analyzing the 3 detected markers
+          const marks = [...sortedMarks];
           
-          // Assume topMark is top-left, estimate top-right
-          const paperWidth = bottomMarks[1].x - bottomMarks[0].x;
+          // Find the two markers with similar Y coordinates (top or bottom edge)
+          const yDiffs = [
+            { idx: [0, 1], diff: Math.abs(marks[0].y - marks[1].y) },
+            { idx: [0, 2], diff: Math.abs(marks[0].y - marks[2].y) },
+            { idx: [1, 2], diff: Math.abs(marks[1].y - marks[2].y) },
+          ];
+          yDiffs.sort((a, b) => a.diff - b.diff);
           
-          markers = {
-            topLeft: { x: topMark.x, y: topMark.y },
-            topRight: { x: topMark.x + paperWidth, y: topMark.y },
-            bottomLeft: { x: bottomMarks[0].x, y: bottomMarks[0].y },
-            bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
-          };
+          const edgePair = yDiffs[0].idx;
+          const loneIdx = [0, 1, 2].find(i => !edgePair.includes(i))!;
+          
+          const edge1 = marks[edgePair[0]];
+          const edge2 = marks[edgePair[1]];
+          const lone = marks[loneIdx];
+          
+          // Sort edge markers by X
+          const [edgeLeft, edgeRight] = edge1.x < edge2.x ? [edge1, edge2] : [edge2, edge1];
+          
+          // Determine if edge is top or bottom based on Y comparison with lone marker
+          const edgeIsTop = (edgeLeft.y + edgeRight.y) / 2 < lone.y;
+          
+          if (edgeIsTop) {
+            // We have TR, TL, and one bottom corner - estimate the other bottom
+            const paperWidth = edgeRight.x - edgeLeft.x;
+            const missingX = lone.x < (edgeLeft.x + edgeRight.x) / 2 
+              ? edgeRight.x  // lone is BL, missing BR
+              : edgeLeft.x;  // lone is BR, missing BL
+            
+            markers = {
+              topLeft: { x: edgeLeft.x, y: edgeLeft.y },
+              topRight: { x: edgeRight.x, y: edgeRight.y },
+              bottomLeft: lone.x < (edgeLeft.x + edgeRight.x) / 2 
+                ? { x: lone.x, y: lone.y }
+                : { x: missingX, y: lone.y },
+              bottomRight: lone.x >= (edgeLeft.x + edgeRight.x) / 2
+                ? { x: lone.x, y: lone.y }
+                : { x: missingX, y: lone.y },
+            };
+          } else {
+            // We have BL, BR, and one top corner - estimate the other top
+            const paperWidth = edgeRight.x - edgeLeft.x;
+            const missingX = lone.x < (edgeLeft.x + edgeRight.x) / 2
+              ? edgeRight.x  // lone is TL, missing TR
+              : edgeLeft.x;  // lone is TR, missing TL
+            
+            markers = {
+              topLeft: lone.x < (edgeLeft.x + edgeRight.x) / 2
+                ? { x: lone.x, y: lone.y }
+                : { x: missingX, y: lone.y },
+              topRight: lone.x >= (edgeLeft.x + edgeRight.x) / 2
+                ? { x: lone.x, y: lone.y }
+                : { x: missingX, y: lone.y },
+              bottomLeft: { x: edgeLeft.x, y: edgeLeft.y },
+              bottomRight: { x: edgeRight.x, y: edgeRight.y },
+            };
+          }
           
           console.log('[OMR] Only 3 markers detected, estimating 4th corner');
         }

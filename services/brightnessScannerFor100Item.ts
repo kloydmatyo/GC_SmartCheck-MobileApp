@@ -122,43 +122,43 @@ function get100ItemTemplateLayout(): TemplateLayout {
       {
         startQ: 41, endQ: 50,
         firstBubbleNX: 89.35 / fw,
-        firstBubbleNY: 51 / fh,
+        firstBubbleNY: 47 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
       {
         startQ: 71, endQ: 80,
         firstBubbleNX: 154.85 / fw,
-        firstBubbleNY: 51 / fh,
+        firstBubbleNY: 47 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
       // Bottom grid – row 0
       {
         startQ: 1, endQ: 10,
-        firstBubbleNX: 24.86 / fw,
-        firstBubbleNY: 105 / fh,
+        firstBubbleNX: 24.86 / fw,  // Adjusted: was 24.86, moved left by 2.5mm (half bubble spacing)
+        firstBubbleNY: 102 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
       {
         startQ: 21, endQ: 30,
         firstBubbleNX: 70.02 / fw,
-        firstBubbleNY: 105 / fh,
+        firstBubbleNY: 102 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
       {
         startQ: 51, endQ: 60,
         firstBubbleNX: 115.18 / fw,
-        firstBubbleNY: 105 / fh,
+        firstBubbleNY: 102 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
       {
         startQ: 81, endQ: 90,
         firstBubbleNX: 160.34 / fw,
-        firstBubbleNY: 105 / fh,
+        firstBubbleNY: 102 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
@@ -166,7 +166,7 @@ function get100ItemTemplateLayout(): TemplateLayout {
       {
         startQ: 11, endQ: 20,
         firstBubbleNX: 24.86 / fw,
-        firstBubbleNY: 161 / fh,
+        firstBubbleNY: 159 / fh,
         bubbleSpacingNX: 5.0 / fw,
         rowSpacingNY: 4.8 / fh,
       },
@@ -235,6 +235,11 @@ function detectAnswersFromImage(
         fills.push({ choice: choiceLabels[c], brightness });
       }
 
+      // Debug: Log all brightness values for first question in each block
+      if (q === block.startQ) {
+        console.log(`[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
+      }
+
       // Sort ascending by brightness — darkest (most filled) first
       const sorted = [...fills].sort((a, b) => a.brightness - b.brightness);
       const darkest = sorted[0].brightness;
@@ -252,25 +257,32 @@ function detectAnswersFromImage(
       const absoluteGap = secondDark - darkest;
       const gapFromThird = thirdDark - darkest;
 
-      // Detection with adaptive thresholds:
-      // Primary: darkest must be < 70% of brightest (30%+ drop)
-      // Secondary: darkest < 90% of brightest AND strong gap from 2nd (10%+)
-      // Tertiary: darkest < 95% of brightest AND moderate gap (5%+) - for light fills
-      // Quaternary: darkest is clearly darker than at least 3 other bubbles (handles ties)
-      // Quinary: darkest is darker than median brightness (last resort for extreme ties)
+      // Detection with balanced thresholds:
+      // Primary: darkest must be < 68% of brightest (32%+ drop) - strong fill
+      // Secondary: darkest < 88% of brightest AND strong gap from 2nd (12%+) - clear fill
+      // Tertiary: darkest < 93% of brightest AND moderate gap (7%+) AND absolute gap >= 12 - light fill
+      // Quaternary: absolute gap >= 18 AND darkest clearly darker than 3rd (gap >= 8) - handles noise
+      // Quinary: very light fills - absolute gap >= 3 AND darkest is clearly below median
+      // Final: extremely light fills - any detectable difference (catches 1-unit differences)
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
       
-      if (darkRatio < 0.70) {
+      if (darkRatio < 0.68) {
+        // Strong fill: darkest is 32%+ darker than brightest
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.90 && gapRatio > 0.10) {
+      } else if (darkRatio < 0.88 && gapRatio > 0.12) {
+        // Clear fill: darkest is 12%+ darker AND has strong separation from 2nd
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.95 && gapRatio > 0.05) {
+      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 12) {
+        // Light fill: darkest is 7%+ darker AND has absolute gap of 12+ units
         selectedChoice = sorted[0].choice;
-      } else if (gapFromThird >= 2 && darkest < brightest) {
-        // If darkest is at least 2 units darker than the 3rd darkest
+      } else if (absoluteGap >= 18 && gapFromThird >= 8) {
+        // Noise handling: clear separation from both 2nd and 3rd darkest
         selectedChoice = sorted[0].choice;
-      } else if (darkest < median && darkest < brightest) {
-        // Last resort: darkest is below median (darker than at least half the bubbles)
+      } else if (absoluteGap >= 3 && darkest < median - 2) {
+        // Very light fill: at least 3 units darker AND clearly below median
+        selectedChoice = sorted[0].choice;
+      } else if (absoluteGap >= 1 && darkest < brightest) {
+        // Extremely light fill: any detectable 1+ unit difference (catches very light pencil marks)
         selectedChoice = sorted[0].choice;
       }
 
