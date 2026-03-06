@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     FlatList,
     StyleSheet,
@@ -136,7 +137,10 @@ export default function HistoryList({ onClose }: HistoryListProps) {
             {/* List */}
             <View style={styles.listContainer}>
                 {loading ? (
-                    <Text style={styles.emptyText}>Loading...</Text>
+                    <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="large" color="#3B5943" />
+                        <Text style={styles.loadingText}>Loading history...</Text>
+                    </View>
                 ) : history.length === 0 ? (
                     <View style={styles.emptyContainer}>
                         <Ionicons name="folder-open-outline" size={64} color="#ccc" />
@@ -160,7 +164,7 @@ export default function HistoryList({ onClose }: HistoryListProps) {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#F2F4F7" },
     header: {
-        backgroundColor: "#1A237E",
+        backgroundColor: "#3B5943",
         padding: 20,
         paddingTop: 40,
         flexDirection: "row",
@@ -175,6 +179,17 @@ const styles = StyleSheet.create({
     backButton: { padding: 4 },
     listContainer: { flex: 1 },
     listContent: { padding: 15 },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 12,
+    },
+    loadingText: {
+        color: "#3B5943",
+        fontSize: 16,
+        fontWeight: "600",
+    },
     emptyContainer: {
         flex: 1,
         justifyContent: "center",
@@ -260,7 +275,7 @@ const styles = StyleSheet.create({
         fontSize: 12,
     },
     percentageText: {
-        color: "#1A237E",
+        color: "#2E7D32",
         fontWeight: "bold",
         fontSize: 12,
     },
