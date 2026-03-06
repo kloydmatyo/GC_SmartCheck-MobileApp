@@ -118,6 +118,28 @@ export default function ClassesScreen() {
         cardBorder: "#2f4a38",
       };
 
+  const modalColors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        panelSoft: "#2a3a33",
+        border: "#34483f",
+        text: "#e7f1eb",
+        subtext: "#b9c9c0",
+        accent: "#1f3a2f",
+        accentStrong: "#8fd1ad",
+      }
+    : {
+        bg: COLORS.white,
+        headerBg: "#3d5a3d",
+        panelSoft: "#3d5a3d",
+        border: "#2f6b49",
+        text: "#E8F5E9",
+        subtext: "#B8D4B8",
+        accent: "#2d7a5f",
+        accentStrong: "#4CAF50",
+      };
+
   // Create new class
   const handleCreateClass = async () => {
     // Validation
@@ -416,67 +438,100 @@ export default function ClassesScreen() {
         transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
+        <View style={[styles.modalContent, { backgroundColor: modalColors.bg }]}>
+          <View style={[styles.modalHeader, { backgroundColor: modalColors.headerBg }]}>
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setModalVisible(false)}
             >
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Create New Class</Text>
+            <Text style={[styles.modalTitle, { color: modalColors.text }]}>Create New Class</Text>
             <View style={styles.modalHeaderPlaceholder} />
           </View>
 
           <ScrollView
-            style={styles.modalBody}
+            style={[
+              styles.modalBody,
+              { backgroundColor: darkModeEnabled ? modalColors.bg : "#f5f5f5" },
+            ]}
+            contentContainerStyle={styles.modalBodyContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-              <Text style={styles.label}>Class Name *</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Class Name *</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., CS 101"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.class_name}
                 onChangeText={(text) =>
                   setFormData({ ...formData, class_name: text })
                 }
               />
 
-              <Text style={styles.label}>Course Subject *</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Course Subject *</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., Computer Science"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.course_subject}
                 onChangeText={(text) =>
                   setFormData({ ...formData, course_subject: text })
                 }
               />
 
-              <Text style={styles.label}>Section/Block</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Section/Block</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., A"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.section_block}
                 onChangeText={(text) =>
                   setFormData({ ...formData, section_block: text })
                 }
               />
 
-              <Text style={styles.label}>Room</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Room</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., 404"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.room}
                 onChangeText={(text) =>
                   setFormData({ ...formData, room: text })
                 }
               />
 
-              <Text style={styles.label}>Schedule Day (Select multiple)</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Schedule Day (Select multiple)</Text>
               <View style={styles.dayButtons}>
                 {[
                   "Monday",
@@ -490,16 +545,30 @@ export default function ClassesScreen() {
                     key={day}
                     style={[
                       styles.dayButton,
+                      darkModeEnabled && {
+                        backgroundColor: modalColors.panelSoft,
+                        borderColor: modalColors.border,
+                      },
                       formData.schedule_day.includes(day) &&
                         styles.dayButtonActive,
+                      darkModeEnabled &&
+                        formData.schedule_day.includes(day) && {
+                          backgroundColor: modalColors.accent,
+                          borderColor: modalColors.accentStrong,
+                        },
                     ]}
                     onPress={() => toggleDay(day)}
                   >
                     <Text
                       style={[
                         styles.dayButtonText,
+                        darkModeEnabled && { color: modalColors.subtext },
                         formData.schedule_day.includes(day) &&
                           styles.dayButtonTextActive,
+                        darkModeEnabled &&
+                          formData.schedule_day.includes(day) && {
+                            color: modalColors.accentStrong,
+                          },
                       ]}
                     >
                       {day.substring(0, 3)}
@@ -508,44 +577,72 @@ export default function ClassesScreen() {
                 ))}
               </View>
 
-              <Text style={styles.label}>Schedule Time</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Schedule Time</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., 10:00am"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.schedule_time}
                 onChangeText={(text) =>
                   setFormData({ ...formData, schedule_time: text })
                 }
               />
 
-              <Text style={styles.label}>School Year</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>School Year</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., 2025*2026"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.school_year}
                 onChangeText={(text) =>
                   setFormData({ ...formData, school_year: text })
                 }
               />
 
-              <Text style={styles.label}>Semester</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Semester</Text>
               <View style={styles.semesterButtons}>
                 {["1st semester", "2nd semester", "Summer"].map((sem) => (
                   <TouchableOpacity
                     key={sem}
                     style={[
                       styles.semesterButton,
+                      darkModeEnabled && {
+                        backgroundColor: modalColors.panelSoft,
+                        borderColor: modalColors.border,
+                      },
                       formData.semester === sem && styles.semesterButtonActive,
+                      darkModeEnabled &&
+                        formData.semester === sem && {
+                          backgroundColor: modalColors.accent,
+                          borderColor: modalColors.accentStrong,
+                        },
                     ]}
                     onPress={() => setFormData({ ...formData, semester: sem })}
                   >
                     <Text
                       style={[
                         styles.semesterButtonText,
+                        darkModeEnabled && { color: modalColors.subtext },
                         formData.semester === sem &&
                           styles.semesterButtonTextActive,
+                        darkModeEnabled &&
+                          formData.semester === sem && {
+                            color: modalColors.accentStrong,
+                          },
                       ]}
                     >
                       {sem}
@@ -555,17 +652,34 @@ export default function ClassesScreen() {
               </View>
           </ScrollView>
 
-          <View style={styles.modalFooter}>
+          <View
+            style={[
+              styles.modalFooter,
+              {
+                backgroundColor: darkModeEnabled ? modalColors.bg : COLORS.white,
+                borderTopColor: darkModeEnabled ? modalColors.border : "#e4e8e6",
+              },
+            ]}
+          >
             <TouchableOpacity
-              style={styles.cancelButton}
+              style={[
+                styles.cancelButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: modalColors.border,
+                },
+              ]}
               onPress={() => setModalVisible(false)}
               disabled={creating}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={[styles.cancelButtonText, darkModeEnabled && { color: "#b9c9c0" }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.createButton,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.accent,
+                },
                 creating && styles.createButtonDisabled,
               ]}
               onPress={handleCreateClass}
@@ -909,8 +1023,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 20,
     backgroundColor: "#f5f5f5",
+  },
+  modalBodyContent: {
+    paddingBottom: 96,
   },
   label: {
     fontSize: 12,

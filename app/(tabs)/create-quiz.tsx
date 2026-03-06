@@ -156,6 +156,9 @@ export default function CreateQuizScreen() {
         border: "#34483f",
         text: "#e7f1eb",
         subtext: "#9db1a6",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        accent: "#8fd1ad",
       }
     : {
         screenBg: "#f5f5f5",
@@ -164,6 +167,9 @@ export default function CreateQuizScreen() {
         border: "#e0e0e0",
         text: "#E8F5E9",
         subtext: "#B8D4B8",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        accent: "#4CAF50",
       };
 
   const handleDateChange = (_event: any, selectedDate?: Date) => {
@@ -532,12 +538,30 @@ export default function CreateQuizScreen() {
         <View style={styles.section}>
           <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CLASS *</Text>
           {classesLoading ? (
-            <View style={styles.loadingClassesRow}>
+            <View
+              style={[
+                styles.loadingClassesRow,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <ActivityIndicator size="small" color="#E8F5E9" />
               <Text style={[styles.loadingClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>Loading classes...</Text>
             </View>
           ) : classOptions.length === 0 ? (
-            <View style={styles.emptyClassesBox}>
+            <View
+              style={[
+                styles.emptyClassesBox,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <Text style={[styles.emptyClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>No classes found</Text>
             </View>
           ) : (
@@ -549,7 +573,16 @@ export default function CreateQuizScreen() {
                     key={cls.id}
                     style={[
                       styles.classButton,
+                      darkModeEnabled && {
+                        backgroundColor: "#2a3a33",
+                        borderColor: colors.border,
+                      },
                       selected && styles.classButtonActive,
+                      darkModeEnabled &&
+                        selected && {
+                          backgroundColor: colors.primary,
+                          borderColor: colors.accent,
+                        },
                     ]}
                     onPress={() => setSelectedClassId(cls.id)}
                     disabled={loading}
@@ -700,7 +733,16 @@ export default function CreateQuizScreen() {
         </View>
 
         {/* Manual Editing Section */}
-        <View style={styles.manualSection}>
+        <View
+          style={[
+            styles.manualSection,
+            darkModeEnabled && {
+              backgroundColor: "#2a3a33",
+              borderWidth: 1,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <View style={styles.manualHeader}>
             <Text style={[styles.manualTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Manual Editing</Text>
             <Text style={[styles.manualSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
@@ -709,12 +751,22 @@ export default function CreateQuizScreen() {
             </Text>
           </View>
           <TouchableOpacity
-            style={styles.editButton}
+            style={[
+              styles.editButton,
+              darkModeEnabled && {
+                backgroundColor: colors.primary,
+                borderColor: colors.primaryDark,
+              },
+            ]}
             onPress={handleEditAnswerKey}
             disabled={loading}
           >
-            <Ionicons name="create-outline" size={20} color="#fff" />
-            <Text style={[styles.editButtonText, darkModeEnabled && { color: "#8fd1ad" }]}>Edit Answer Key</Text>
+            <Ionicons
+              name="create-outline"
+              size={20}
+              color={darkModeEnabled ? colors.accent : "#fff"}
+            />
+            <Text style={[styles.editButtonText, darkModeEnabled && { color: colors.accent }]}>Edit Answer Key</Text>
           </TouchableOpacity>
         </View>
 
@@ -722,11 +774,22 @@ export default function CreateQuizScreen() {
         <View style={styles.section}>
           <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>ANSWER KEY</Text>
           <TouchableOpacity
-            style={styles.scanButton}
+            style={[
+              styles.scanButton,
+              darkModeEnabled && {
+                backgroundColor: "#2a3a33",
+                borderWidth: 1,
+                borderColor: colors.border,
+              },
+            ]}
             onPress={handleScanAnswerKey}
             disabled={loading}
           >
-            <Ionicons name="camera-outline" size={32} color="#E8F5E9" />
+            <Ionicons
+              name="camera-outline"
+              size={32}
+              color={darkModeEnabled ? colors.accent : "#E8F5E9"}
+            />
             <View style={styles.scanTextContainer}>
               <Text style={[styles.scanTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Scan Answer Key</Text>
               <Text style={[styles.scanSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
@@ -748,7 +811,15 @@ export default function CreateQuizScreen() {
           ]}
         >
         <TouchableOpacity
-          style={[styles.saveButton, loading && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            darkModeEnabled && {
+              backgroundColor: colors.primary,
+              borderWidth: 1,
+              borderColor: colors.primaryDark,
+            },
+            loading && styles.saveButtonDisabled,
+          ]}
           onPress={handleSave}
           disabled={loading}
         >

@@ -61,6 +61,7 @@ export class BatchHistoryService {
         version,
         sheetsGenerated,
         createdAt: serverTimestamp(),
+        clientCreatedAt: Date.now(),
         createdBy: currentUser.uid,
         status: "generated",
         templateVersion,
@@ -116,7 +117,11 @@ export class BatchHistoryService {
           templateName: data.templateName,
           version: data.version,
           sheetsGenerated: data.sheetsGenerated,
-          createdAt: data.createdAt?.toDate() || new Date(),
+          createdAt:
+            data.createdAt?.toDate?.() ||
+            (data.clientCreatedAt
+              ? new Date(data.clientCreatedAt)
+              : new Date()),
           createdBy: data.createdBy,
           status: data.status,
           templateVersion: data.templateVersion,
@@ -146,7 +151,7 @@ export class BatchHistoryService {
 
       if (filter?.searchQuery) {
         const query = filter.searchQuery.toLowerCase();
-        filteredBatches = batches.filter(
+        filteredBatches = filteredBatches.filter(
           (batch) =>
             batch.examTitle.toLowerCase().includes(query) ||
             batch.examCode.toLowerCase().includes(query) ||

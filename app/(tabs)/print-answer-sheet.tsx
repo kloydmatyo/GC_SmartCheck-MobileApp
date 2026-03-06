@@ -11,9 +11,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Platform,
@@ -34,6 +34,7 @@ import VersionMismatchWarningModal from "@/components/exam/VersionMismatchWarnin
 import { auth } from "@/config/firebase";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { BatchHistoryService } from "../../services/batchHistoryService";
+import { ExamService } from "../../services/examService";
 import type {
     BatchDuplicateWarning,
     BatchVersionMismatch,
@@ -48,6 +49,12 @@ const TEMPLATES = [
 type TemplateKey = (typeof TEMPLATES)[number]["key"];
 const VERSIONS = ["A", "B", "C", "D"] as const;
 type Version = (typeof VERSIONS)[number];
+type LatestExamContext = {
+  examTitle: string;
+  examSection: string;
+  examVersion: number;
+  changed: boolean;
+};
 
 const LOGO_URI =
   "https://gordoncollege.edu.ph/wp-content/uploads/2022/09/cropped-GC-Logo.png";
@@ -378,8 +385,11 @@ function build100QuestionFullPageLayout(
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes"/>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 12px; background: white; width: 612px; }
+    body { font-family: Arial, sans-serif; margin: 0 auto; padding: 12px; background: white; width: 100%; max-width: 612px; }
     .page { position: relative; width: 100%; min-height: 792px; }
+    @media screen and (max-width: 700px) {
+      body { padding: 8px; }
+    }
     @media print {
       body { margin: 0; padding: 12px; }
       .page-break { page-break-after: always; }
@@ -675,6 +685,8 @@ async function createPdfFromHtml(
 
 export default function PrintAnswerSheetScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ examId?: string }>();
+  const examId = typeof params.examId === "string" ? params.examId : "";
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const goToQuizzes = () => {
     if (router.canGoBack()) {
@@ -688,6 +700,7 @@ export default function PrintAnswerSheetScreen() {
   const [examName, setExamName] = useState("");
   const [section, setSection] = useState("");
   const [version, setVersion] = useState<Version>("A");
+  const [examVersion, setExamVersion] = useState(1);
   const [pdfUri, setPdfUri] = useState<string | null>(null);
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -718,10 +731,44 @@ export default function PrintAnswerSheetScreen() {
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [pendingGeneration, setPendingGeneration] = useState(false);
 
+  const syncExamContext = useCallback(async (): Promise<LatestExamContext | null> => {
+    if (!examId) return null;
+
+    const examData = await ExamService.getExamById(examId);
+    if (!examData) return null;
+
+    const latestTitle = examData.metadata.title?.trim() || "Untitled Exam";
+    const latestSection =
+      examData.metadata.section?.trim() ||
+      examData.metadata.subject?.trim() ||
+      "";
+    const latestVersion = examData.metadata.version || 1;
+    const changed =
+      latestTitle !== examName ||
+      latestSection !== section ||
+      latestVersion !== examVersion;
+
+    setExamName(latestTitle);
+    setSection(latestSection);
+    setExamVersion(latestVersion);
+
+    return {
+      examTitle: latestTitle,
+      examSection: latestSection,
+      examVersion: latestVersion,
+      changed,
+    };
+  }, [examId, examName, section, examVersion]);
+
   const selected = useMemo(
     () => TEMPLATES.find((t) => t.key === templateKey)!,
     [templateKey],
   );
+  const previewHeight = useMemo(() => {
+    if (templateKey === "standard100") return rp(980);
+    if (templateKey === "standard50") return rp(760);
+    return rp(480);
+  }, [templateKey]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -735,7 +782,13 @@ export default function PrintAnswerSheetScreen() {
           console.warn("Failed to load dark mode preference:", error);
         }
       })();
-    }, []),
+
+      if (examId) {
+        syncExamContext().catch((error) => {
+          console.warn("Failed to sync latest exam details:", error);
+        });
+      }
+    }, [examId, syncExamContext]),
   );
 
   const colors = darkModeEnabled
@@ -743,28 +796,36 @@ export default function PrintAnswerSheetScreen() {
         bg: "#111815",
         headerBg: "#1a2520",
         cardBg: "#1f2b26",
+        softCardBg: "#23332c",
+        inputBg: "#2a3a33",
         border: "#34483f",
+        borderSoft: "#3b5247",
         title: "#e7f1eb",
         text: "#b9c9c0",
-        primary: "#1f3a2f",
+        primary: "#3d5a3d",
+        pillBg: "#2a3a33",
       }
     : {
-        bg: COLORS.bg,
+        bg: "#eef1ef",
         headerBg: COLORS.white,
-        cardBg: COLORS.white,
-        border: COLORS.border,
-        title: COLORS.textDark,
-        text: COLORS.textMid,
-        primary: COLORS.primaryMid,
+        cardBg: "#f4f8f5",
+        softCardBg: "#e7efe9",
+        inputBg: "#ffffff",
+        border: "#9fb7a7",
+        borderSoft: "#c6d6cc",
+        title: "#24362f",
+        text: "#5e7466",
+        primary: "#3d5a3d",
+        pillBg: "#e6ede8",
       };
 
   // Check for duplicate batches
-  async function checkForDuplicates() {
-    if (!examName) return null;
+  async function checkForDuplicates(targetExamId: string) {
+    if (!targetExamId) return null;
 
     try {
       const warning = await BatchHistoryService.checkDuplicateBatch(
-        examName, // Using examName as examId
+        targetExamId,
         version,
         5, // 5-minute window
       );
@@ -776,13 +837,16 @@ export default function PrintAnswerSheetScreen() {
   }
 
   // Check for version mismatch
-  async function checkForVersionMismatch() {
-    if (!examName) return null;
+  async function checkForVersionMismatch(
+    targetExamId: string,
+    currentTemplateVersion: number,
+  ) {
+    if (!targetExamId) return null;
 
     try {
       const mismatch = await BatchHistoryService.checkVersionMismatch(
-        examName, // Using examName as examId
-        1, // Current template version
+        targetExamId,
+        currentTemplateVersion,
       );
       return mismatch;
     } catch (error) {
@@ -792,8 +856,13 @@ export default function PrintAnswerSheetScreen() {
   }
 
   // Create batch record after successful generation
-  async function createBatchRecord() {
-    if (!examName || !pdfMetrics) return;
+  async function createBatchRecord(generationData: {
+    examIdValue: string;
+    examTitle: string;
+    examSection: string;
+    examVersion: number;
+  }) {
+    if (!generationData.examTitle) return;
 
     try {
       const currentUser = auth.currentUser;
@@ -802,15 +871,15 @@ export default function PrintAnswerSheetScreen() {
         return;
       }
 
-      const examCode = `${examName.toUpperCase().replace(/\s+/g, "-")}-${version}`;
+      const examCode = `${generationData.examTitle.toUpperCase().replace(/\s+/g, "-")}-${version}`;
       const batchId = await BatchHistoryService.createBatch(
-        examName, // examId
-        examName, // examTitle
+        generationData.examIdValue,
+        generationData.examTitle,
         examCode,
         selected.label, // templateName
         version,
         1, // sheetsGenerated - 1 sheet per generation
-        1, // templateVersion
+        generationData.examVersion,
         {
           totalQuestions: selected.totalQuestions,
           columns: selected.totalQuestions > 25 ? 2 : 1,
@@ -827,8 +896,30 @@ export default function PrintAnswerSheetScreen() {
 
   // Main generation handler with duplicate/version checks
   async function handleGeneratePreview() {
+    const hasLocalSnapshot =
+      examName.trim().length > 0 || section.trim().length > 0 || examVersion > 1;
+    const syncedExam = await syncExamContext();
+
+    if (syncedExam?.changed && hasLocalSnapshot) {
+      setVersionMismatch({
+        hasMismatch: true,
+        currentVersion: syncedExam.examVersion,
+        batchVersion: examVersion,
+        message:
+          "This exam was updated on another device. Preview details were refreshed to the latest version.",
+      });
+      setShowVersionModal(true);
+      setPendingGeneration(true);
+      return;
+    }
+
+    const activeExamId = examId || syncedExam?.examTitle || examName.trim();
+    const activeExamTitle = syncedExam?.examTitle || examName;
+    const activeExamSection = syncedExam?.examSection || section;
+    const activeExamVersion = syncedExam?.examVersion || examVersion;
+
     // Check for duplicates first
-    const dupWarning = await checkForDuplicates();
+    const dupWarning = await checkForDuplicates(activeExamId);
     if (dupWarning?.isDuplicate) {
       setDuplicateWarning(dupWarning);
       setShowDuplicateModal(true);
@@ -837,7 +928,10 @@ export default function PrintAnswerSheetScreen() {
     }
 
     // Check for version mismatch
-    const verMismatch = await checkForVersionMismatch();
+    const verMismatch = await checkForVersionMismatch(
+      activeExamId,
+      activeExamVersion,
+    );
     if (verMismatch?.hasMismatch) {
       setVersionMismatch(verMismatch);
       setShowVersionModal(true);
@@ -846,11 +940,21 @@ export default function PrintAnswerSheetScreen() {
     }
 
     // Proceed with generation
-    await performGeneration();
+    await performGeneration({
+      examIdValue: activeExamId,
+      examTitle: activeExamTitle,
+      examSection: activeExamSection,
+      examVersion: activeExamVersion,
+    });
   }
 
   // Actual PDF generation logic
-  async function performGeneration() {
+  async function performGeneration(generationData?: {
+    examIdValue: string;
+    examTitle: string;
+    examSection: string;
+    examVersion: number;
+  }) {
     setLoading(true);
     setErrorText(null);
     setPdfMetrics(null);
@@ -859,8 +963,20 @@ export default function PrintAnswerSheetScreen() {
     const startTime = Date.now();
 
     try {
+      const activeGenerationData = generationData ?? {
+        examIdValue: examId || examName.trim(),
+        examTitle: examName,
+        examSection: section,
+        examVersion,
+      };
+
       // Generate HTML content for preview
-      const html = buildFallbackHtml(templateKey, examName, section, version);
+      const html = buildFallbackHtml(
+        templateKey,
+        activeGenerationData.examTitle,
+        activeGenerationData.examSection,
+        version,
+      );
       setHtmlContent(html);
 
       // Also generate PDF for download
@@ -889,7 +1005,7 @@ export default function PrintAnswerSheetScreen() {
       setPdfMetrics(metrics);
 
       // Create batch record after successful generation
-      await createBatchRecord();
+      await createBatchRecord(activeGenerationData);
 
       // Check performance
       if (loadTime > 5000) {
@@ -934,7 +1050,12 @@ export default function PrintAnswerSheetScreen() {
   function handleDuplicateProceed() {
     setShowDuplicateModal(false);
     setDuplicateWarning(null);
-    performGeneration();
+    performGeneration({
+      examIdValue: examId || examName.trim(),
+      examTitle: examName,
+      examSection: section,
+      examVersion,
+    });
   }
 
   function handleVersionCancel() {
@@ -946,7 +1067,12 @@ export default function PrintAnswerSheetScreen() {
   function handleVersionProceed() {
     setShowVersionModal(false);
     setVersionMismatch(null);
-    performGeneration();
+    performGeneration({
+      examIdValue: examId || examName.trim(),
+      examTitle: examName,
+      examSection: section,
+      examVersion,
+    });
   }
 
   function navigateToBatchHistory() {
@@ -1017,8 +1143,8 @@ export default function PrintAnswerSheetScreen() {
                   style={[
                     styles.templateBtn,
                     {
-                      borderColor: colors.border,
-                      backgroundColor: darkModeEnabled ? "#2a3a33" : "#f3f7f4",
+                      borderColor: colors.borderSoft,
+                      backgroundColor: colors.pillBg,
                     },
                     active && styles.templateBtnActive,
                     active && { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -1044,8 +1170,8 @@ export default function PrintAnswerSheetScreen() {
             style={[
               styles.input,
               {
-                borderColor: colors.border,
-                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+                borderColor: colors.borderSoft,
+                backgroundColor: colors.inputBg,
                 color: colors.title,
               },
             ]}
@@ -1060,8 +1186,8 @@ export default function PrintAnswerSheetScreen() {
             style={[
               styles.input,
               {
-                borderColor: colors.border,
-                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+                borderColor: colors.borderSoft,
+                backgroundColor: colors.inputBg,
                 color: colors.title,
               },
             ]}
@@ -1081,8 +1207,8 @@ export default function PrintAnswerSheetScreen() {
                   style={[
                     styles.versionBtn,
                     {
-                      borderColor: colors.border,
-                      backgroundColor: darkModeEnabled ? "#2a3a33" : "#f3f7f4",
+                      borderColor: colors.borderSoft,
+                      backgroundColor: colors.pillBg,
                     },
                     active && styles.versionBtnActive,
                     active && { backgroundColor: colors.primary, borderColor: colors.primary },
@@ -1128,7 +1254,7 @@ export default function PrintAnswerSheetScreen() {
               styles.batchHistoryBtn,
               {
                 borderColor: colors.primary,
-                backgroundColor: darkModeEnabled ? "#2a3a33" : COLORS.white,
+                backgroundColor: colors.softCardBg,
               },
             ]}
             onPress={navigateToBatchHistory}
@@ -1167,7 +1293,7 @@ export default function PrintAnswerSheetScreen() {
 
         {htmlContent ? (
           <View style={[styles.viewerCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-            <View style={[styles.viewerHeader, { backgroundColor: darkModeEnabled ? "#2a3a33" : "#f5f9f6", borderBottomColor: colors.border }]}>
+            <View style={[styles.viewerHeader, { backgroundColor: colors.softCardBg, borderBottomColor: colors.border }]}>
               <Text style={[styles.viewerTitle, { color: colors.title }]}>Answer Sheet Preview</Text>
               <TouchableOpacity
                 style={[styles.downloadBtn, { backgroundColor: colors.primary }]}
@@ -1187,7 +1313,7 @@ export default function PrintAnswerSheetScreen() {
                 style={[
                   styles.metricsBar,
                   {
-                    backgroundColor: darkModeEnabled ? "#22302a" : "#f9fafb",
+                    backgroundColor: colors.softCardBg,
                     borderBottomColor: colors.border,
                   },
                 ]}
@@ -1247,10 +1373,11 @@ export default function PrintAnswerSheetScreen() {
 
             <WebView
               source={{ html: htmlContent }}
-              style={styles.webview}
+              style={[styles.webview, { height: previewHeight }]}
               javaScriptEnabled
               domStorageEnabled
               scalesPageToFit
+              nestedScrollEnabled
               originWhitelist={["*"]}
               onError={(syntheticEvent) => {
                 const { nativeEvent } = syntheticEvent;
@@ -1354,6 +1481,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
     padding: rp(14),
+    ...Platform.select({
+      android: { elevation: 1 },
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.06,
+        shadowRadius: 2,
+      },
+    }),
   },
   stepTitle: {
     fontSize: rf(15),
@@ -1374,6 +1510,8 @@ const styles = StyleSheet.create({
     paddingVertical: rp(7),
     paddingHorizontal: rp(10),
     backgroundColor: "#f3f7f4",
+    minWidth: rs(90),
+    alignItems: "center",
   },
   templateBtnActive: {
     backgroundColor: COLORS.primaryMid,
@@ -1492,7 +1630,7 @@ const styles = StyleSheet.create({
     gap: rp(6),
   },
   downloadText: { color: COLORS.white, fontSize: rf(12), fontWeight: "700" },
-  webview: { height: rp(480), backgroundColor: "#efefef" },
+  webview: { backgroundColor: "#efefef" },
   webviewLoader: {
     position: "absolute",
     top: 0,

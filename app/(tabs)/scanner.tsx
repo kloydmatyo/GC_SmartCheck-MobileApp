@@ -26,7 +26,7 @@ export default function ScannerTab() {
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
         <View style={styles.header}>
-          <Ionicons name="scan" size={64} color="#007AFF" />
+          <Ionicons name="scan" size={64} color="#3d5a3d" />
           <Text style={styles.title}>Zipgrade Scanner</Text>
           <Text style={styles.subtitle}>
             Scan and automatically grade Zipgrade-compatible answer sheets
@@ -67,7 +67,7 @@ export default function ScannerTab() {
           style={styles.historyButton}
           onPress={() => setShowHistory(true)}
         >
-          <Ionicons name="time-outline" size={24} color="#007AFF" />
+          <Ionicons name="time-outline" size={24} color="#3d5a3d" />
           <Text style={styles.historyButtonText}>View History</Text>
         </TouchableOpacity>
 
@@ -141,14 +141,14 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   scanButton: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#3d5a3d",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     padding: 18,
     borderRadius: 12,
     marginBottom: 30,
-    shadowColor: "#007AFF",
+    shadowColor: "#3d5a3d",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -169,10 +169,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 30,
     borderWidth: 1,
-    borderColor: "#007AFF",
+    borderColor: "#3d5a3d",
   },
   historyButtonText: {
-    color: "#007AFF",
+    color: "#3d5a3d",
     fontSize: 16,
     fontWeight: "600",
     marginLeft: 8,

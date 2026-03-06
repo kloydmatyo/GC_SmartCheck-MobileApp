@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -35,13 +35,26 @@ export default function BatchHistoryScreen() {
     deletedBatches: 0,
   });
 
+  const loadStatistics = async () => {
+    try {
+      const stats = await BatchHistoryService.getBatchStatistics();
+      setStatistics(stats);
+    } catch (error) {
+      console.error("Error loading statistics:", error);
+    }
+  };
+
   useEffect(() => {
     loadBatchHistory();
     loadStatistics();
   }, [filterStatus]);
 
+  const refreshAllData = useCallback(async () => {
+    await Promise.all([loadBatchHistory(), loadStatistics()]);
+  }, [filterStatus, searchQuery]);
+
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       (async () => {
         try {
           const savedDarkMode = await AsyncStorage.getItem(
@@ -52,7 +65,9 @@ export default function BatchHistoryScreen() {
           console.warn("Failed to load dark mode preference:", error);
         }
       })();
-    }, []),
+
+      refreshAllData();
+    }, [refreshAllData]),
   );
 
   const colors = darkModeEnabled
@@ -105,19 +120,9 @@ export default function BatchHistoryScreen() {
     }
   };
 
-  const loadStatistics = async () => {
-    try {
-      const stats = await BatchHistoryService.getBatchStatistics();
-      setStatistics(stats);
-    } catch (error) {
-      console.error("Error loading statistics:", error);
-    }
-  };
-
   const handleRefresh = () => {
     setRefreshing(true);
-    loadBatchHistory();
-    loadStatistics();
+    refreshAllData();
   };
 
   const handleDeleteBatch = async (batchId: string) => {

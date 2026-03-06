@@ -5,9 +5,12 @@
 
 import { CacheSyncIndicator } from "@/components/student/CacheSyncIndicator";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
 import { StudentExtended } from "@/types/student";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import { useFocusEffect } from "expo-router";
 import {
   collection,
   getDocs,
@@ -19,6 +22,7 @@ import {
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   FlatList,
   Modal,
   RefreshControl,
@@ -62,6 +66,97 @@ export default function StudentsScreen() {
 
   // REQ 22: Import modal state
   const [showImportModal, setShowImportModal] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+
+  const loadDarkModePreference = React.useCallback(async () => {
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    } catch (error) {
+      console.warn("Failed to load dark mode preference:", error);
+    }
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      (async () => {
+        await loadDarkModePreference();
+        if (!active) return;
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadDarkModePreference]),
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      "darkModeChanged",
+      (value: boolean) => {
+        setDarkModeEnabled(Boolean(value));
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const colors = darkModeEnabled
+      ? {
+        background: "#111815",
+        header: "#1a2520",
+        card: "#1f2b26",
+        border: "#34483f",
+        text: "#e7f1eb",
+        textSecondary: "#b9c9c0",
+        muted: "#9db1a6",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        accent: "#8fd1ad",
+        accentDark: "#6cb992",
+        accentSoft: "#2a3a33",
+        chip: "#22302a",
+        chipText: "#b9c9c0",
+        chipActiveBg: "#1f3a2f",
+        chipActiveBorder: "#8fd1ad",
+        inputBg: "#1f3a2f",
+        inputText: "#e7f1eb",
+        inputPlaceholder: "#8fa39a",
+        searchIcon: "#9db1a6",
+        headerButtonBg: "#22302a",
+        inactive: "#4b6358",
+        dangerSoft: "#3f2a2a",
+        modalOverlay: "rgba(0, 0, 0, 0.6)",
+        studentCardBg: "#1f2b26",
+        studentCardBorder: "#34483f",
+      }
+    : {
+        background: "#eef1ef",
+        header: "#fff",
+        card: "#fff",
+        border: "#d8dfda",
+        text: "#24362f",
+        textSecondary: "#5e7268",
+        muted: "#8da096",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        accent: "#3d5a3d",
+        accentDark: "#2f4a38",
+        accentSoft: "#e2ece6",
+        chip: "#e8ece9",
+        chipText: "#5e7268",
+        chipActiveBg: "#3d5a3d",
+        chipActiveBorder: "#2f4a38",
+        inputBg: "#3d5a3d",
+        inputText: "#ecf7f1",
+        inputPlaceholder: "#b8d4c4",
+        searchIcon: "#d6e9de",
+        headerButtonBg: "#edf3ef",
+        inactive: "#ccc",
+        dangerSoft: "#ffebee",
+        modalOverlay: "rgba(0, 0, 0, 0.5)",
+        studentCardBg: "#f0ead6",
+        studentCardBorder: "#d4c5a0",
+      };
 
   // Initialize database and load students
   useEffect(() => {
@@ -248,27 +343,36 @@ export default function StudentsScreen() {
   };
 
   const renderStudentCard = ({ item }: { item: StudentExtended }) => (
-    <TouchableOpacity style={styles.studentCard}>
+    <TouchableOpacity
+      style={[
+        styles.studentCard,
+        { backgroundColor: colors.studentCardBg, borderColor: colors.studentCardBorder },
+      ]}
+    >
       <View style={styles.studentHeader}>
-        <View style={styles.avatarContainer}>
+        <View style={[styles.avatarContainer, { backgroundColor: colors.primary }]}>
           <Ionicons name="person" size={24} color="#fff" />
         </View>
         <View style={styles.studentInfo}>
-          <Text style={styles.studentName}>
+          <Text style={[styles.studentName, { color: colors.text }]}>
             {item.last_name}, {item.first_name}
           </Text>
-          <Text style={styles.studentId}>ID: {item.student_id}</Text>
+          <Text style={[styles.studentId, { color: colors.textSecondary }]}>
+            ID: {item.student_id}
+          </Text>
           {item.section && (
-            <Text style={styles.studentClass}>{item.section}</Text>
+            <Text style={[styles.studentClass, { color: colors.textSecondary }]}>
+              {item.section}
+            </Text>
           )}
         </View>
         <View style={styles.studentBadges}>
           {!item.is_active && (
-            <View style={styles.inactiveBadge}>
+            <View style={[styles.inactiveBadge, { backgroundColor: colors.dangerSoft }]}>
               <Text style={styles.inactiveBadgeText}>Inactive</Text>
             </View>
           )}
-          <Ionicons name="chevron-forward" size={20} color="#666" />
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -282,50 +386,102 @@ export default function StudentsScreen() {
       transparent={true}
       onRequestClose={() => setShowFilterModal(false)}
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Filters</Text>
+      <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
+        <View
+          style={[
+            styles.modalContent,
+            { backgroundColor: colors.card, borderTopColor: colors.border },
+          ]}
+        >
+          <View
+            style={[
+              styles.modalHeader,
+              {
+                borderBottomColor: colors.border,
+                backgroundColor: darkModeEnabled ? "#22302a" : "#f3f7f4",
+              },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Filters</Text>
             <TouchableOpacity onPress={() => setShowFilterModal(false)}>
-              <Ionicons name="close" size={24} color="#333" />
+              <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.filterSection}>
-            <Text style={styles.filterLabel}>Status</Text>
+          <View style={[styles.filterSection, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Status</Text>
             <TouchableOpacity
-              style={styles.filterToggle}
+              style={[
+                styles.filterToggle,
+                {
+                  backgroundColor: activeOnly ? colors.chipActiveBg : colors.background,
+                  borderColor: activeOnly ? colors.chipActiveBorder : colors.border,
+                },
+              ]}
               onPress={() => setActiveOnly(!activeOnly)}
             >
               <Ionicons
                 name={activeOnly ? "checkbox" : "square-outline"}
                 size={24}
-                color="#00a550"
+                color={activeOnly ? "#e7f1eb" : colors.accent}
               />
-              <Text style={styles.filterToggleText}>Active students only</Text>
+              <Text
+                style={[
+                  styles.filterToggleText,
+                  { color: activeOnly ? "#e7f1eb" : colors.text },
+                ]}
+              >
+                Active students only
+              </Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.filterSection}>
-            <Text style={styles.filterLabel}>Sort By</Text>
+          <View style={[styles.filterSection, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.filterLabel, { color: colors.text }]}>Sort By</Text>
             {(["name", "student_id", "section"] as const).map((field) => (
               <TouchableOpacity
                 key={field}
-                style={styles.sortOption}
+                style={[
+                  styles.sortOption,
+                  {
+                    backgroundColor:
+                      sortBy === field ? colors.chipActiveBg : colors.background,
+                    borderColor:
+                      sortBy === field ? colors.chipActiveBorder : colors.border,
+                  },
+                ]}
                 onPress={() => changeSortBy(field)}
               >
-                <Text style={styles.sortOptionText}>
-                  {field === "name"
-                    ? "Name"
-                    : field === "student_id"
-                      ? "Student ID"
-                      : "Section"}
-                </Text>
+                <View style={styles.sortOptionLeft}>
+                  <Ionicons
+                    name={
+                      field === "name"
+                        ? "person-outline"
+                        : field === "student_id"
+                          ? "card-outline"
+                          : "albums-outline"
+                    }
+                    size={16}
+                    color={sortBy === field ? "#e7f1eb" : colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.sortOptionText,
+                      { color: sortBy === field ? "#e7f1eb" : colors.text },
+                    ]}
+                  >
+                    {field === "name"
+                      ? "Name"
+                      : field === "student_id"
+                        ? "Student ID"
+                        : "Section"}
+                  </Text>
+                </View>
                 {sortBy === field && (
                   <Ionicons
                     name={sortOrder === "asc" ? "arrow-up" : "arrow-down"}
                     size={20}
-                    color="#00a550"
+                    color={colors.accent}
                   />
                 )}
               </TouchableOpacity>
@@ -333,7 +489,7 @@ export default function StudentsScreen() {
           </View>
 
           <TouchableOpacity
-            style={styles.applyButton}
+            style={[styles.applyButton, { backgroundColor: colors.primary }]}
             onPress={() => {
               setShowFilterModal(false);
               loadStudents();
@@ -352,10 +508,22 @@ export default function StudentsScreen() {
     if (totalPages <= 1) return null;
 
     return (
-      <View style={styles.paginationContainer}>
+      <View
+        style={[
+          styles.paginationContainer,
+          {
+            backgroundColor: colors.primary,
+            borderTopColor: colors.primaryDark,
+          },
+        ]}
+      >
         <TouchableOpacity
           style={[
             styles.pageButton,
+            {
+              backgroundColor: colors.primaryDark,
+              borderColor: colors.primaryDark,
+            },
             currentPage === 1 && styles.pageButtonDisabled,
           ]}
           onPress={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
@@ -364,17 +532,21 @@ export default function StudentsScreen() {
           <Ionicons
             name="chevron-back"
             size={20}
-            color={currentPage === 1 ? "#ccc" : "#00a550"}
+            color={currentPage === 1 ? "#9ab79f" : "#e8f5e9"}
           />
         </TouchableOpacity>
 
-        <Text style={styles.pageInfo}>
+        <Text style={[styles.pageInfo, { color: "#ecf7f1" }]}>
           Page {currentPage} of {totalPages} ({totalCount} students)
         </Text>
 
         <TouchableOpacity
           style={[
             styles.pageButton,
+            {
+              backgroundColor: colors.primaryDark,
+              borderColor: colors.primaryDark,
+            },
             currentPage === totalPages && styles.pageButtonDisabled,
           ]}
           onPress={() =>
@@ -385,7 +557,7 @@ export default function StudentsScreen() {
           <Ionicons
             name="chevron-forward"
             size={20}
-            color={currentPage === totalPages ? "#ccc" : "#00a550"}
+            color={currentPage === totalPages ? "#9ab79f" : "#e8f5e9"}
           />
         </TouchableOpacity>
       </View>
@@ -393,52 +565,67 @@ export default function StudentsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Students</Text>
+      <View
+        style={[
+          styles.header,
+          { backgroundColor: colors.header, borderBottomColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Students</Text>
         <View style={styles.headerActions}>
           {/* REQ 44: Download/Refresh button */}
           <TouchableOpacity
-            style={styles.headerButton}
+            style={[styles.headerButton, { backgroundColor: colors.headerButtonBg }]}
             onPress={handleRefresh}
             disabled={isRefreshing}
           >
-            <Ionicons name="cloud-download" size={24} color="#00a550" />
+            <Ionicons name="cloud-download" size={24} color={colors.accent} />
           </TouchableOpacity>
           {/* REQ 22: Import button */}
           <TouchableOpacity
-            style={styles.headerButton}
+            style={[styles.headerButton, { backgroundColor: colors.headerButtonBg }]}
             onPress={() => setShowImportModal(true)}
           >
-            <Ionicons name="cloud-upload" size={24} color="#00a550" />
+            <Ionicons name="cloud-upload" size={24} color={colors.accent} />
           </TouchableOpacity>
         </View>
       </View>
 
       {/* REQ 49: Cache Status Display */}
-      <View style={styles.cacheSection}>
+      <View
+        style={[
+          styles.cacheSection,
+          { backgroundColor: colors.header, borderBottomColor: colors.border },
+        ]}
+      >
         <CacheSyncIndicator compact onRefresh={loadStudents} />
       </View>
 
       {/* REQ 33: Search Bar */}
-      <View style={styles.searchContainer}>
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: colors.inputBg, borderColor: colors.primaryDark },
+        ]}
+      >
         <Ionicons
           name="search"
           size={20}
-          color="#666"
+          color={colors.searchIcon}
           style={styles.searchIcon}
         />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { color: colors.inputText }]}
           placeholder="Search by name, ID, or section..."
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholderTextColor="#999"
+          placeholderTextColor={colors.inputPlaceholder}
         />
         {searchQuery.length > 0 && (
           <TouchableOpacity onPress={() => setSearchQuery("")}>
-            <Ionicons name="close-circle" size={20} color="#999" />
+            <Ionicons name="close-circle" size={20} color={colors.inputPlaceholder} />
           </TouchableOpacity>
         )}
       </View>
@@ -447,26 +634,71 @@ export default function StudentsScreen() {
       <View style={styles.controlsRow}>
         {/* REQ 35: Filter button */}
         <TouchableOpacity
-          style={styles.filterButton}
+          style={[
+            styles.filterButton,
+            { backgroundColor: colors.accentSoft, borderColor: colors.border },
+          ]}
           onPress={() => setShowFilterModal(true)}
         >
-          <Ionicons name="options" size={20} color="#00a550" />
-          <Text style={styles.filterButtonText}>Filters</Text>
+          <Ionicons name="options" size={20} color={colors.accent} />
+          <Text style={[styles.filterButtonText, { color: colors.accent }]}>
+            Filters
+          </Text>
         </TouchableOpacity>
+
+        <View style={styles.filterPills}>
+          <View
+            style={[
+              styles.filterPill,
+              {
+                backgroundColor: activeOnly ? colors.chipActiveBg : colors.chip,
+                borderColor: activeOnly ? colors.chipActiveBorder : colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                { color: activeOnly ? "#e7f1eb" : colors.chipText },
+              ]}
+            >
+              Active
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.filterPill,
+              {
+                backgroundColor: colors.chip,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.filterPillText, { color: colors.chipText }]}>
+              {sortBy === "name" ? "Name" : sortBy === "student_id" ? "ID" : "Section"}{" "}
+              {sortOrder === "asc" ? "↑" : "↓"}
+            </Text>
+          </View>
+        </View>
 
         {/* REQ 42: Clear filters button */}
         {(searchQuery || selectedSection || !activeOnly) && (
           <TouchableOpacity
-            style={styles.clearButton}
+            style={[
+              styles.clearButton,
+              { backgroundColor: colors.chip, borderColor: colors.border },
+            ]}
             onPress={handleClearFilters}
           >
-            <Ionicons name="close" size={16} color="#666" />
-            <Text style={styles.clearButtonText}>Clear</Text>
+            <Ionicons name="close" size={16} color={colors.textSecondary} />
+            <Text style={[styles.clearButtonText, { color: colors.textSecondary }]}>
+              Clear
+            </Text>
           </TouchableOpacity>
         )}
 
         <View style={styles.sortIndicator}>
-          <Text style={styles.sortText}>
+          <Text style={[styles.sortText, { color: colors.textSecondary }]}>
             Sort:{" "}
             {sortBy === "name"
               ? "Name"
@@ -480,11 +712,21 @@ export default function StudentsScreen() {
 
       {/* Stats Summary */}
       <View style={styles.summaryContainer}>
-        <View style={styles.summaryCard}>
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
+          ]}
+        >
           <Text style={styles.summaryValue}>{totalCount}</Text>
           <Text style={styles.summaryLabel}>Total Students</Text>
         </View>
-        <View style={styles.summaryCard}>
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
+          ]}
+        >
           <Text style={styles.summaryValue}>{students.length}</Text>
           <Text style={styles.summaryLabel}>Current Page</Text>
         </View>
@@ -493,8 +735,10 @@ export default function StudentsScreen() {
       {/* REQ 40: Loading indicator */}
       {isLoading && !isRefreshing && (
         <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#00a550" />
-          <Text style={styles.loadingText}>Loading students...</Text>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            Loading students...
+          </Text>
         </View>
       )}
 
@@ -506,18 +750,23 @@ export default function StudentsScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
         }
         ListEmptyComponent={
           !isLoading ? (
             <View style={styles.emptyContainer}>
-              <Ionicons name="people-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>
+              <Ionicons name="people-outline" size={64} color={colors.inactive} />
+              <Text style={[styles.emptyText, { color: colors.muted }]}>
                 {searchQuery ? "No students found" : "No students in database"}
               </Text>
               {!searchQuery && (
                 <TouchableOpacity
-                  style={styles.emptyActionButton}
+                  style={[styles.emptyActionButton, { backgroundColor: colors.accent }]}
                   onPress={() => setShowImportModal(true)}
                 >
                   <Text style={styles.emptyActionText}>Import Students</Text>
@@ -570,7 +819,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerButton: {
-    padding: 4,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cacheSection: {
     paddingHorizontal: 20,
@@ -605,6 +858,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     gap: 8,
+    flexWrap: "wrap",
   },
   filterButton: {
     flexDirection: "row",
@@ -612,6 +866,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     backgroundColor: "#e8f5e9",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     borderRadius: 20,
     gap: 6,
   },
@@ -626,6 +882,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     backgroundColor: "#f0f0f0",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     borderRadius: 16,
     gap: 4,
   },
@@ -634,12 +892,27 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   sortIndicator: {
-    flex: 1,
+    marginLeft: "auto",
     alignItems: "flex-end",
   },
   sortText: {
     fontSize: 13,
     color: "#666",
+  },
+  filterPills: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  filterPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   summaryContainer: {
     flexDirection: "row",
@@ -653,6 +926,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#2f4a38",
   },
   summaryValue: {
     fontSize: 28,
@@ -755,6 +1030,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 20,
     backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#d0dbd4",
   },
   pageButtonDisabled: {
     opacity: 0.5,
@@ -797,6 +1074,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: 40,
+    borderTopWidth: 1,
   },
   modalHeader: {
     flexDirection: "row",
@@ -826,6 +1104,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   filterToggleText: {
     fontSize: 15,
@@ -838,8 +1121,15 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     borderRadius: 8,
     marginBottom: 8,
+  },
+  sortOptionLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   sortOptionText: {
     fontSize: 15,
