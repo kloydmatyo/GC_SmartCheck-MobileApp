@@ -93,8 +93,8 @@ export default function CameraScanner({
         {
           x: 0.25,
           xEnd: 0.52,
-          y: 0.28,
-          yEnd: 0.5,
+          y: 0.25,
+          yEnd: 0.49,
           label: "Q1-10",
           color: "rgba(255,0,0,0.3)",
         },
