@@ -63,6 +63,9 @@ export default function StudentsScreen() {
   // REQ 22: Import modal state
   const [showImportModal, setShowImportModal] = useState(false);
 
+  // REQ 35: Available sections for filter picker
+  const [availableSections, setAvailableSections] = useState<string[]>([]);
+
   // Initialize database and load students
   useEffect(() => {
     initializeAndLoad();
@@ -86,6 +89,11 @@ export default function StudentsScreen() {
     };
   }, [searchQuery]);
 
+  // REQ 35, 38: Reset to page 1 when any filter or sort dimension changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedSection, activeOnly, sortBy, sortOrder]);
+
   // Load students when query, filters, or pagination changes
   useEffect(() => {
     loadStudents();
@@ -100,6 +108,28 @@ export default function StudentsScreen() {
 
   const initializeAndLoad = async () => {
     try {
+      const { StudentDatabaseService } =
+        await import("../../services/studentDatabaseService");
+
+      await StudentDatabaseService.initializeDatabase();
+
+      // Auto-download from Firestore when cache is empty (fresh install / first run)
+      const meta = await StudentDatabaseService.getCacheMetadata();
+      if (meta.studentCount === 0) {
+        try {
+          await StudentDatabaseService.downloadStudentDatabase();
+        } catch (e) {
+          console.warn(
+            "[Students] Auto-download failed (Firestore fallback active):",
+            e,
+          );
+        }
+      }
+
+      // Populate section filter options from cache
+      const sections = await StudentDatabaseService.getUniqueSections();
+      setAvailableSections(sections);
+
       await loadStudents();
     } catch (error) {
       console.error("Failed to initialize:", error);
@@ -171,11 +201,15 @@ export default function StudentsScreen() {
 
         const querySnapshot = await getDocs(q);
         let allStudents: StudentExtended[] = [];
+        const seenIds = new Set<string>();
 
         querySnapshot.forEach((doc) => {
           const data = doc.data();
+          const studentId = data.student_id || doc.id;
+          if (seenIds.has(studentId)) return; // deduplicate
+          seenIds.add(studentId);
           allStudents.push({
-            student_id: data.student_id || doc.id,
+            student_id: studentId,
             first_name: data.first_name || data.firstName || "",
             last_name: data.last_name || data.lastName || "",
             email: data.email,
@@ -185,6 +219,16 @@ export default function StudentsScreen() {
             updated_at: data.updated_at,
           });
         });
+
+        // Populate sections from Firestore results when cache was empty
+        const uniqueSections = [
+          ...new Set(
+            allStudents.map((s) => s.section).filter(Boolean) as string[],
+          ),
+        ].sort();
+        setAvailableSections((prev) =>
+          prev.length > 0 ? prev : uniqueSections,
+        );
 
         // Client-side search filter as fallback
         if (debouncedQuery) {
@@ -212,9 +256,20 @@ export default function StudentsScreen() {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
+      // Re-sync from Firestore, then reload the local view
+      const { StudentDatabaseService } =
+        await import("../../services/studentDatabaseService");
+      await StudentDatabaseService.downloadStudentDatabase();
+      const sections = await StudentDatabaseService.getUniqueSections();
+      setAvailableSections(sections);
       await loadStudents();
     } catch (error) {
       console.error("Refresh failed:", error);
+      Alert.alert(
+        "Refresh Failed",
+        "Could not sync with the server. Showing cached data.",
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsRefreshing(false);
     }
@@ -222,6 +277,15 @@ export default function StudentsScreen() {
 
   const handleImportComplete = async () => {
     setShowImportModal(false);
+    // Refresh section list so newly imported sections appear in the filter immediately
+    try {
+      const { StudentDatabaseService } =
+        await import("../../services/studentDatabaseService");
+      const sections = await StudentDatabaseService.getUniqueSections();
+      setAvailableSections(sections);
+    } catch {
+      // non-critical — sections will update on next pull-to-refresh
+    }
     await loadStudents();
   };
 
@@ -305,6 +369,34 @@ export default function StudentsScreen() {
               <Text style={styles.filterToggleText}>Active students only</Text>
             </TouchableOpacity>
           </View>
+
+          {/* REQ 35: Section filter */}
+          {availableSections.length > 0 && (
+            <View style={styles.filterSection}>
+              <Text style={styles.filterLabel}>Section</Text>
+              <TouchableOpacity
+                style={styles.sortOption}
+                onPress={() => setSelectedSection(undefined)}
+              >
+                <Text style={styles.sortOptionText}>All Sections</Text>
+                {!selectedSection && (
+                  <Ionicons name="checkmark" size={18} color="#00a550" />
+                )}
+              </TouchableOpacity>
+              {availableSections.map((section) => (
+                <TouchableOpacity
+                  key={section}
+                  style={styles.sortOption}
+                  onPress={() => setSelectedSection(section)}
+                >
+                  <Text style={styles.sortOptionText}>{section}</Text>
+                  {selectedSection === section && (
+                    <Ionicons name="checkmark" size={18} color="#00a550" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>Sort By</Text>
@@ -513,7 +605,9 @@ export default function StudentsScreen() {
             <View style={styles.emptyContainer}>
               <Ionicons name="people-outline" size={64} color="#ccc" />
               <Text style={styles.emptyText}>
-                {searchQuery ? "No students found" : "No students in database"}
+                {searchQuery || selectedSection || !activeOnly
+                  ? "No students found"
+                  : "No students in database"}
               </Text>
               {!searchQuery && (
                 <TouchableOpacity
