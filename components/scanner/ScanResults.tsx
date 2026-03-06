@@ -75,7 +75,10 @@ export default function ScanResults({
     <View style={styles.container}>
       {/* Institution Header */}
       <View style={styles.header}>
-        <View>
+        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <Ionicons name="close" size={28} color="white" />
+        </TouchableOpacity>
+        <View style={styles.headerContent}>
           <Text style={styles.institution}>GORDON COLLEGE</Text>
           <Text style={styles.location}>OLONGAPO CITY</Text>
         </View>
@@ -247,15 +250,20 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F2F4F7" },
   header: {
     padding: 20,
-    backgroundColor: "#1A237E",
+    backgroundColor: "#3B5943",
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerContent: {
+    flex: 1,
     alignItems: "center",
   },
   institution: { color: "white", fontSize: 18, fontWeight: "800" },
   location: { color: "#BBDEFB", fontSize: 12 },
   scoreBadge: { backgroundColor: "white", padding: 8, borderRadius: 8 },
-  scoreText: { fontWeight: "bold", fontSize: 18, color: "#1A237E" },
+  scoreText: { fontWeight: "bold", fontSize: 18, color: "#3B5943" },
+  closeButton: { padding: 8 },
   content: { flex: 1, padding: 15 },
 
   // Image styles
@@ -409,7 +417,7 @@ const styles = StyleSheet.create({
   },
   btnPrimary: {
     flex: 2,
-    backgroundColor: "#1A237E",
+    backgroundColor: "#3B5943",
     padding: 16,
     borderRadius: 10,
     alignItems: "center",

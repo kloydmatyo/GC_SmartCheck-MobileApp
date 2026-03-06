@@ -160,7 +160,7 @@ export default function HistoryList({ onClose }: HistoryListProps) {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: "#F2F4F7" },
     header: {
-        backgroundColor: "#1A237E",
+        backgroundColor: "#3B5943",
         padding: 20,
         paddingTop: 40,
         flexDirection: "row",
