@@ -250,43 +250,59 @@ export class GradeStorageService {
       },
     );
 
-    // Student ID validation
-    const studentValid = await GradeStorageService.validateStudentId(
-      result.studentId,
-    );
-    if (!studentValid) {
-      return {
-        success: false,
-        status: "error",
-        message: `Student ID "${result.studentId}" was not found in the database.`,
-      };
+    // ── 1. Student ID validation (with 2s SLA) ──
+    try {
+      const studentValid = await withTimeout(
+        GradeStorageService.validateStudentId(result.studentId),
+        2000
+      );
+      if (!studentValid) {
+        return {
+          success: false,
+          status: "error",
+          message: `Student ID "${result.studentId}" was not found in the database.`,
+        };
+      }
+    } catch (err) {
+      console.warn("[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.");
     }
 
-    // Exam ID validation
-    const examValid = await GradeStorageService.validateExamId(resolvedExamId);
-    if (!examValid) {
-      return {
-        success: false,
-        status: "error",
-        message: `Exam ID "${resolvedExamId}" is not active or does not exist.`,
-      };
+    // ── 2. Exam ID validation (with 2s SLA) ──
+    try {
+      const examValid = await withTimeout(
+        GradeStorageService.validateExamId(resolvedExamId),
+        2000
+      );
+      if (!examValid) {
+        return {
+          success: false,
+          status: "error",
+          message: `Exam ID "${resolvedExamId}" is not active or does not exist.`,
+        };
+      }
+    } catch (err) {
+      console.warn("[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.");
     }
 
-    // Duplicate check
-    const duplicate = await GradeStorageService.isDuplicate(
-      result.studentId,
-      resolvedExamId,
-    );
-    if (duplicate) {
-      await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
-        studentId: result.studentId,
-        examId: resolvedExamId,
-      });
-      return {
-        success: false,
-        status: "duplicate",
-        message: `A grade for Student ${result.studentId} in this exam already exists.`,
-      };
+    // ── 3. Duplicate check (with 2s SLA) ──
+    try {
+      const duplicate = await withTimeout(
+        GradeStorageService.isDuplicate(result.studentId, resolvedExamId),
+        2000
+      );
+      if (duplicate) {
+        await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
+          studentId: result.studentId,
+          examId: resolvedExamId,
+        });
+        return {
+          success: false,
+          status: "duplicate",
+          message: `A grade for Student ${result.studentId} in this exam already exists.`,
+        };
+      }
+    } catch (err) {
+      console.warn("[GradeStorageService] Duplicate check timed out. Proceeding.");
     }
 
     console.log(`[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`);
@@ -458,22 +474,43 @@ export class GradeStorageService {
       let validRecordsToSyncCount = 0;
 
       for (const record of recordsToSync) {
-        // Re-check duplicate before syncing
-        const duplicate = await GradeStorageService.isDuplicate(
-          record.studentId,
-          record.examId,
-        );
+        // ── Re-validate everything before syncing ──
+        try {
+          // 1. Check if student still exists
+          const studentValid = await GradeStorageService.validateStudentId(record.studentId);
+          if (!studentValid) {
+            console.warn(`[GradeStorageService] Skipping sync for invalid student: ${record.studentId}`);
+            continue;
+          }
 
-        if (duplicate) {
-          await LogService.warn(
-            "SAVE_DUPLICATE",
-            "Skipped duplicate during offline sync",
-            {
-              studentId: record.studentId,
-              examId: record.examId,
-            },
+          // 2. Check if exam is still active
+          const examValid = await GradeStorageService.validateExamId(record.examId);
+          if (!examValid) {
+            console.warn(`[GradeStorageService] Skipping sync for invalid/inactive exam: ${record.examId}`);
+            continue;
+          }
+
+          // 3. Re-check duplicate before syncing
+          const duplicate = await GradeStorageService.isDuplicate(
+            record.studentId,
+            record.examId,
           );
-          // Duplicate won't be synced but will be deleted from local Realm 
+
+          if (duplicate) {
+            await LogService.warn(
+              "SAVE_DUPLICATE",
+              "Skipped duplicate during offline sync",
+              {
+                studentId: record.studentId,
+                examId: record.examId,
+              },
+            );
+            // Duplicate won't be synced but will be deleted from local Realm 
+            continue;
+          }
+        } catch (err) {
+          // If a check fails due to network, we can't sync this record in this batch
+          console.error(`[GradeStorageService] Re-validation failed for ${record.studentId}. Skipping in this batch.`, err);
           continue;
         }
 
