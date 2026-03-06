@@ -45,29 +45,20 @@ export default function CameraScanner({
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
-    // Custom dimensions for 20q template
+    // Custom dimensions for each template to fit phone screen
+    // These dimensions create the green guide frame overlay
     if (questionCount <= 20) {
+      // 20-item: 105mm × 148.5mm (aspect ~0.707)
       return { width: 300, height: 400 };
-    }
-
-    // Physical aspect ratios for 50q and 100q templates
-    const aspectRatios = {
-      50: 91 / 211, // ~0.43 (very tall/narrow)
-      100: 197 / 215.5, // ~0.91 (nearly square, slightly wider)
-    };
-
-    let aspectRatio = aspectRatios[50]; // default
-    if (questionCount <= 50) {
-      aspectRatio = aspectRatios[50];
+    } else if (questionCount <= 50) {
+      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
+      return { width: 215, height: 500 };
     } else {
-      aspectRatio = aspectRatios[100];
+      // 100-item: 210mm × 297mm (aspect ~0.707, A4 paper)
+      // The paper is A4 size, nearly same aspect as 20-item but larger
+      // Use 85% of screen width to allow some margin
+      return { width: 320, height: 450 };
     }
-
-    // Base height on screen size, calculate width from aspect ratio
-    const frameHeight = 500; // Taller frame for better visibility
-    const frameWidth = frameHeight * aspectRatio;
-
-    return { width: frameWidth, height: frameHeight };
   };
 
   const frameDimensions = getFrameDimensions();
@@ -102,8 +93,8 @@ export default function CameraScanner({
         {
           x: 0.25,
           xEnd: 0.52,
-          y: 0.28,
-          yEnd: 0.5,
+          y: 0.25,
+          yEnd: 0.49,
           label: "Q1-10",
           color: "rgba(255,0,0,0.3)",
         },
@@ -141,91 +132,8 @@ export default function CameraScanner({
         },
       ];
     } else {
-      // 100q: 2 rows × 5 columns
-      return [
-        // Top row
-        {
-          x: 0.066,
-          xEnd: 0.203,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q1-10",
-          color: "rgba(255,0,0,0.3)",
-        },
-        {
-          x: 0.216,
-          xEnd: 0.353,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q11-20",
-          color: "rgba(255,100,0,0.3)",
-        },
-        {
-          x: 0.365,
-          xEnd: 0.503,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q21-30",
-          color: "rgba(255,200,0,0.3)",
-        },
-        {
-          x: 0.515,
-          xEnd: 0.652,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q31-40",
-          color: "rgba(0,255,0,0.3)",
-        },
-        {
-          x: 0.665,
-          xEnd: 0.802,
-          y: 0.269,
-          yEnd: 0.478,
-          label: "Q41-50",
-          color: "rgba(0,255,200,0.3)",
-        },
-        // Bottom row
-        {
-          x: 0.066,
-          xEnd: 0.203,
-          y: 0.52,
-          yEnd: 0.729,
-          label: "Q51-60",
-          color: "rgba(0,100,255,0.3)",
-        },
-        {
-          x: 0.216,
-          xEnd: 0.353,
-          y: 0.52,
-          yEnd: 0.729,
-          label: "Q61-70",
-          color: "rgba(100,0,255,0.3)",
-        },
-        {
-          x: 0.365,
-          xEnd: 0.503,
-          y: 0.52,
-          yEnd: 0.729,
-          label: "Q71-80",
-          color: "rgba(200,0,255,0.3)",
-        },
-        {
-          x: 0.515,
-          xEnd: 0.652,
-          y: 0.52,
-          yEnd: 0.729,
-          label: "Q81-90",
-          color: "rgba(255,0,100,0.3)",
-        },
-        {
-          x: 0.665,
-          xEnd: 0.802,
-          y: 0.52,
-          yEnd: 0.729,
-          label: "Q91-100",
-          color: "rgba(255,0,200,0.3)",
-        },
-      ];
+      // 100-item: No debug regions shown
+      return [];
     }
   };
 
