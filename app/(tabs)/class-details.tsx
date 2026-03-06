@@ -1,10 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import {
     ActivityIndicator,
     Animated,
+    DeviceEventEmitter,
     FlatList,
     Modal,
     ScrollView,
@@ -42,6 +45,7 @@ export default function ClassDetailsScreen() {
     studentId: string;
     studentName: string;
   } | null>(null);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
   // Student form state
   const [studentForm, setStudentForm] = useState({
@@ -59,6 +63,31 @@ export default function ClassDetailsScreen() {
     router.replace("/(tabs)/classes");
   };
 
+  const loadDarkModePreference = React.useCallback(async () => {
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    } catch (error) {
+      console.warn("Failed to load dark mode preference:", error);
+    }
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadDarkModePreference();
+    }, [loadDarkModePreference]),
+  );
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      "darkModeChanged",
+      (value: boolean) => {
+        setDarkModeEnabled(Boolean(value));
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
   useEffect(() => {
     loadClassData();
   }, [classId]);
@@ -70,6 +99,54 @@ export default function ClassDetailsScreen() {
       useNativeDriver: true,
     }).start();
   }, [activeTab, tabSlideAnim]);
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        surface: "#1a2520",
+        surfaceSoft: "#1f2b26",
+        surfaceMuted: "#22302a",
+        border: "#34483f",
+        borderSoft: "#2b3b34",
+        text: "#e7f1eb",
+        textSecondary: "#b9c9c0",
+        textMuted: "#8fa39a",
+        inputBg: "#22302a",
+        inputBorder: "#34483f",
+        inputPlaceholder: "#8fa39a",
+        headerIconBg: "#22302a",
+        studentCardBg: "#2a3129",
+        studentCardBorder: "#4c473f",
+        scoreBadgeBg: "#39362f",
+        scoreBadgeBorder: "#6f6758",
+        badgeBg: "#395046",
+        badgeText: "#dcece4",
+        emptyIcon: "#4f655b",
+        modalOverlay: "rgba(5, 10, 8, 0.78)",
+      }
+    : {
+        screenBg: "#edf1ee",
+        surface: COLORS.white,
+        surfaceSoft: "#4f715f",
+        surfaceMuted: "#f4f5f2",
+        border: "#d5dfd9",
+        borderSoft: "#3f5f4f",
+        text: "#24362f",
+        textSecondary: "#6a7b72",
+        textMuted: "#8ea094",
+        inputBg: "#f8fbf9",
+        inputBorder: "#d5dfd9",
+        inputPlaceholder: "#c3dbcf",
+        headerIconBg: "#e2efe8",
+        studentCardBg: "#e0cfb4",
+        studentCardBorder: "#6f6c62",
+        scoreBadgeBg: "#e9d8bf",
+        scoreBadgeBorder: "#d7c8af",
+        badgeBg: "#7da78f",
+        badgeText: "#214132",
+        emptyIcon: "#ccc",
+        modalOverlay: "rgba(15, 25, 20, 0.55)",
+      };
 
   const loadClassData = async () => {
     try {
@@ -181,7 +258,15 @@ export default function ClassDetailsScreen() {
   };
 
   const renderStudentItem = ({ item }: { item: Student }) => (
-    <View style={styles.studentCard}>
+    <View
+      style={[
+        styles.studentCard,
+        {
+          backgroundColor: colors.studentCardBg,
+          borderColor: colors.studentCardBorder,
+        },
+      ]}
+    >
       <View style={styles.studentInfo}>
         <View style={styles.studentAvatar}>
           <Text style={styles.studentAvatarText}>
@@ -190,11 +275,32 @@ export default function ClassDetailsScreen() {
           </Text>
         </View>
         <View style={styles.studentDetails}>
-          <Text style={styles.studentName}>
+          <Text
+            style={[
+              styles.studentName,
+              { color: darkModeEnabled ? colors.text : "#2c3d35" },
+            ]}
+          >
             {item.first_name} {item.last_name}
           </Text>
-          <Text style={styles.studentId}>ID: {item.student_id}</Text>
-          {item.email && <Text style={styles.studentEmail}>{item.email}</Text>}
+          <Text
+            style={[
+              styles.studentId,
+              { color: darkModeEnabled ? colors.textSecondary : "#6a7b72" },
+            ]}
+          >
+            ID: {item.student_id}
+          </Text>
+          {item.email && (
+            <Text
+              style={[
+                styles.studentEmail,
+                { color: darkModeEnabled ? colors.textMuted : "#85968d" },
+              ]}
+            >
+              {item.email}
+            </Text>
+          )}
         </View>
       </View>
       {showClassDetails ? (
@@ -209,7 +315,15 @@ export default function ClassDetailsScreen() {
           <Ionicons name="trash-outline" size={20} color={COLORS.error} />
         </TouchableOpacity>
       ) : (
-        <View style={styles.scoreBadge}>
+        <View
+          style={[
+            styles.scoreBadge,
+            {
+              backgroundColor: colors.scoreBadgeBg,
+              borderColor: colors.scoreBadgeBorder,
+            },
+          ]}
+        >
           <Text
             style={[
               styles.scoreText,
@@ -225,16 +339,18 @@ export default function ClassDetailsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.screenBg }]}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading class details...</Text>
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+          Loading class details...
+        </Text>
       </View>
     );
   }
 
   if (error || !classData) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.screenBg }]}>
         <Ionicons name="alert-circle-outline" size={64} color={COLORS.error} />
         <Text style={styles.errorText}>{error || "Class not found"}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadClassData}>
@@ -251,13 +367,30 @@ export default function ClassDetailsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backIcon} onPress={goToClasses}>
-          <Ionicons name="arrow-back" size={22} color="#2b4337" />
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[styles.backIcon, { backgroundColor: colors.headerIconBg }]}
+          onPress={goToClasses}
+        >
+          <Ionicons
+            name="arrow-back"
+            size={22}
+            color={darkModeEnabled ? colors.text : "#2b4337"}
+          />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{showClassDetails ? "Class Details" : ""}</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>
+          {showClassDetails ? "Class Details" : ""}
+        </Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -341,10 +474,29 @@ export default function ClassDetailsScreen() {
           style={[
             styles.section,
             showClassDetails ? styles.listSwitchSection : styles.listSwitchSectionLight,
+            showClassDetails
+              ? {
+                  backgroundColor: colors.surfaceSoft,
+                  borderColor: colors.borderSoft,
+                }
+              : {
+                  backgroundColor: darkModeEnabled
+                    ? colors.surface
+                    : colors.surfaceMuted,
+                  borderColor: darkModeEnabled
+                    ? colors.border
+                    : colors.surfaceMuted,
+                },
           ]}
         >
           <View
-            style={styles.listNav}
+            style={[
+              styles.listNav,
+              {
+                backgroundColor: darkModeEnabled ? "#2a3129" : "#e7e2d3",
+                borderColor: darkModeEnabled ? "#4b5b53" : "#d4c5a0",
+              },
+            ]}
             onLayout={(event) => setListNavWidth(event.nativeEvent.layout.width)}
           >
             <Animated.View
@@ -352,6 +504,9 @@ export default function ClassDetailsScreen() {
               style={[
                 styles.listNavActivePill,
                 { width: listNavPillWidth },
+                {
+                  backgroundColor: darkModeEnabled ? "#35523f" : "#3f6f52",
+                },
                 {
                   transform: [
                     {
@@ -371,6 +526,7 @@ export default function ClassDetailsScreen() {
               <Text
                 style={[
                   styles.listNavText,
+                  { color: darkModeEnabled ? colors.textSecondary : "#4d5f55" },
                   activeTab === "students" && styles.listNavTextActive,
                 ]}
               >
@@ -384,6 +540,7 @@ export default function ClassDetailsScreen() {
               <Text
                 style={[
                   styles.listNavText,
+                  { color: darkModeEnabled ? colors.textSecondary : "#4d5f55" },
                   activeTab === "quizzes" && styles.listNavTextActive,
                 ]}
               >
@@ -392,28 +549,50 @@ export default function ClassDetailsScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.studentSearchRow}>
-            <Ionicons name="search" size={16} color="#d2e8dc" />
+          <View
+            style={[
+              styles.studentSearchRow,
+              {
+                backgroundColor: darkModeEnabled ? colors.inputBg : "#3f6b54",
+                borderColor: darkModeEnabled ? colors.inputBorder : "#355b49",
+              },
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={16}
+              color={darkModeEnabled ? colors.textSecondary : "#d2e8dc"}
+            />
             <TextInput
               ref={studentSearchInputRef}
-              style={styles.studentSearchInput}
+              style={[
+                styles.studentSearchInput,
+                { color: darkModeEnabled ? colors.text : "#ecf7f1" },
+              ]}
               placeholder={
                 activeTab === "students" ? "Search student..." : "Search quizzes..."
               }
-              placeholderTextColor="#c3dbcf"
+              placeholderTextColor={colors.inputPlaceholder}
               value={activeTab === "students" ? studentSearch : quizSearch}
               onChangeText={
                 activeTab === "students" ? setStudentSearch : setQuizSearch
               }
               autoCapitalize="none"
             />
-            <View style={styles.studentCountBadge}>
+            <View
+              style={[
+                styles.studentCountBadge,
+                { backgroundColor: colors.badgeBg },
+              ]}
+            >
               <Ionicons
                 name={activeTab === "students" ? "people-outline" : "document-text-outline"}
                 size={12}
-                color="#214132"
+                color={colors.badgeText}
               />
-              <Text style={styles.studentCountText}>
+              <Text
+                style={[styles.studentCountText, { color: colors.badgeText }]}
+              >
                 {activeTab === "students"
                   ? filteredStudents.length
                   : filteredQuizzes.length}
@@ -427,6 +606,19 @@ export default function ClassDetailsScreen() {
           style={[
             styles.section,
             showClassDetails ? styles.listContentSection : styles.listContentSectionLight,
+            showClassDetails
+              ? {
+                  backgroundColor: colors.surfaceSoft,
+                  borderColor: colors.borderSoft,
+                }
+              : {
+                  backgroundColor: darkModeEnabled
+                    ? colors.surface
+                    : colors.surfaceMuted,
+                  borderColor: darkModeEnabled
+                    ? colors.border
+                    : colors.surfaceMuted,
+                },
           ]}
         >
           {showClassDetails && (
@@ -449,9 +641,15 @@ export default function ClassDetailsScreen() {
 
           {activeTab === "students" && classData.students.length === 0 ? (
             <View style={styles.emptyStudents}>
-              <Ionicons name="people-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No students yet</Text>
-              <Text style={styles.emptySubtext}>
+              <Ionicons
+                name="people-outline"
+                size={48}
+                color={colors.emptyIcon}
+              />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                No students yet
+              </Text>
+              <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>
                 Tap + to add your first student
               </Text>
             </View>
@@ -463,24 +661,91 @@ export default function ClassDetailsScreen() {
               scrollEnabled={false}
             />
           ) : filteredQuizzes.length === 0 ? (
-            <View style={styles.quizPlaceholderCard}>
-              <Text style={styles.quizPlaceholderTitle}>No recent quizzes yet</Text>
-              <Text style={styles.quizPlaceholderSubtitle}>
+            <View
+              style={[
+                styles.quizPlaceholderCard,
+                {
+                  backgroundColor: darkModeEnabled
+                    ? colors.surfaceMuted
+                    : "rgba(233, 245, 238, 0.16)",
+                  borderColor: darkModeEnabled
+                    ? colors.border
+                    : "rgba(221, 239, 230, 0.3)",
+                },
+              ]}
+            >
+              <Text
+                style={[styles.quizPlaceholderTitle, { color: colors.text }]}
+              >
+                No recent quizzes yet
+              </Text>
+              <Text
+                style={[
+                  styles.quizPlaceholderSubtitle,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 Create a quiz to see latest results for this class.
               </Text>
             </View>
           ) : (
             filteredQuizzes.map((quiz) => (
-              <View key={quiz.id} style={styles.quizCard}>
-                <Text style={styles.quizCardTitle}>{quiz.title}</Text>
-                <Text style={styles.quizCardSubject}>{quiz.subject}</Text>
+              <View
+                key={quiz.id}
+                style={[
+                  styles.quizCard,
+                  {
+                    backgroundColor: darkModeEnabled
+                      ? colors.surfaceMuted
+                      : "#3f6b54",
+                    borderColor: darkModeEnabled ? colors.border : "#355b49",
+                  },
+                ]}
+              >
+                <Text style={[styles.quizCardTitle, { color: colors.text }]}>
+                  {quiz.title}
+                </Text>
+                <Text
+                  style={[styles.quizCardSubject, { color: colors.textSecondary }]}
+                >
+                  {quiz.subject}
+                </Text>
                 <View style={styles.quizMetaRow}>
-                  <Ionicons name="calendar-outline" size={12} color="#cde2d8" />
-                  <Text style={styles.quizMetaText}>{quiz.date}</Text>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={12}
+                    color={darkModeEnabled ? colors.textSecondary : "#cde2d8"}
+                  />
+                  <Text
+                    style={[
+                      styles.quizMetaText,
+                      {
+                        color: darkModeEnabled
+                          ? colors.textSecondary
+                          : "#d5e9de",
+                      },
+                    ]}
+                  >
+                    {quiz.date}
+                  </Text>
                 </View>
                 <View style={styles.quizActionsRow}>
-                  <View style={styles.quizStudentsBadge}>
-                    <Text style={styles.quizStudentsBadgeText}>
+                  <View
+                    style={[
+                      styles.quizStudentsBadge,
+                      {
+                        backgroundColor: darkModeEnabled
+                          ? "#35523f"
+                          : "#2d4f3e",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.quizStudentsBadgeText,
+                        { color: darkModeEnabled ? colors.text : "#d8ebdf" },
+                      ]}
+                    >
                       {quiz.students} STUDENTS
                     </Text>
                   </View>
@@ -508,22 +773,49 @@ export default function ClassDetailsScreen() {
         transparent={true}
         onRequestClose={() => setAddStudentModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Student</Text>
+        <View
+          style={[
+            styles.modalOverlay,
+            { backgroundColor: colors.modalOverlay },
+          ]}
+        >
+          <View
+            style={[
+              styles.modalContent,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View
+              style={[styles.modalHeader, { borderBottomColor: colors.border }]}
+            >
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Add Student
+              </Text>
               <TouchableOpacity
                 onPress={() => setAddStudentModalVisible(false)}
               >
-                <Ionicons name="close" size={28} color="#333" />
+                <Ionicons name="close" size={28} color={colors.text} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.modalBody}>
-              <Text style={styles.label}>Student ID *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Student ID *
+              </Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                  },
+                ]}
                 placeholder="e.g., 202311070"
+                placeholderTextColor={colors.inputPlaceholder}
                 value={studentForm.student_id}
                 onChangeText={(text) =>
                   setStudentForm({ ...studentForm, student_id: text })
@@ -531,30 +823,60 @@ export default function ClassDetailsScreen() {
                 keyboardType="numeric"
               />
 
-              <Text style={styles.label}>First Name *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                First Name *
+              </Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                  },
+                ]}
                 placeholder="e.g., John"
+                placeholderTextColor={colors.inputPlaceholder}
                 value={studentForm.first_name}
                 onChangeText={(text) =>
                   setStudentForm({ ...studentForm, first_name: text })
                 }
               />
 
-              <Text style={styles.label}>Last Name *</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Last Name *
+              </Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                  },
+                ]}
                 placeholder="e.g., Doe"
+                placeholderTextColor={colors.inputPlaceholder}
                 value={studentForm.last_name}
                 onChangeText={(text) =>
                   setStudentForm({ ...studentForm, last_name: text })
                 }
               />
 
-              <Text style={styles.label}>Email</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>
+                Email
+              </Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  {
+                    borderColor: colors.inputBorder,
+                    backgroundColor: colors.inputBg,
+                    color: colors.text,
+                  },
+                ]}
                 placeholder="e.g., student@example.com"
+                placeholderTextColor={colors.inputPlaceholder}
                 value={studentForm.email}
                 onChangeText={(text) =>
                   setStudentForm({ ...studentForm, email: text })
@@ -564,13 +886,30 @@ export default function ClassDetailsScreen() {
               />
             </View>
 
-            <View style={styles.modalFooter}>
+            <View
+              style={[styles.modalFooter, { borderTopColor: colors.border }]}
+            >
               <TouchableOpacity
-                style={styles.cancelButton}
+                style={[
+                  styles.cancelButton,
+                  {
+                    borderColor: colors.inputBorder,
+                    backgroundColor: darkModeEnabled
+                      ? colors.surfaceMuted
+                      : "#f7f9f8",
+                  },
+                ]}
                 onPress={() => setAddStudentModalVisible(false)}
                 disabled={addingStudent}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text
+                  style={[
+                    styles.cancelButtonText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[

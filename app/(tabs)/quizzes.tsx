@@ -1,4 +1,6 @@
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -34,6 +36,7 @@ interface Quiz {
 
 export default function QuizzesScreen() {
   const router = useRouter();
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [filter, setFilter] = useState<
     "All" | "Draft" | "Scheduled" | "Active" | "Completed"
   >("All");
@@ -127,8 +130,40 @@ export default function QuizzesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadQuizzes();
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
     }, []),
   );
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+      }
+    : {
+        screenBg: "#eef1ef",
+        headerBg: "#fff",
+        headerBorder: "#d8dfda",
+        title: "#24362f",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardBorder: "#2f4a38",
+      };
 
   const filteredQuizzes = quizzes.filter((q) => {
     const matchesFilter = filter === "All" ? true : q.status === filter;
@@ -216,7 +251,10 @@ export default function QuizzesScreen() {
 
   const renderQuizCard = ({ item }: { item: Quiz }) => (
     <TouchableOpacity
-      style={styles.quizCard}
+      style={[
+        styles.quizCard,
+        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+      ]}
       onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
     >
       <View style={styles.quizHeader}>
@@ -307,9 +345,17 @@ export default function QuizzesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Quizzes</Text>
+      <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.headerBg,
+              borderBottomColor: colors.headerBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#00a550" />
@@ -320,13 +366,21 @@ export default function QuizzesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Quizzes</Text>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
+        <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
       </View>
 
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
         <Ionicons name="search" size={16} color="#d6e9de" />
         <TextInput
           style={styles.searchInput}
@@ -339,7 +393,7 @@ export default function QuizzesScreen() {
 
       <View style={styles.filterContainer}>
         <TouchableOpacity
-          style={styles.filterTrigger}
+          style={[styles.filterTrigger, { backgroundColor: colors.primary }]}
           onPress={() => setShowFilterMenu((prev) => !prev)}
         >
           <Text style={styles.filterTriggerText}>Filter: {filter}</Text>
@@ -350,7 +404,7 @@ export default function QuizzesScreen() {
           />
         </TouchableOpacity>
         {showFilterMenu && (
-          <View style={styles.filterMenu}>
+          <View style={[styles.filterMenu, { backgroundColor: colors.primaryDark }]}>
             {(
               ["All", "Draft", "Scheduled", "Active", "Completed"] as const
             ).map((status) => (
@@ -398,10 +452,13 @@ export default function QuizzesScreen() {
       />
 
       <TouchableOpacity
-        style={styles.newQuizButton}
+        style={[
+          styles.newQuizButton,
+          { backgroundColor: colors.primary, shadowColor: colors.primary },
+        ]}
         onPress={() => router.push("/(tabs)/create-quiz")}
       >
-        <Ionicons name="add-circle-outline" size={18} color="#fff" />
+        <Ionicons name="add-circle" size={22} color="#fff" />
         <Text style={styles.newQuizText}>New Quiz</Text>
       </TouchableOpacity>
     </View>
@@ -411,7 +468,7 @@ export default function QuizzesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f0f2f0",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
@@ -432,7 +489,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     marginHorizontal: 8,
     marginTop: 8,
     marginBottom: 8,
@@ -456,7 +513,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 38,
@@ -468,7 +525,7 @@ const styles = StyleSheet.create({
   },
   filterMenu: {
     marginTop: 6,
-    backgroundColor: "#2f5a45",
+    backgroundColor: "#2f4a38",
     borderRadius: 10,
     padding: 6,
     borderWidth: 1,
@@ -496,12 +553,12 @@ const styles = StyleSheet.create({
     paddingBottom: 90,
   },
   quizCard: {
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     borderRadius: 10,
     padding: 12,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#355b49",
+    borderColor: "#2f4a38",
   },
   quizHeader: {
     flexDirection: "row",
@@ -625,20 +682,24 @@ const styles = StyleSheet.create({
   },
   newQuizButton: {
     position: "absolute",
-    right: 10,
-    bottom: 14,
-    backgroundColor: "#2f8a74",
+    right: 14,
+    bottom: 66,
+    backgroundColor: "#3d5a3d",
     borderRadius: 14,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: 13,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    elevation: 3,
+    gap: 8,
+    elevation: 6,
+    shadowColor: "#3d5a3d",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   newQuizText: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "700",
   },
 });

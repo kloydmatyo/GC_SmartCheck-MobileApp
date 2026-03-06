@@ -1,4 +1,3 @@
-import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
@@ -26,17 +25,8 @@ export default function CameraScanner({
     return <View />;
   }
 
-  if (!permission.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>
-          We need your permission to show the camera
-        </Text>
-        <TouchableOpacity onPress={requestPermission} style={styles.button}>
-          <Text style={styles.buttonText}>Grant Permission</Text>
-        </TouchableOpacity>
-      </View>
-    );
+  if (showHistory) {
+    return <HistoryList onClose={() => setShowHistory(false)} />;
   }
 
   const toggleCameraFacing = () => {
@@ -252,68 +242,76 @@ export default function CameraScanner({
           </Text>
         </View>
 
-        {/* Controls */}
-        <View style={styles.controls}>
-          <TouchableOpacity style={styles.controlButton} onPress={onCancel}>
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
+        <View style={styles.features}>
+          <View style={styles.feature}>
+            <Ionicons name="camera" size={24} color="#4CAF50" />
+            <Text style={styles.featureText}>Capture answer sheets</Text>
+          </View>
 
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => setTorch(!torch)}
-          >
-            <Ionicons
-              name={torch ? "flash" : "flash-off"}
-              size={24}
-              color="white"
-            />
-          </TouchableOpacity>
+          <View style={styles.feature}>
+            <Ionicons name="person" size={24} color="#4CAF50" />
+            <Text style={styles.featureText}>Read student IDs</Text>
+          </View>
 
-          <TouchableOpacity
-            style={[
-              styles.captureButton,
-              isProcessing && styles.captureButtonDisabled,
-            ]}
-            onPress={takePicture}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <Text style={styles.captureButtonText}>Processing...</Text>
-            ) : (
-              <Ionicons name="camera" size={32} color="white" />
-            )}
-          </TouchableOpacity>
+          <View style={styles.feature}>
+            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+            <Text style={styles.featureText}>Auto-grade answers</Text>
+          </View>
 
-          <TouchableOpacity
-            style={styles.controlButton}
-            onPress={toggleCameraFacing}
-          >
-            <Ionicons name="camera-reverse" size={24} color="white" />
-          </TouchableOpacity>
+          <View style={styles.feature}>
+            <Ionicons name="document-text" size={24} color="#4CAF50" />
+            <Text style={styles.featureText}>Zipgrade format compatible</Text>
+          </View>
         </View>
-      </CameraView>
-    </View>
+
+        <TouchableOpacity
+          style={styles.scanButton}
+          onPress={() => setShowScanner(true)}
+        >
+          <Ionicons name="camera" size={24} color="white" />
+          <Text style={styles.scanButtonText}>Start Scanning</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={() => setShowHistory(true)}
+        >
+          <Ionicons name="time-outline" size={24} color="#007AFF" />
+          <Text style={styles.historyButtonText}>View History</Text>
+        </TouchableOpacity>
+
+        <View style={styles.instructions}>
+          <Text style={styles.instructionsTitle}>Instructions:</Text>
+          <Text style={styles.instructionText}>
+            1. Generate answer sheet using Generator tab
+          </Text>
+          <Text style={styles.instructionText}>
+            2. Ensure good lighting conditions
+          </Text>
+          <Text style={styles.instructionText}>
+            3. Align Zipgrade sheet within camera frame
+          </Text>
+          <Text style={styles.instructionText}>
+            4. Tap capture when all bubbles are visible
+          </Text>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
+    backgroundColor: "#f5f5f5",
   },
-  message: {
-    textAlign: "center",
-    paddingBottom: 10,
-    fontSize: 16,
-  },
-  camera: {
+  content: {
     flex: 1,
+    padding: 20,
   },
-  overlay: {
-    flex: 1,
-    backgroundColor: "transparent",
-    justifyContent: "center",
+  header: {
     alignItems: "center",
+    marginBottom: 40,
   },
   scanFrame: {
     // Base dimensions - will be overridden by inline styles
@@ -326,64 +324,94 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     marginTop: 20,
-    textAlign: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 10,
-    borderRadius: 5,
-  },
-  tipText: {
-    color: "white",
-    fontSize: 14,
-    marginTop: 10,
-    textAlign: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 8,
-    borderRadius: 5,
-  },
-  controls: {
-    position: "absolute",
-    bottom: 50,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingHorizontal: 20,
-  },
-  controlButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  captureButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "#ff4444",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  captureButtonDisabled: {
-    backgroundColor: "#666",
-  },
-  captureButtonText: {
-    color: "white",
-    fontSize: 12,
+    marginBottom: 10,
     textAlign: "center",
   },
-  button: {
-    backgroundColor: "#007AFF",
-    padding: 15,
-    borderRadius: 8,
-    margin: 20,
-  },
-  buttonText: {
-    color: "white",
-    textAlign: "center",
+  subtitle: {
     fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  features: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 30,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  feature: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 15,
+  },
+  featureText: {
+    fontSize: 16,
+    color: "#333",
+    marginLeft: 15,
+    fontWeight: "500",
+  },
+  scanButton: {
+    backgroundColor: "#007AFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    borderRadius: 12,
+    marginBottom: 30,
+    shadowColor: "#007AFF",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  scanButtonText: {
+    color: "white",
+    fontSize: 18,
     fontWeight: "bold",
+    marginLeft: 10,
+  },
+  historyButton: {
+    backgroundColor: "white",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "#007AFF",
+  },
+  historyButtonText: {
+    color: "#007AFF",
+    fontSize: 16,
+    fontWeight: "600",
+    marginLeft: 8,
+  },
+  instructions: {
+    backgroundColor: "white",
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  instructionsTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#333",
+    marginBottom: 15,
+  },
+  instructionText: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+    lineHeight: 20,
   },
 });

@@ -1,6 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -12,10 +14,12 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { BatchHistoryService } from "../../services/batchHistoryService";
 import { ExamBatch } from "../../types/batch";
 
 export default function BatchHistoryScreen() {
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [batches, setBatches] = useState<ExamBatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -31,10 +35,66 @@ export default function BatchHistoryScreen() {
     deletedBatches: 0,
   });
 
+  const loadStatistics = async () => {
+    try {
+      const stats = await BatchHistoryService.getBatchStatistics();
+      setStatistics(stats);
+    } catch (error) {
+      console.error("Error loading statistics:", error);
+    }
+  };
+
   useEffect(() => {
     loadBatchHistory();
     loadStatistics();
   }, [filterStatus]);
+
+  const refreshAllData = useCallback(async () => {
+    await Promise.all([loadBatchHistory(), loadStatistics()]);
+  }, [filterStatus, searchQuery]);
+
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+
+      refreshAllData();
+    }, [refreshAllData]),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        subtitle: "#9db1a6",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+        inputBg: "#2a3a33",
+        primary: "#1f3a2f",
+        accent: "#8fd1ad",
+      }
+    : {
+        bg: "#eef1ef",
+        headerBg: "#3d5a3d",
+        headerBorder: "#2f4a38",
+        title: "#e8f6ee",
+        subtitle: "#b8d4b8",
+        cardBg: "#3d5a3d",
+        cardBorder: "#3d5a3d",
+        inputBg: "#3d5a3d",
+        primary: "#3d5a3d",
+        accent: "#8fd1ad",
+      };
 
   const loadBatchHistory = async () => {
     try {
@@ -60,19 +120,9 @@ export default function BatchHistoryScreen() {
     }
   };
 
-  const loadStatistics = async () => {
-    try {
-      const stats = await BatchHistoryService.getBatchStatistics();
-      setStatistics(stats);
-    } catch (error) {
-      console.error("Error loading statistics:", error);
-    }
-  };
-
   const handleRefresh = () => {
     setRefreshing(true);
-    loadBatchHistory();
-    loadStatistics();
+    refreshAllData();
   };
 
   const handleDeleteBatch = async (batchId: string) => {
@@ -137,7 +187,13 @@ export default function BatchHistoryScreen() {
   };
 
   const renderBatchItem = (batch: ExamBatch) => (
-    <View key={batch.batchId} style={styles.batchCard}>
+    <View
+      key={batch.batchId}
+      style={[
+        styles.batchCard,
+        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+      ]}
+    >
       <View style={styles.batchHeader}>
         <View style={styles.batchTitleRow}>
           <Ionicons
@@ -145,7 +201,7 @@ export default function BatchHistoryScreen() {
             size={20}
             color={getStatusColor(batch.status)}
           />
-          <Text style={styles.batchTitle}>{batch.examTitle}</Text>
+          <Text style={[styles.batchTitle, { color: colors.title }]}>{batch.examTitle}</Text>
         </View>
         <View
           style={[
@@ -159,38 +215,38 @@ export default function BatchHistoryScreen() {
 
       <View style={styles.batchDetails}>
         <View style={styles.detailRow}>
-          <Ionicons name="barcode" size={16} color="#666" />
-          <Text style={styles.detailText}>Batch ID: {batch.batchId}</Text>
+          <Ionicons name="barcode" size={16} color={colors.subtitle} />
+          <Text style={[styles.detailText, { color: colors.subtitle }]}>Batch ID: {batch.batchId}</Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons name="code" size={16} color="#666" />
-          <Text style={styles.detailText}>Exam Code: {batch.examCode}</Text>
+          <Ionicons name="code" size={16} color={colors.subtitle} />
+          <Text style={[styles.detailText, { color: colors.subtitle }]}>Exam Code: {batch.examCode}</Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons name="document" size={16} color="#666" />
-          <Text style={styles.detailText}>
+          <Ionicons name="document" size={16} color={colors.subtitle} />
+          <Text style={[styles.detailText, { color: colors.subtitle }]}>
             Template: {batch.templateName} (v{batch.version})
           </Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons name="copy" size={16} color="#666" />
-          <Text style={styles.detailText}>Sheets: {batch.sheetsGenerated}</Text>
+          <Ionicons name="copy" size={16} color={colors.subtitle} />
+          <Text style={[styles.detailText, { color: colors.subtitle }]}>Sheets: {batch.sheetsGenerated}</Text>
         </View>
 
         <View style={styles.detailRow}>
-          <Ionicons name="time" size={16} color="#666" />
-          <Text style={styles.detailText}>
+          <Ionicons name="time" size={16} color={colors.subtitle} />
+          <Text style={[styles.detailText, { color: colors.subtitle }]}>
             {BatchHistoryService.formatDate(batch.createdAt)}
           </Text>
         </View>
 
         {batch.metadata && (
           <View style={styles.detailRow}>
-            <Ionicons name="information-circle" size={16} color="#666" />
-            <Text style={styles.detailText}>
+            <Ionicons name="information-circle" size={16} color={colors.subtitle} />
+            <Text style={[styles.detailText, { color: colors.subtitle }]}>
               {batch.metadata.totalQuestions} questions •{" "}
               {batch.metadata.columns} column(s)
             </Text>
@@ -199,7 +255,7 @@ export default function BatchHistoryScreen() {
       </View>
 
       {batch.status !== "deleted" && (
-        <View style={styles.batchActions}>
+        <View style={[styles.batchActions, { borderTopColor: colors.cardBorder }]}>
           {batch.status === "generated" && (
             <TouchableOpacity
               style={[styles.actionButton, styles.printButton]}
@@ -223,41 +279,74 @@ export default function BatchHistoryScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#007AFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.accent} />
         </TouchableOpacity>
-        <Text style={styles.title}>Batch History</Text>
+        <Text style={[styles.title, { color: colors.title }]}>Batch History</Text>
         <View style={styles.placeholder} />
       </View>
 
       {/* Statistics */}
       <View style={styles.statsContainer}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{statistics.totalBatches}</Text>
-          <Text style={styles.statLabel}>Total Batches</Text>
+        <View
+          style={[
+            styles.statCard,
+            {
+              backgroundColor: colors.cardBg,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.totalBatches}</Text>
+          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Total Batches</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{statistics.totalSheets}</Text>
-          <Text style={styles.statLabel}>Total Sheets</Text>
+        <View
+          style={[
+            styles.statCard,
+            {
+              backgroundColor: colors.cardBg,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.totalSheets}</Text>
+          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Total Sheets</Text>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{statistics.printedBatches}</Text>
-          <Text style={styles.statLabel}>Printed</Text>
+        <View
+          style={[
+            styles.statCard,
+            {
+              backgroundColor: colors.cardBg,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.printedBatches}</Text>
+          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Printed</Text>
         </View>
       </View>
 
       {/* Search and Filter */}
       <View style={styles.searchContainer}>
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={20} color="#666" />
+        <View style={[styles.searchBox, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
+          <Ionicons name="search" size={20} color={colors.subtitle} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.title }]}
             placeholder="Search by exam, code, or batch ID..."
+            placeholderTextColor={colors.subtitle}
             value={searchQuery}
             onChangeText={setSearchQuery}
             onSubmitEditing={loadBatchHistory}
@@ -271,13 +360,16 @@ export default function BatchHistoryScreen() {
             key={status}
             style={[
               styles.filterButton,
+              { backgroundColor: colors.inputBg, borderColor: colors.cardBorder },
               filterStatus === status && styles.filterButtonActive,
+              filterStatus === status && { backgroundColor: colors.primary, borderColor: colors.primary },
             ]}
             onPress={() => setFilterStatus(status)}
           >
             <Text
               style={[
                 styles.filterButtonText,
+                { color: colors.subtitle },
                 filterStatus === status && styles.filterButtonTextActive,
               ]}
             >
@@ -290,14 +382,14 @@ export default function BatchHistoryScreen() {
       {/* Batch List */}
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading batch history...</Text>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={[styles.loadingText, { color: colors.subtitle }]}>Loading batch history...</Text>
         </View>
       ) : batches.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>No batches found</Text>
-          <Text style={styles.emptySubtext}>
+          <Ionicons name="document-text-outline" size={64} color={darkModeEnabled ? "#5b6d64" : "#9aaea3"} />
+          <Text style={[styles.emptyText, { color: colors.subtitle }]}>No batches found</Text>
+          <Text style={[styles.emptySubtext, { color: colors.subtitle }]}>
             Generate answer sheets to create batch records
           </Text>
         </View>
@@ -324,8 +416,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: 20,
-    paddingTop: 60,
+    paddingHorizontal: 12,
+    paddingTop: 56,
+    paddingBottom: 10,
     backgroundColor: "white",
     borderBottomWidth: 1,
     borderBottomColor: "#e0e0e0",
@@ -335,7 +428,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 20,
-    fontWeight: "bold",
+    fontWeight: "800",
     color: "#333",
   },
   placeholder: {
@@ -343,24 +436,28 @@ const styles = StyleSheet.create({
   },
   statsContainer: {
     flexDirection: "row",
-    padding: 15,
-    gap: 10,
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    marginBottom: 10,
+    gap: 8,
   },
   statCard: {
     flex: 1,
     backgroundColor: "white",
     borderRadius: 12,
-    padding: 15,
+    padding: 12,
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: "bold",
+    fontSize: 22,
+    fontWeight: "800",
     color: "#007AFF",
     marginBottom: 5,
   },
@@ -370,21 +467,24 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   searchContainer: {
-    padding: 15,
+    paddingHorizontal: 10,
     paddingTop: 0,
+    paddingBottom: 10,
   },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "white",
     borderRadius: 12,
-    padding: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     gap: 10,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
   },
   searchInput: {
     flex: 1,
@@ -393,12 +493,12 @@ const styles = StyleSheet.create({
   },
   filterContainer: {
     flexDirection: "row",
-    paddingHorizontal: 15,
-    paddingBottom: 15,
-    gap: 10,
+    paddingHorizontal: 10,
+    paddingBottom: 12,
+    gap: 8,
   },
   filterButton: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: "white",
@@ -419,18 +519,20 @@ const styles = StyleSheet.create({
   },
   batchList: {
     flex: 1,
-    padding: 15,
+    paddingHorizontal: 10,
   },
   batchCard: {
     backgroundColor: "white",
     borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
+    elevation: 1,
   },
   batchHeader: {
     flexDirection: "row",
@@ -446,7 +548,7 @@ const styles = StyleSheet.create({
   },
   batchTitle: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: "800",
     color: "#333",
     flex: 1,
   },
@@ -470,7 +572,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   detailText: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#666",
   },
   batchActions: {
@@ -487,7 +589,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 10,
-    borderRadius: 8,
+    borderRadius: 10,
     gap: 6,
   },
   printButton: {
