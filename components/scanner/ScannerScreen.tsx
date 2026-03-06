@@ -2,19 +2,19 @@ import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import {
-    DuplicateScoreDetectionService,
-    DuplicateScoreMatch,
+  DuplicateScoreDetectionService,
+  DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
@@ -23,6 +23,16 @@ import { GradingResult, ScanResult } from "../../types/scanning";
 import { DuplicateScoreWarningModal } from "../modals/DuplicateScoreWarningModal";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
+
+// Helper for fast-failing Firestore calls
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ]);
+}
 
 type ScannerState = "exam-select" | "camera" | "results";
 
@@ -72,99 +82,58 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
       console.log(`[ScannerScreen] Detected student ID: ${studentId}`);
 
-      // Verify the student account with Firestore
+      // ── Verify the student account (Fast Timeout) ──
       console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+      let isValidId = false;
 
-      // First, check the students collection
-      const studentsRef = collection(db, "students");
-      const q = query(studentsRef, where("studentId", "==", studentId));
+      try {
+        const studentsRef = collection(db, "students");
+        const q = query(studentsRef, where("studentId", "==", studentId));
 
-      const startTime = Date.now();
-      const querySnapshot = await getDocs(q);
-      let duration = Date.now() - startTime;
+        const snap = await withTimeout(getDocs(q), 2000); // 2s SLA
+        isValidId = !snap.empty;
 
-      let isValidId = !querySnapshot.empty;
+        if (!isValidId) {
+          // Fallback: Check if student exists in any class's students array
+          console.log(`[Firestore] Not found in collection, checking classes...`);
+          const classesRef = collection(db, "classes");
+          const classesSnapshot = await withTimeout(getDocs(classesRef), 3000);
 
-      if (isValidId) {
-        const studentData = querySnapshot.docs[0].data();
-        console.log(
-          `[Firestore] Verification complete for ${studentId}: MATCH FOUND in students collection (${duration}ms)`,
-        );
-        console.log(`[Firestore] Student data:`, studentData);
-      } else {
-        // Fallback: Check if student exists in any class's students array
-        console.log(
-          `[Firestore] Not found in students collection, checking classes...`,
-        );
-
-        const classesRef = collection(db, "classes");
-        const classesSnapshot = await getDocs(classesRef);
-        duration = Date.now() - startTime;
-
-        for (const classDoc of classesSnapshot.docs) {
-          const classData = classDoc.data();
-          if (classData.students && Array.isArray(classData.students)) {
-            const foundStudent = classData.students.find(
-              (s: any) => s.student_id === studentId,
-            );
+          for (const classDoc of classesSnapshot.docs) {
+            const classData = classDoc.data();
+            const foundStudent = classData.students?.find((s: any) => s.student_id === studentId);
             if (foundStudent) {
               isValidId = true;
-              console.log(
-                `[Firestore] Verification complete for ${studentId}: MATCH FOUND in class ${classData.class_name} (${duration}ms)`,
-              );
-              console.log(`[Firestore] Student data:`, foundStudent);
               break;
             }
           }
         }
-
-        if (!isValidId) {
-          console.warn(
-            `[Firestore] Student ID ${studentId} not found in students collection or any class (${duration}ms)`,
-          );
-          Alert.alert(
-            "Unrecognized ID",
-            `Student ID ${studentId} is not registered in any class, but it was still scored.`,
-          );
-        }
+      } catch (err) {
+        console.warn("[ScannerScreen] Student verification timed out. Assuming valid for now (Offline Mode).");
+        isValidId = true; // Trust the student while offline
       }
 
-      // Fetch the actual answer key from Firebase
-      console.log(
-        `[ScannerScreen] Fetching answer key for exam: ${activeExamId}`,
-      );
+      if (!isValidId) {
+        Alert.alert("Unrecognized ID", `Student ID ${studentId} is not registered, but it was still scored.`);
+      }
+
+      // ── Fetch Answer Key (Fast Timeout) ──
+      console.log(`[ScannerScreen] Fetching answer key for exam: ${activeExamId}`);
       const rawCount = scanResult.answers?.length || 20;
       let answerKey: string[] = [];
 
       try {
-        // Import ExamService dynamically to avoid circular dependencies
         const { ExamService } = await import("../../services/examService");
-        const examData = await ExamService.getExamById(activeExamId);
+        const examData = await withTimeout(ExamService.getExamById(activeExamId), 2500);
 
-        if (examData && examData.answerKey && examData.answerKey.answers) {
+        if (examData?.answerKey?.answers) {
           answerKey = examData.answerKey.answers;
-          console.log(
-            `[ScannerScreen] Loaded answer key from exam: ${answerKey.length} questions`,
-          );
-          console.log(
-            `[ScannerScreen] First 5 answers:`,
-            answerKey.slice(0, 5),
-          );
         } else {
-          console.warn(
-            `[ScannerScreen] No answer key found for exam ${activeExamId}, using default`,
-          );
-          // Fallback to default pattern
-          answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-            (ak) => ak.correctAnswer,
-          );
+          throw new Error("No answer key field");
         }
       } catch (error) {
-        console.error(`[ScannerScreen] Error fetching answer key:`, error);
-        // Fallback to default pattern
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.correctAnswer,
-        );
+        console.warn(`[ScannerScreen] Answer key fetch failed/timed out. using default key.`);
+        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(ak => ak.correctAnswer);
       }
 
       // Convert string array to AnswerKey format
