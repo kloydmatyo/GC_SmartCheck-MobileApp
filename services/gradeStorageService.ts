@@ -14,7 +14,7 @@ import {
 import { GradeStorageRecord, GradingResult } from "../types/scanning";
 import { LogService } from "./logService";
 
-const GRADE_RESULTS_COLLECTION = "grade_results";
+const GRADE_RESULTS_COLLECTION = "scannedResults";
 const OFFLINE_QUEUE_KEY = "gcsc-grade-queue";
 
 export interface SaveResult {
@@ -87,18 +87,29 @@ export class GradeStorageService {
 
   static async validateStudentId(studentId: string): Promise<boolean> {
     try {
-      // Query classes where the students array contains a matching student_id
+      // ── Primary: check top-level `students` collection ──────────────────
+      // 1a. Document ID is the student ID (most common pattern in this app)
+      const directRef = doc(db, "students", studentId);
+      const directSnap = await getDoc(directRef);
+      if (directSnap.exists()) return true;
+
+      // 1b. `student_id` field within the collection
+      const studentFieldQ = query(
+        collection(db, "students"),
+        where("student_id", "==", studentId),
+      );
+      const studentFieldSnap = await getDocs(studentFieldQ);
+      if (!studentFieldSnap.empty) return true;
+
+      // ── Fallback: check class rosters ────────────────────────────────────
       const q = query(
         collection(db, "classes"),
         where("students", "array-contains-any", [{ student_id: studentId }]),
       );
       const snap = await getDocs(q);
-
-      // array-contains-any does partial object match only in some SDK versions;
-      // fall back to a manual scan of the first page if the query returns empty
       if (!snap.empty) return true;
 
-      // Manual fallback: scan all classes and check each students array
+      // Manual fallback for SDKs that don't support partial object matching
       const allClasses = await getDocs(collection(db, "classes"));
       for (const classDoc of allClasses.docs) {
         const students: { student_id: string }[] =
@@ -108,7 +119,7 @@ export class GradeStorageService {
 
       LogService.warn(
         "STUDENT_ID_INVALID",
-        `Student ID not found in any class: ${studentId}`,
+        `Student ID not found in students collection or any class: ${studentId}`,
         { studentId },
       );
       return false;
@@ -117,7 +128,7 @@ export class GradeStorageService {
         studentId,
         error,
       });
-      // Prototype: allow if validation fails due to network — don't block save
+      // Allow if validation fails due to network — don't block save
       return true;
     }
   }
@@ -156,15 +167,21 @@ export class GradeStorageService {
   static async isDuplicate(
     studentId: string,
     examId: string,
+    uid: string,
   ): Promise<boolean> {
     try {
+      // Query by examId only to avoid needing a composite index in Firestore
       const q = query(
         collection(db, GRADE_RESULTS_COLLECTION),
-        where("studentId", "==", studentId),
         where("examId", "==", examId),
       );
       const snap = await getDocs(q);
-      return !snap.empty;
+
+      // Client-side filter for studentId and user ownership
+      return snap.docs.some((docSnap) => {
+        const data = docSnap.data();
+        return data.studentId === studentId && data.scannedBy === uid;
+      });
     } catch (error) {
       LogService.error("SAVE_FAILED", "Duplicate check query failed", {
         studentId,
@@ -229,6 +246,7 @@ export class GradeStorageService {
     const duplicate = await GradeStorageService.isDuplicate(
       result.studentId,
       resolvedExamId,
+      uid,
     );
     if (duplicate) {
       await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
@@ -254,7 +272,7 @@ export class GradeStorageService {
       totalQuestions: result.totalQuestions,
       dateScanned: result.dateScanned,
       status: "saved",
-      savedBy: uid,
+      scannedBy: uid,
       createdAt: new Date(),
     };
 
@@ -382,6 +400,7 @@ export class GradeStorageService {
         const duplicate = await GradeStorageService.isDuplicate(
           record.studentId,
           record.examId,
+          record.scannedBy || GradeStorageService.requireAuth(),
         );
         if (duplicate) {
           await LogService.warn(

@@ -4,11 +4,12 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -48,7 +49,20 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   const [pendingResult, setPendingResult] = useState<GradingResult | null>(
     null,
   );
-  const [scanCount, setScanCount] = useState(0); // Track scan count to force camera remount
+  const [scanCount, setScanCount] = useState(0);
+
+  // ── Manual student ID entry (fallback when OMR can't read bubbles) ──────
+  const [manualIdModal, setManualIdModal] = useState<{
+    visible: boolean;
+    pendingScan: ScanResult | null;
+    pendingImage: string;
+    input: string;
+  }>({
+    visible: false,
+    pendingScan: null,
+    pendingImage: "",
+    input: "",
+  });
 
   const handleScanComplete = async (
     scanResult: ScanResult,
@@ -58,14 +72,22 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
       const studentId = scanResult.studentId;
 
       // Ensure that a valid student ID was parsed
-      if (!studentId || studentId === "0000000" || studentId === "Unknown") {
+      const isInvalidId =
+        !studentId ||
+        studentId === "Unknown" ||
+        /^0+$/.test(studentId); // catches 0000000, 00000000, etc.
+
+      if (isInvalidId) {
         console.warn(
-          `[ScannerScreen] Invalid student ID detected: "${studentId}"`,
+          `[ScannerScreen] Unreadable student ID ("${studentId}") — prompting manual entry`,
         );
-        Alert.alert(
-          "Invalid ID",
-          "Could not detect a valid student ID from the scanned sheet. Please ensure the ID bubbles are properly filled.",
-        );
+        // Show manual entry modal instead of hard-blocking
+        setManualIdModal({
+          visible: true,
+          pendingScan: { ...scanResult, studentId: "" },
+          pendingImage: imageUri,
+          input: "",
+        });
         return;
       }
 
@@ -522,6 +544,27 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     setCurrentState("camera");
   };
 
+  // ── Handler for manual ID submission ──
+  const handleConfirmManualId = () => {
+    const { pendingScan, pendingImage, input } = manualIdModal;
+    if (!input.trim() || !pendingScan) {
+      Alert.alert("Error", "Please enter a valid Student ID");
+      return;
+    }
+
+    // Hide manual modal
+    setManualIdModal({
+      visible: false,
+      pendingScan: null,
+      pendingImage: "",
+      input: "",
+    });
+
+    // Resume the scan workflow with the manually entered ID
+    const correctedScan = { ...pendingScan, studentId: input.trim() };
+    handleScanComplete(correctedScan, pendingImage);
+  };
+
   return (
     <View style={styles.container}>
       {/* ── Step 5: Exam Selector ── */}
@@ -607,6 +650,64 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         />
       )}
 
+      {/* ── Manual Student ID Entry Modal ── */}
+      <Modal
+        visible={manualIdModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setManualIdModal({ ...manualIdModal, visible: false })
+        }
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.manualIdModalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={28} color="#f39c12" />
+              <Text style={styles.modalTitle}>Unreadable Student ID</Text>
+            </View>
+
+            <Text style={styles.modalMessage}>
+              The scanner could not read the student ID bubbles on this sheet.
+              Please type the correct Student ID below to continue saving.
+            </Text>
+
+            <TextInput
+              style={styles.manualIdInput}
+              placeholder="e.g. 202300109"
+              value={manualIdModal.input}
+              onChangeText={(text) =>
+                setManualIdModal({ ...manualIdModal, input: text })
+              }
+              keyboardType="number-pad"
+              autoFocus
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSummaryCancel]}
+                onPress={() => {
+                  setManualIdModal({
+                    visible: false,
+                    pendingScan: null,
+                    pendingImage: "",
+                    input: "",
+                  });
+                  setCurrentState("camera");
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel Scan</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalVerifyConfirm]}
+                onPress={handleConfirmManualId}
+              >
+                <Text style={styles.modalConfirmText}>Confirm & Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -674,5 +775,89 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  // ── Manual ID Modal Styles ──
+  manualIdModalContent: {
+    width: "90%",
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 24,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  manualIdInput: {
+    width: "100%",
+    backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 24,
+    letterSpacing: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  modalSummaryCancel: {
+    backgroundColor: "#f5f5f5",
+  },
+  modalCancelText: {
+    color: "#666",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalVerifyConfirm: {
+    backgroundColor: "#00a550",
+  },
+  modalConfirmText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
