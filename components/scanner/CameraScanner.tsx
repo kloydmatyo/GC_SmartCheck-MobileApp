@@ -16,7 +16,6 @@ export default function CameraScanner({
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
-  const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -38,10 +37,6 @@ export default function CameraScanner({
       </View>
     );
   }
-
-  const toggleCameraFacing = () => {
-    setFacing((current) => (current === "back" ? "front" : "back"));
-  };
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
@@ -289,7 +284,7 @@ export default function CameraScanner({
       <CameraView
         ref={cameraRef}
         style={styles.camera}
-        facing={facing}
+        facing="back"
         enableTorch={torch}
       >
         {/* Overlay for Zipgrade answer sheet alignment */}
@@ -351,17 +346,6 @@ export default function CameraScanner({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.controlButton}
-            onPress={() => setTorch(!torch)}
-          >
-            <Ionicons
-              name={torch ? "flash" : "flash-off"}
-              size={24}
-              color="white"
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity
             style={[
               styles.captureButton,
               isProcessing && styles.captureButtonDisabled,
@@ -378,9 +362,13 @@ export default function CameraScanner({
 
           <TouchableOpacity
             style={styles.controlButton}
-            onPress={toggleCameraFacing}
+            onPress={() => setTorch(!torch)}
           >
-            <Ionicons name="camera-reverse" size={24} color="white" />
+            <Ionicons
+              name={torch ? "flash" : "flash-off"}
+              size={24}
+              color="white"
+            />
           </TouchableOpacity>
         </View>
       </CameraView>
@@ -454,7 +442,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "#ff4444",
+    backgroundColor: "#22c55e",
     justifyContent: "center",
     alignItems: "center",
   },
