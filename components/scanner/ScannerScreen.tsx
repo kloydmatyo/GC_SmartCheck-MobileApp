@@ -83,7 +83,6 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     try {
       const studentId = scanResult.studentId;
 
-<<<<<<< HEAD
       // Ensure that a valid student ID was parsed
       const isInvalidId =
         !studentId ||
@@ -101,11 +100,6 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           pendingImage: imageUri,
           input: "",
         });
-=======
-      // Basic validation
-      if (!studentId || studentId === "0000000" || studentId === "Unknown") {
-        Alert.alert("Invalid ID", "Could not detect a valid student ID. Please check the bubbles.");
->>>>>>> b84de6dc8e340785885c18d9ff640d33943c9b95
         return;
       }
 
@@ -345,74 +339,69 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           onCancel={() => setShowDuplicateModal(false)}
         />
       )}
-<<<<<<< HEAD
+      {/* ── Manual Student ID Entry Modal ── */}
+      <Modal
+        visible={manualIdModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setManualIdModal({ ...manualIdModal, visible: false })
+        }
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.manualIdModalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={28} color="#f39c12" />
+              <Text style={styles.modalTitle}>Unreadable Student ID</Text>
+            </View>
 
-  {/* ── Manual Student ID Entry Modal ── */ }
-  <Modal
-    visible={manualIdModal.visible}
-    transparent
-    animationType="fade"
-    onRequestClose={() =>
-      setManualIdModal({ ...manualIdModal, visible: false })
-    }
-  >
-    <View style={styles.modalOverlay}>
-      <View style={styles.manualIdModalContent}>
-        <View style={styles.modalHeader}>
-          <Ionicons name="warning" size={28} color="#f39c12" />
-          <Text style={styles.modalTitle}>Unreadable Student ID</Text>
+            <Text style={styles.modalMessage}>
+              The scanner could not read the student ID bubbles on this sheet.
+              Please type the correct Student ID below to continue saving.
+            </Text>
+
+            <TextInput
+              style={styles.manualIdInput}
+              placeholder="e.g. 202300109"
+              value={manualIdModal.input}
+              onChangeText={(text) =>
+                setManualIdModal({ ...manualIdModal, input: text })
+              }
+              keyboardType="number-pad"
+              autoFocus
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSummaryCancel]}
+                onPress={() => {
+                  setManualIdModal({
+                    visible: false,
+                    pendingScan: null,
+                    pendingImage: "",
+                    input: "",
+                  });
+                  setCurrentState("camera");
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel Scan</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalVerifyConfirm]}
+                onPress={handleConfirmManualId}
+              >
+                <Text style={styles.modalConfirmText}>Confirm & Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-
-        <Text style={styles.modalMessage}>
-          The scanner could not read the student ID bubbles on this sheet.
-          Please type the correct Student ID below to continue saving.
-        </Text>
-
-        <TextInput
-          style={styles.manualIdInput}
-          placeholder="e.g. 202300109"
-          value={manualIdModal.input}
-          onChangeText={(text) =>
-            setManualIdModal({ ...manualIdModal, input: text })
-          }
-          keyboardType="number-pad"
-          autoFocus
-        />
-
-        <View style={styles.modalActions}>
-          <TouchableOpacity
-            style={[styles.modalButton, styles.modalSummaryCancel]}
-            onPress={() => {
-              setManualIdModal({
-                visible: false,
-                pendingScan: null,
-                pendingImage: "",
-                input: "",
-              });
-              setCurrentState("camera");
-            }}
-          >
-            <Text style={styles.modalCancelText}>Cancel Scan</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.modalButton, styles.modalVerifyConfirm]}
-            onPress={handleConfirmManualId}
-          >
-            <Text style={styles.modalConfirmText}>Confirm & Save</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  </Modal>
-=======
->>>>>>> b84de6dc8e340785885c18d9ff640d33943c9b95
+      </Modal>
     </View >
   );
 }
 
 const styles = StyleSheet.create({
-<<<<<<< HEAD
   container: {
     flex: 1,
     backgroundColor: "#000",
@@ -560,14 +549,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-=======
-  container: { flex: 1, backgroundColor: "white" },
-  examSelector: { flex: 1, padding: 20, justifyContent: "center" },
-  closeButton: { position: "absolute", top: 40, right: 20 },
-  content: { alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 20 },
-  input: { borderBottomWidth: 2, borderBottomColor: "#007AFF", width: "80%", fontSize: 20, textAlign: "center", marginBottom: 30 },
-  btn: { backgroundColor: "#007AFF", padding: 15, borderRadius: 10, width: "80%", alignItems: "center" },
-  btnText: { color: "white", fontSize: 18, fontWeight: "bold" }
->>>>>>> b84de6dc8e340785885c18d9ff640d33943c9b95
 });
