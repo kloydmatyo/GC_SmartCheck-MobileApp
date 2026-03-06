@@ -39,18 +39,44 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
   const handlePickFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel'],
+        type: [
+          'text/csv',
+          'text/comma-separated-values',
+          'text/plain',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        ],
         copyToCacheDirectory: true
       });
 
       if (result.canceled) return;
 
       const file = result.assets[0];
-      
+
+      // Resolve file size — DocumentPicker may return undefined on some Android versions
+      let fileSize = file.size;
+      if (fileSize == null) {
+        try {
+          const info = await FileSystem.getInfoAsync(file.uri);
+          fileSize = info.exists && 'size' in info ? info.size : undefined;
+        } catch {
+          fileSize = undefined;
+        }
+      }
+
+      if (fileSize == null) {
+        Alert.alert(
+          'File Error',
+          'Could not determine file size. Please try a different file.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
       // REQ 23: Validate file type and size
       const errors = StudentImportService.validateFile(
         file.uri,
-        file.size || 0,
+        fileSize,
         file.mimeType || 'text/csv'
       );
 
@@ -83,8 +109,26 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       setIsProcessing(true);
       setProgress(0);
 
-      // Read file content
-      const fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
+      // Detect XLSX and convert to CSV before processing
+      const mimeType = selectedFile.mimeType || '';
+      const isXlsx =
+        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        selectedFile.name?.toLowerCase().endsWith('.xlsx');
+
+      let fileContent: string;
+
+      if (isXlsx) {
+        const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+        const XLSX = await import('xlsx');
+        const wb = XLSX.read(base64, { type: 'base64' });
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        fileContent = XLSX.utils.sheet_to_csv(firstSheet);
+      } else {
+        // Read file content
+        fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
+      }
 
       // REQ 24-32: Process with validation, duplicates, batch insert, etc.
       const importResult = await StudentImportService.processImport(

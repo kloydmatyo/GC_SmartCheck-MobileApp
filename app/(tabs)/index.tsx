@@ -11,12 +11,23 @@ import {
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    orderBy,
+    query,
+    where,
+} from "firebase/firestore";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+    Image,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from "react-native";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
@@ -341,6 +352,21 @@ export default function HomeScreen() {
               Answer Sheets
             </Text>
           </View>
+
+          <View style={styles.statCard}>
+            <Ionicons
+              name="trending-up"
+              size={24}
+              color="#00a550"
+              style={styles.statIcon}
+            />
+            {loadingStats ? (
+              <View style={styles.skeletonValue} />
+            ) : (
+              <Text style={styles.statValue}>{stats.passRateToday}%</Text>
+            )}
+            <Text style={styles.statLabel}>Pass Rate</Text>
+          </View>
         </View>
 
         {/* Quick Actions */}
@@ -640,27 +666,22 @@ const styles = StyleSheet.create({
   // Stats
   statsContainer: {
     flexDirection: "row",
-    paddingHorizontal: 10,
-    gap: 8,
-    marginBottom: 16,
+    flexWrap: "wrap",
+    paddingHorizontal: 20,
+    gap: 10,
+    marginBottom: 14,
   },
   statCard: {
-    flex: 1,
+    width: "47%",
     backgroundColor: "#f0ead6",
     borderRadius: 12,
-    padding: 12,
+    padding: 14,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#8cb09a",
     elevation: 2,
   },
-  statIconContainer: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#dbe7df",
-    alignItems: "center",
-    justifyContent: "center",
+  statIcon: {
     marginBottom: 6,
   },
   statValue: {
@@ -862,5 +883,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
+    color: "#fff",
   },
 });

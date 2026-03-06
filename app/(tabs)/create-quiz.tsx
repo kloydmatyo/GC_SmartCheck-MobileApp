@@ -321,7 +321,7 @@ export default function CreateQuizScreen() {
         instructorId: instructorId,
         examCode: examCode,
         version: 1,
-        answer_keys: [],
+        answerKeys: [],
         generated_sheets: [],
         choicePoints: {},
       };

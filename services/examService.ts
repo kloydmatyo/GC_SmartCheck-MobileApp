@@ -29,15 +29,28 @@ export class ExamService {
    */
   static async getExamById(examId: string): Promise<ExamPreviewData | null> {
     try {
+      console.log("[ExamService] ===== FETCHING EXAM =====");
+      console.log("[ExamService] Exam ID:", examId);
+
       // Fetch exam metadata
       const examRef = doc(db, "exams", examId);
       const examSnap = await getDoc(examRef);
 
       if (!examSnap.exists()) {
+        console.log("[ExamService] Exam document not found");
         return null;
       }
 
       const examData = examSnap.data();
+      console.log("[ExamService] Exam document found");
+      console.log("[ExamService] Exam title:", examData.title);
+      console.log("[ExamService] Exam num_items:", examData.num_items);
+      console.log(
+        "[ExamService] Exam createdAt:",
+        examData.createdAt?.toMillis(),
+      );
+      console.log("[ExamService] Exam examId field:", examData.examId);
+      console.log("[ExamService] Exam document ID:", examSnap.id);
 
       // Fetch answer key - prefer the most recently updated answer key for this exam
       let answerKeyData = null;
@@ -72,29 +85,99 @@ export class ExamService {
         answerKeyId = selected.id;
         console.log("[ExamService] Found latest answer key via query:", answerKeyId);
       } else {
-        // Legacy fallback: timestamp-based document id
-        const timestampBasedId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
-        const answerKeyRef = doc(db, "answerKeys", timestampBasedId);
-        const answerKeySnap = await getDoc(answerKeyRef);
-        if (answerKeySnap.exists()) {
-          answerKeyData = answerKeySnap.data();
-          answerKeyId = answerKeySnap.id;
-          console.log("[ExamService] Found answer key with legacy timestamp ID");
+        // Strategy 2: Query for answer key by examId
+        console.log(
+          "[ExamService] Timestamp-based ID not found, querying by examId:",
+          examId,
+        );
+        const { collection, query, where, getDocs } =
+          await import("firebase/firestore");
+        const answerKeysQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", examId),
+        );
+        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+
+        console.log(
+          "[ExamService] Query returned",
+          answerKeysSnapshot.size,
+          "documents",
+        );
+
+        if (!answerKeysSnapshot.empty) {
+          const firstDoc = answerKeysSnapshot.docs[0];
+          answerKeyData = firstDoc.data();
+          answerKeyId = firstDoc.id;
+          console.log("[ExamService] Found answer key via query:", answerKeyId);
+          console.log("[ExamService] Answer key examId:", answerKeyData.examId);
+          console.log(
+            "[ExamService] Answer key has questionSettings:",
+            !!answerKeyData.questionSettings,
+          );
+          if (answerKeyData.questionSettings) {
+            console.log(
+              "[ExamService] questionSettings length:",
+              answerKeyData.questionSettings.length,
+            );
+            console.log(
+              "[ExamService] First 3 answers:",
+              answerKeyData.questionSettings.slice(0, 3).map((qs: any) => ({
+                q: qs.questionNumber,
+                a: qs.correctAnswer,
+              })),
+            );
+          }
         } else {
           console.log("[ExamService] No answer key found for exam:", examId);
+          console.log("[ExamService] Tried timestamp ID:", timestampBasedId);
+
+          // Strategy 3: Try to find by ID pattern (for web app compatibility)
+          console.log("[ExamService] Trying Strategy 3: Search by ID pattern");
+          const allAnswerKeysSnapshot = await getDocs(
+            collection(db, "answerKeys"),
+          );
+
+          console.log(
+            "[ExamService] Total answer keys in collection:",
+            allAnswerKeysSnapshot.size,
+          );
+
+          // Look for answer keys that start with our exam ID
+          for (const docSnap of allAnswerKeysSnapshot.docs) {
+            if (docSnap.id.startsWith(`ak_${examId}`)) {
+              answerKeyData = docSnap.data();
+              answerKeyId = docSnap.id;
+              console.log(
+                "[ExamService] Found answer key by ID pattern:",
+                answerKeyId,
+              );
+              break;
+            }
+          }
+
+          if (!answerKeyData) {
+            console.log(
+              "[ExamService] Strategy 3 failed - no matching answer key found",
+            );
+          }
         }
       }
 
       // Determine choice format
       const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
       const totalQuestions =
-        answerKeyData?.questionSettings?.length || examData.num_items || 20;
+        answerKeyData?.questionSettings?.length ||
+        answerKeyData?.answers?.length ||
+        examData.num_items ||
+        20;
 
-      // Extract answers from questionSettings
+      // Extract answers - support both mobile and web formats
       const extractedAnswers: string[] = [];
+
       if (answerKeyData?.questionSettings) {
+        // Mobile app format: questionSettings array
         console.log(
-          "[ExamService] Found questionSettings:",
+          "[ExamService] Using mobile format (questionSettings):",
           answerKeyData.questionSettings.length,
         );
         for (let i = 0; i < totalQuestions; i++) {
@@ -104,7 +187,26 @@ export class ExamService {
           const answer = setting?.correctAnswer || "";
           extractedAnswers.push(answer);
           if (i < 5) {
-            // Log first 5 for debugging
+            console.log(`[ExamService] Q${i + 1}: ${answer}`);
+          }
+        }
+        console.log(
+          "[ExamService] Total answers extracted:",
+          extractedAnswers.filter((a) => a).length,
+        );
+      } else if (
+        answerKeyData?.answers &&
+        Array.isArray(answerKeyData.answers)
+      ) {
+        // Web app format: answers array
+        console.log(
+          "[ExamService] Using web format (answers array):",
+          answerKeyData.answers.length,
+        );
+        for (let i = 0; i < totalQuestions; i++) {
+          const answer = answerKeyData.answers[i] || "";
+          extractedAnswers.push(answer);
+          if (i < 5) {
             console.log(`[ExamService] Q${i + 1}: ${answer}`);
           }
         }
@@ -113,10 +215,10 @@ export class ExamService {
           extractedAnswers.filter((a) => a).length,
         );
       } else {
+        // No answers found - use empty array
         console.log(
-          "[ExamService] No questionSettings found, using empty answers",
+          "[ExamService] No questionSettings or answers array found, using empty answers",
         );
-        // Fallback to empty answers
         for (let i = 0; i < totalQuestions; i++) {
           extractedAnswers.push("");
         }

@@ -240,6 +240,12 @@ export default function TabLayout() {
           tabBarStyle: { display: "none" },
         }}
       />
+      <Tabs.Screen
+        name="exam-stats"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

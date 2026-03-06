@@ -99,11 +99,15 @@ export class StudentDatabaseService {
 
       const querySnapshot = await getDocs(q);
       const students: StudentExtended[] = [];
+      const seenIds = new Set<string>();
 
       querySnapshot.forEach((doc: any) => {
         const data = doc.data();
+        const studentId = data.student_id || doc.id;
+        if (seenIds.has(studentId)) return; // skip duplicates
+        seenIds.add(studentId);
         students.push({
-          student_id: data.student_id || doc.id,
+          student_id: studentId,
           first_name: data.first_name || data.firstName || "",
           last_name: data.last_name || data.lastName || "",
           email: data.email,
@@ -355,5 +359,23 @@ export class StudentDatabaseService {
       console.error("[Cache] Refresh failed:", error);
       throw error;
     }
+  }
+
+  /**
+   * REQ 35: Get unique sections from cached students
+   */
+  static async getUniqueSections(): Promise<string[]> {
+    await this.initializeDatabase();
+    if (!this.cachedStudents || this.cachedStudents.length === 0) {
+      return [];
+    }
+    const sections = [
+      ...new Set(
+        this.cachedStudents
+          .map((s) => s.section)
+          .filter((s): s is string => Boolean(s))
+      ),
+    ].sort();
+    return sections;
   }
 }

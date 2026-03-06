@@ -20,12 +20,12 @@ import {
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 interface QuestionAnswer {
@@ -35,8 +35,14 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
   const { examId } = useLocalSearchParams();
+
+  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
+  const goToExamPreview = () =>
+    router.replace(
+      `/(tabs)/exam-preview?examId=${examId}&refresh=${Date.now()}`,
+    );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);

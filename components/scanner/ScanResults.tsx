@@ -12,8 +12,6 @@ import {
 } from "react-native";
 import { StorageService } from "../../services/storageService";
 import { GradingResult } from "../../types/scanning";
-import { GradingResultExtended } from "../../types/student";
-import { StudentValidationResult } from "../student/StudentValidationResult";
 
 interface ScanResultsProps {
   result: GradingResult;
@@ -35,20 +33,28 @@ export default function ScanResults({
   const [isImageModalVisible, setImageModalVisible] = useState(false);
   const [isEditingId, setIsEditingId] = useState(false);
   const [editedStudentId, setEditedStudentId] = useState(
-    result.studentId || ""
+    result.studentId || "",
   );
-  const details = result?.details || [];
+
+  // Get details from result, or generate from answers if missing
+  const details = result?.details || result?.answers || [];
 
   const totalQuestions =
     questionCount ??
-    (details.length > 0 ? details.length : result?.totalPoints ?? 20);
+    (details.length > 0 ? details.length : (result?.totalPoints ?? 20));
+
+  console.log("[ScanResults] Rendering with details:", details.length);
+  console.log("[ScanResults] First 3 details:", details.slice(0, 3));
 
   const handleSaveId = async () => {
     setIsEditingId(false);
 
     try {
       if (result.metadata?.timestamp) {
-        await StorageService.updateStudentId(result.metadata.timestamp, editedStudentId);
+        await StorageService.updateStudentId(
+          result.metadata.timestamp,
+          editedStudentId,
+        );
         // We also want to update the local result object so the UI reflects it immediately
         result.studentId = editedStudentId;
       }
@@ -158,36 +164,48 @@ export default function ScanResults({
           <Text style={styles.sectionTitle}>
             Scanned {totalQuestions}-Question Sheet
           </Text>
-          {details.map((item) => (
-            <View key={item.questionNumber} style={styles.row}>
-              <View style={styles.qBox}>
-                <Text style={styles.qLabel}>{item.questionNumber}</Text>
-              </View>
-              <View style={styles.comparisonContainer}>
-                <View style={styles.scanGroup}>
-                  <Text style={styles.miniLabel}>SCANNED</Text>
-                  <Text
-                    style={[
-                      styles.bubbleValue,
-                      item.isCorrect ? styles.correctColor : styles.errorColor,
-                    ]}
-                  >
-                    {item.studentAnswer || "—"}
-                  </Text>
+          {details.length > 0 ? (
+            details.map((item) => {
+              // Handle both field name variations
+              const studentAns =
+                item.studentAnswer || item.selectedAnswer || "—";
+              const correctAns = item.correctAnswer || "—";
+              const isCorrect = item.isCorrect ?? false;
+
+              return (
+                <View key={item.questionNumber} style={styles.row}>
+                  <View style={styles.qBox}>
+                    <Text style={styles.qLabel}>{item.questionNumber}</Text>
+                  </View>
+                  <View style={styles.comparisonContainer}>
+                    <View style={styles.scanGroup}>
+                      <Text style={styles.miniLabel}>SCANNED</Text>
+                      <Text
+                        style={[
+                          styles.bubbleValue,
+                          isCorrect ? styles.correctColor : styles.errorColor,
+                        ]}
+                      >
+                        {studentAns}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={14} color="#DDD" />
+                    <View style={styles.scanGroup}>
+                      <Text style={styles.miniLabel}>KEY</Text>
+                      <Text style={styles.bubbleValue}>{correctAns}</Text>
+                    </View>
+                  </View>
+                  <Ionicons
+                    name={isCorrect ? "checkmark-circle" : "close-circle"}
+                    size={22}
+                    color={isCorrect ? "#4CAF50" : "#F44336"}
+                  />
                 </View>
-                <Ionicons name="chevron-forward" size={14} color="#DDD" />
-                <View style={styles.scanGroup}>
-                  <Text style={styles.miniLabel}>KEY</Text>
-                  <Text style={styles.bubbleValue}>{item.correctAnswer}</Text>
-                </View>
-              </View>
-              <Ionicons
-                name={item.isCorrect ? "checkmark-circle" : "close-circle"}
-                size={22}
-                color={item.isCorrect ? "#4CAF50" : "#F44336"}
-              />
-            </View>
-          ))}
+              );
+            })
+          ) : (
+            <Text style={styles.noDataText}>No answer details available</Text>
+          )}
         </View>
       </ScrollView>
 
@@ -264,7 +282,12 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 8,
   },
-  overlayText: { color: "white", fontSize: 12, marginLeft: 5, fontWeight: "600" },
+  overlayText: {
+    color: "white",
+    fontSize: 12,
+    marginLeft: 5,
+    fontWeight: "600",
+  },
 
   // Student ID
   studentIdSection: {
@@ -285,7 +308,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   studentIdLabel: { fontSize: 12, color: "#5C6BC0", fontWeight: "700" },
-  studentIdValue: { fontSize: 16, fontWeight: "800", color: "#1A237E", letterSpacing: 2, marginTop: 4 },
+  studentIdValue: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1A237E",
+    letterSpacing: 2,
+    marginTop: 4,
+  },
   studentIdInput: {
     fontSize: 16,
     fontWeight: "800",
@@ -344,6 +373,13 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#666",
     marginBottom: 15,
+  },
+  noDataText: {
+    fontSize: 14,
+    color: "#999",
+    textAlign: "center",
+    paddingVertical: 20,
+    fontStyle: "italic",
   },
   row: {
     flexDirection: "row",
