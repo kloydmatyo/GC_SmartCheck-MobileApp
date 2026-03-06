@@ -5,13 +5,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Clipboard,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Clipboard,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth } from "../../config/firebase";
@@ -345,7 +345,7 @@ export default function ExamPreviewScreen() {
                   </Text>
                 </View>
                 <View style={styles.configItem}>
-                  <Text style={styles.configLabel}>Questions/Column</Text>
+                  <Text style={styles.configLabel}>Questions Rows</Text>
                   <Text style={styles.configValue}>
                     {exam.templateLayout.questionsPerColumn}
                   </Text>
