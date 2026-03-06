@@ -6,7 +6,7 @@ import {
 } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { AppState, AppStateStatus } from "react-native";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
@@ -22,6 +22,19 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const appState = useRef<AppStateStatus>(AppState.currentState);
+
+  // Initial sync on mount
+  useEffect(() => {
+    const performInitialSync = async () => {
+      // Small delay to ensure all services are ready
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const netState = await NetInfo.fetch();
+      if (netState.isConnected && netState.isInternetReachable) {
+        GradeStorageService.syncOfflineQueue();
+      }
+    };
+    performInitialSync();
+  }, []);
 
   // Offline sync on app resume 
   useEffect(() => {

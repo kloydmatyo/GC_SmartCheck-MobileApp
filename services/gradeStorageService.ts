@@ -1,4 +1,5 @@
 import { auth, db } from "@/config/firebase";
+import NetInfo from "@react-native-community/netinfo";
 import {
   collection,
   doc,
@@ -238,6 +239,29 @@ export class GradeStorageService {
 
     const resolvedExamId = examId || result.examId;
     console.log(`[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`);
+
+    // ── Check Connectivity First ──
+    const netState = await NetInfo.fetch();
+    const isOnline = !!(netState.isConnected && netState.isInternetReachable);
+
+    if (!isOnline) {
+      console.log("[GradeStorageService] Offline detected. Bypassing validation and queueing to RealmDB.");
+      const record: GradeStorageRecord = {
+        studentId: result.studentId,
+        examId: resolvedExamId,
+        score: result.score,
+        totalPoints: result.totalPoints,
+        percentage: result.percentage,
+        gradeEquivalent: result.gradeEquivalent,
+        correctAnswers: result.correctAnswers,
+        totalQuestions: result.totalQuestions,
+        dateScanned: result.dateScanned,
+        status: "pending",
+        savedBy: uid,
+        createdAt: new Date(),
+      };
+      return GradeStorageService.queueOffline(record);
+    }
 
     await LogService.info(
       "SCAN_SUCCESS",

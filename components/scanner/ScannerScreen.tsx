@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
@@ -68,593 +69,238 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     try {
       const studentId = scanResult.studentId;
 
-      // Ensure that a valid student ID was parsed
+      // Basic validation
       if (!studentId || studentId === "0000000" || studentId === "Unknown") {
-        console.warn(
-          `[ScannerScreen] Invalid student ID detected: "${studentId}"`,
-        );
-        Alert.alert(
-          "Invalid ID",
-          "Could not detect a valid student ID from the scanned sheet. Please ensure the ID bubbles are properly filled.",
-        );
+        Alert.alert("Invalid ID", "Could not detect a valid student ID. Please check the bubbles.");
         return;
       }
 
       console.log(`[ScannerScreen] Detected student ID: ${studentId}`);
 
-      // ── Verify the student account (Fast Timeout) ──
-      console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+      // ── 1. Fast Student Verification ──
       let isValidId = false;
+      const netState = await NetInfo.fetch();
 
-      try {
-        const studentsRef = collection(db, "students");
-        const q = query(studentsRef, where("studentId", "==", studentId));
+      if (netState.isConnected && netState.isInternetReachable) {
+        console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+        try {
+          const q = query(collection(db, "students"), where("studentId", "==", studentId));
+          const snap = await withTimeout(getDocs(q), 2000);
+          isValidId = !snap.empty;
 
-        const snap = await withTimeout(getDocs(q), 2000); // 2s SLA
-        isValidId = !snap.empty;
-
-        if (!isValidId) {
-          // Fallback: Check if student exists in any class's students array
-          console.log(`[Firestore] Not found in collection, checking classes...`);
-          const classesRef = collection(db, "classes");
-          const classesSnapshot = await withTimeout(getDocs(classesRef), 3000);
-
-          for (const classDoc of classesSnapshot.docs) {
-            const classData = classDoc.data();
-            const foundStudent = classData.students?.find((s: any) => s.student_id === studentId);
-            if (foundStudent) {
-              isValidId = true;
-              break;
+          if (!isValidId) {
+            // Fallback to class check
+            const classesSnapshot = await withTimeout(getDocs(collection(db, "classes")), 2500);
+            for (const classDoc of classesSnapshot.docs) {
+              if (classDoc.data().students?.some((s: any) => s.student_id === studentId)) {
+                isValidId = true;
+                break;
+              }
             }
           }
+        } catch (err) {
+          console.warn("[ScannerScreen] Student verification timed out. Assuming valid.");
+          isValidId = true;
         }
-      } catch (err) {
-        console.warn("[ScannerScreen] Student verification timed out. Assuming valid for now (Offline Mode).");
-        isValidId = true; // Trust the student while offline
+      } else {
+        console.log("[ScannerScreen] Offline - Skipping network validation.");
+        isValidId = true; // Trust ID while offline
       }
 
       if (!isValidId) {
-        Alert.alert("Unrecognized ID", `Student ID ${studentId} is not registered, but it was still scored.`);
+        Alert.alert("Unregistered student", `ID ${studentId} not found, but it will be scored anyway.`);
       }
 
-      // ── Fetch Answer Key (Fast Timeout) ──
-      console.log(`[ScannerScreen] Fetching answer key for exam: ${activeExamId}`);
+      // ── 2. Fetch Answer Key (Fast Timeout) ──
       const rawCount = scanResult.answers?.length || 20;
       let answerKey: string[] = [];
 
       try {
         const { ExamService } = await import("../../services/examService");
         const examData = await withTimeout(ExamService.getExamById(activeExamId), 2500);
-
         if (examData?.answerKey?.answers) {
           answerKey = examData.answerKey.answers;
         } else {
-          throw new Error("No answer key field");
+          throw new Error("Missing key");
         }
       } catch (error) {
-        console.warn(`[ScannerScreen] Answer key fetch failed/timed out. using default key.`);
+        console.warn("[ScannerScreen] Answer key fetch failed/timed out. using default key.");
         answerKey = GradingService.getDefaultAnswerKey(rawCount).map(ak => ak.correctAnswer);
       }
 
-      // Convert string array to AnswerKey format
       const answerKeyFormatted = answerKey.map((answer, index) => ({
         questionNumber: index + 1,
         correctAnswer: answer,
         points: 1,
       }));
 
-      console.log(
-        `[ScannerScreen] Using answer key with ${answerKeyFormatted.length} questions`,
-      );
-      console.log(
-        `[ScannerScreen] First 3 formatted keys:`,
-        answerKeyFormatted.slice(0, 3),
-      );
-
-      // Grade the answers
-      const result = GradingService.gradeAnswers(
-        scanResult,
-        answerKeyFormatted,
-      );
+      // ── 3. Grade & Duplicate Check ──
+      const result = GradingService.gradeAnswers(scanResult, answerKeyFormatted);
       result.metadata = { ...result.metadata, isValidId: isValidId } as any;
 
-      console.log(
-        `[ScannerScreen] Scanned student ID: ${result.studentId} (Valid: ${isValidId})`,
-      );
-      console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
-
-      // Check for duplicates
       let duplicateCheck = null;
       try {
-        duplicateCheck =
-          await DuplicateScoreDetectionService.checkForDuplicates(
-            result,
-            activeExamId,
-          );
-      } catch (error) {
-        console.error("[ScannerScreen] Duplicate check failed:", error);
-        // Continue without duplicate check
-      }
-
-      if (duplicateCheck) {
-        console.log(
-          `[ScannerScreen] Duplicate detected: ${duplicateCheck.matchType} (${Math.round(duplicateCheck.similarity * 100)}%)`,
+        duplicateCheck = await withTimeout(
+          DuplicateScoreDetectionService.checkForDuplicates(result, activeExamId),
+          2000
         );
+      } catch (err) { /* proceed if check hangs */ }
 
-        // If exact duplicate, show warning modal
-        if (
-          duplicateCheck.matchType === "exact" ||
-          duplicateCheck.matchType === "high"
-        ) {
-          setPendingResult(result);
-          setDuplicateMatch(duplicateCheck);
-          setShowDuplicateModal(true);
-          return;
-        }
-
-        // For moderate duplicates, just show a toast warning
-        Toast.show({
-          type: "info",
-          text1: "Similar Scan Detected",
-          text2:
-            DuplicateScoreDetectionService.getDuplicateWarningMessage(
-              duplicateCheck,
-            ),
-          visibilityTime: 5000,
-        });
+      if (duplicateCheck && (duplicateCheck.matchType === "exact" || duplicateCheck.matchType === "high")) {
+        setPendingResult(result);
+        setDuplicateMatch(duplicateCheck);
+        setShowDuplicateModal(true);
+        return;
       }
 
-      // 1. Save scan image + local history (StorageService — always runs)
+      // ── 4. Save Pipeline ──
       const savedResult = await StorageService.saveScanResult(result, imageUri);
 
-      // 2. Save to Firestore via GradeStorageService — dynamic result binding (#2)
-      GradeStorageService.saveGradingResult(result, activeExamId).then(
-        (saveResult) => {
-          if (saveResult.status === "saved") {
-            // ── Success: show score summary (#3)
-            Toast.show({
-              type: "save_result",
-              text1: `Saved — ${result.score}/${result.totalPoints} (${result.percentage}%)`,
-              text2: `Student ${result.studentId} · Grade ${result.gradeEquivalent}`,
-              visibilityTime: 4000,
-            });
-          } else if (saveResult.status === "duplicate") {
-            // ── Duplicate: informational (#3)
-            Toast.show({
-              type: "info",
-              text1: "Already Saved",
-              text2: saveResult.message,
-              visibilityTime: 4000,
-            });
-          } else if (saveResult.status === "pending") {
-            // ── Offline queued (#3)
-            Toast.show({
-              type: "save_offline",
-              text1: "Saved Offline",
-              text2: "No connection — will sync automatically when online.",
-              visibilityTime: 5000,
-            });
-          } else {
-            // ── Error: show retry button with pulse animation (#3, #4, #5)
-            Toast.show({
-              type: "save_retry",
-              text1: "Save Failed",
-              text2: saveResult.message,
-              visibilityTime: 8000,
-              props: {
-                onRetry: () =>
-                  handleFirestoreRetrySave(result, activeExamId),
-              },
-            });
-          }
-        },
-      );
-
-      // Show scan-complete toast immediately (doesn't wait for Firestore)
-      Toast.show({
-        type: "success",
-        text1: `Sheet Scanned: ${rawCount} Questions`,
-        text2: `Student ${result.studentId || "00000000"}: ${result.score}/${result.totalPoints}`,
-        visibilityTime: 4000,
+      // Async Firestore/Realm save
+      GradeStorageService.saveGradingResult(result, activeExamId).then(saveResult => {
+        if (saveResult.status === "saved") {
+          Toast.show({ type: "success", text1: "Saved", text2: `Score: ${result.score}/${result.totalPoints}` });
+        } else if (saveResult.status === "pending") {
+          Toast.show({ type: "info", text1: "Queued Offline", text2: "Data saved in RealmDB for later sync." });
+        }
       });
 
       setGradingResult(savedResult);
       setScannedImage(imageUri);
       setCurrentState("results");
+
     } catch (error) {
-      console.error("Error grading answers:", error);
-      Alert.alert("Error", "Failed to grade answers. Please try again.");
+      console.error("[ScannerScreen] Error:", error);
+      Alert.alert("Error", "Failed to process scan.");
     }
   };
 
-  // Retry save from results screen — uses GradeStorageService (#5)
-  const handleRetrySave = async () => {
-    if (!gradingResult || !scannedImage) return;
-    await handleFirestoreRetrySave(gradingResult, activeExamId);
-  };
+  const handleRetrySave = () => handleFirestoreRetrySave(gradingResult!, activeExamId);
 
-  // Core retry logic (also called from save_retry toast button) (#5)
-  const handleFirestoreRetrySave = async (
-    result: GradingResult,
-    examId: string,
-  ) => {
-    try {
-      const saveResult = await GradeStorageService.saveGradingResult(
-        result,
-        examId,
-      );
-
-      if (saveResult.status === "saved") {
-        Toast.show({
-          type: "save_result",
-          text1: "Saved Successfully",
-          text2: `Student ${result.studentId} · ${result.score}/${result.totalPoints}`,
-          visibilityTime: 4000,
-        });
-      } else if (saveResult.status === "pending") {
-        Toast.show({
-          type: "save_offline",
-          text1: "Saved Offline",
-          text2: "Will sync when connection is restored.",
-          visibilityTime: 5000,
-        });
-      } else {
-        // Still failing — show retry again (#5)
-        Toast.show({
-          type: "save_retry",
-          text1: "Save Failed Again",
-          text2: saveResult.message,
-          visibilityTime: 8000,
-          props: {
-            onRetry: () => handleFirestoreRetrySave(result, examId),
-          },
-        });
-      }
-    } catch (error: any) {
-      Toast.show({
-        type: "save_retry",
-        text1: "Save Error",
-        text2: error.message ?? "Could not save. Tap Retry.",
-        visibilityTime: 8000,
-        props: {
-          onRetry: () => handleFirestoreRetrySave(result, examId),
-        },
-      });
+  const handleFirestoreRetrySave = async (result: GradingResult, examId: string) => {
+    const saveResult = await GradeStorageService.saveGradingResult(result, examId);
+    if (saveResult.status === "saved") {
+      Toast.show({ type: "success", text1: "Saved Successfully" });
+    } else if (saveResult.status === "pending") {
+      Toast.show({ type: "info", text1: "Saved Locally (Realm)" });
+    } else {
+      Toast.show({ type: "error", text1: "Still Failing", text2: saveResult.message });
     }
   };
 
   const handleConfirmExam = async () => {
     if (!examIdInput.trim()) return;
-
     setIsValidatingExam(true);
     try {
       const { auth } = await import("../../config/firebase");
       if (!auth.currentUser) {
-        Alert.alert(
-          "Online Mode Required",
-          "You are currently using a guest/dummy account. Searching for exams requires a real account signed in via Firebase.",
-          [{ text: "OK" }]
-        );
+        Alert.alert("Auth Required", "Please sign in to search for exams.");
         return;
       }
 
-      const inputValue = examIdInput.trim();
-      console.log(`[ScannerScreen] Looking up exam: ${inputValue}`);
-
-      // Try to find exam by examCode or document ID
-      const { collection, query, where, getDocs } =
-        await import("firebase/firestore");
       const examsRef = collection(db, "exams");
+      const q = query(examsRef, where("examCode", "==", examIdInput.trim()));
+      const snap = await getDocs(q);
 
-      // First, try to find by examCode
-      const examCodeQuery = query(
-        examsRef,
-        where("examCode", "==", inputValue),
-      );
-      const examCodeSnapshot = await getDocs(examCodeQuery);
-
-      console.log(
-        `[ScannerScreen] Query by examCode returned ${examCodeSnapshot.size} documents`,
-      );
-
-      let examDocId = null;
-
-      if (!examCodeSnapshot.empty) {
-        // Found by exam code
-        examDocId = examCodeSnapshot.docs[0].id;
-        const examData = examCodeSnapshot.docs[0].data();
-        console.log(
-          `[ScannerScreen] Found exam by code: ${inputValue} -> ${examDocId}`,
-        );
-        console.log(`[ScannerScreen] Exam title: ${examData.title}`);
-
-        // Store question count for scanner
-        const questionCount = examData.num_items || 20;
-        setExamQuestionCount(questionCount);
-        console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setExamQuestionCount(data.num_items || 20);
+        setActiveExamId(snap.docs[0].id);
+        setCurrentState("camera");
       } else {
-        console.log(
-          `[ScannerScreen] No exam found with examCode: ${inputValue}, trying as document ID`,
-        );
-        // Try as document ID directly
-        const { doc, getDoc } = await import("firebase/firestore");
-        const examDocRef = doc(db, "exams", inputValue);
-        const examDocSnap = await getDoc(examDocRef);
-
-        if (examDocSnap.exists()) {
-          examDocId = examDocSnap.id;
-          const examData = examDocSnap.data();
-          console.log(
-            `[ScannerScreen] Found exam by document ID: ${examDocId}`,
-          );
-
-          // Store question count for scanner
-          const questionCount = examData.num_items || 20;
-          setExamQuestionCount(questionCount);
-          console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
-        } else {
-          console.log(
-            `[ScannerScreen] No exam found with document ID: ${inputValue}`,
-          );
-        }
+        Alert.alert("Error", "Exam not found.");
       }
-
-      if (!examDocId) {
-        Alert.alert(
-          "Exam Not Found",
-          `No exam found with code or ID: ${inputValue}`,
-        );
-        return;
-      }
-
-      setActiveExamId(examDocId);
-      setCurrentState("camera");
-    } catch (error: any) {
-      console.error("[ScannerScreen] Error validating exam:", error);
-
-      let title = "Connectivity Error";
-      let message = "Failed to validate exam ID. Please try again.";
-
-      if (error.code === "permission-denied") {
-        title = "Access Denied";
-        message = "You don't have permission to access these exam records. Please ensure you are logged in with the correct account.";
-      } else if (
-        error.code === "unavailable" ||
-        error.message?.includes("offline") ||
-        error.message?.includes("network-error")
-      ) {
-        message = "You appear to be offline. Please check your internet connection.";
-      }
-
-      Alert.alert(title, message);
+    } catch (err) {
+      Alert.alert("Error", "Could not reach server.");
     } finally {
       setIsValidatingExam(false);
     }
   };
 
   const handleScanAnother = () => {
-    setGradingResult(null);
-    setScannedImage(undefined);
-    setScanCount((prev) => prev + 1); // Increment to force camera remount
+    setScanCount(prev => prev + 1);
     setCurrentState("camera");
   };
 
   const handleClose = () => {
-    setGradingResult(null);
-    setScannedImage(undefined);
-    setCurrentState("camera");
+    setCurrentState("exam-select");
     onClose();
   };
 
   const handleKeepNewScan = async () => {
     if (!pendingResult || !scannedImage) return;
-
-    try {
-      // Mark as override and save
-      const overriddenResult =
-        DuplicateScoreDetectionService.markAsOverride(pendingResult);
-      const savedResult = await StorageService.saveScanResult(
-        overriddenResult,
-        scannedImage,
-      );
-
-      Toast.show({
-        type: "success",
-        text1: "Scan Saved",
-        text2: "New scan saved successfully",
-        visibilityTime: 3000,
-      });
-
-      setGradingResult(savedResult);
-      setScannedImage(scannedImage);
-      setCurrentState("results");
-    } catch (error) {
-      Toast.show({
-        type: "error",
-        text1: "Save Failed",
-        text2: "Could not save scan result",
-        visibilityTime: 4000,
-      });
-    } finally {
-      setShowDuplicateModal(false);
-      setPendingResult(null);
-      setDuplicateMatch(null);
-    }
-  };
-
-  const handleKeepExistingScan = () => {
-    Toast.show({
-      type: "info",
-      text1: "Scan Discarded",
-      text2: "Keeping existing scan",
-      visibilityTime: 3000,
-    });
-
+    const overridden = DuplicateScoreDetectionService.markAsOverride(pendingResult);
+    const saved = await StorageService.saveScanResult(overridden, scannedImage);
+    GradeStorageService.saveGradingResult(overridden, activeExamId);
+    setGradingResult(saved);
+    setScannedImage(scannedImage);
+    setCurrentState("results");
     setShowDuplicateModal(false);
-    setPendingResult(null);
-    setDuplicateMatch(null);
-    setCurrentState("camera");
-  };
-
-  const handleCancelDuplicate = () => {
-    setShowDuplicateModal(false);
-    setPendingResult(null);
-    setDuplicateMatch(null);
-    setCurrentState("camera");
   };
 
   return (
     <View style={styles.container}>
-      {/* ── Step 5: Exam Selector ── */}
       {currentState === "exam-select" && (
         <View style={styles.examSelector}>
-          <TouchableOpacity onPress={handleClose} style={styles.backButton}>
-            <Ionicons name="close" size={24} color="#666" />
+          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+            <Ionicons name="close" size={32} color="black" />
           </TouchableOpacity>
-
-          <View style={styles.examSelectorContent}>
-            <Ionicons name="document-text" size={56} color="#007AFF" />
-            <Text style={styles.examSelectorTitle}>Select Exam</Text>
-            <Text style={styles.examSelectorSubtitle}>
-              Enter the Exam ID before scanning answer sheets
-            </Text>
-
+          <View style={styles.content}>
+            <Text style={styles.title}>Enter Exam Code</Text>
             <TextInput
-              style={styles.examInput}
-              placeholder="Exam ID (e.g. abc123xyz)"
-              placeholderTextColor="#aaa"
+              style={styles.input}
+              placeholder="e.g. MATH-101"
               value={examIdInput}
               onChangeText={setExamIdInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={handleConfirmExam}
+              autoCapitalize="characters"
             />
-
-            <TouchableOpacity
-              style={[
-                styles.confirmButton,
-                (!examIdInput.trim() || isValidatingExam) &&
-                styles.confirmButtonDisabled,
-              ]}
-              onPress={handleConfirmExam}
-              disabled={!examIdInput.trim() || isValidatingExam}
-            >
-              {isValidatingExam ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={20} color="white" />
-                  <Text style={styles.confirmButtonText}>
-                    Confirm & Start Scanning
-                  </Text>
-                </>
-              )}
+            <TouchableOpacity style={styles.btn} onPress={handleConfirmExam}>
+              {isValidatingExam ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start Scanning</Text>}
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* ── Camera ── */}
       {currentState === "camera" && (
         <CameraScanner
-          key={`camera-${scanCount}`}
+          key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
           onScanComplete={handleScanComplete}
           onCancel={handleClose}
         />
       )}
 
-      {/* ── Results ── */}
       {currentState === "results" && gradingResult && (
         <ScanResults
           result={gradingResult}
           imageUri={scannedImage}
-          questionCount={gradingResult.totalQuestions}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
           onRetrySave={handleRetrySave}
         />
       )}
 
-      {/* Duplicate Warning Modal */}
-      {showDuplicateModal && duplicateMatch && pendingResult && (
+      {showDuplicateModal && duplicateMatch && (
         <DuplicateScoreWarningModal
           visible={showDuplicateModal}
           match={duplicateMatch}
-          newResult={pendingResult}
+          newResult={pendingResult!}
           onKeepNew={handleKeepNewScan}
-          onKeepExisting={handleKeepExistingScan}
-          onCancel={handleCancelDuplicate}
+          onKeepExisting={() => setShowDuplicateModal(false)}
+          onCancel={() => setShowDuplicateModal(false)}
         />
       )}
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  // ── Exam Selector ──
-  examSelector: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  backButton: {
-    padding: 20,
-    alignSelf: "flex-end",
-  },
-  examSelectorContent: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-  },
-  examSelectorTitle: {
-    fontSize: 26,
-    fontWeight: "bold",
-    color: "#333",
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  examSelectorSubtitle: {
-    fontSize: 15,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 32,
-    lineHeight: 22,
-  },
-  examInput: {
-    width: "100%",
-    backgroundColor: "white",
-    borderWidth: 1.5,
-    borderColor: "#007AFF",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: "#333",
-    marginBottom: 20,
-  },
-  confirmButton: {
-    width: "100%",
-    backgroundColor: "#007AFF",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  confirmButtonDisabled: {
-    backgroundColor: "#b0c8f0",
-  },
-  confirmButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
+  container: { flex: 1, backgroundColor: "white" },
+  examSelector: { flex: 1, padding: 20, justifyContent: "center" },
+  closeButton: { position: "absolute", top: 40, right: 20 },
+  content: { alignItems: "center" },
+  title: { fontSize: 24, fontWeight: "bold", marginBottom: 20 },
+  input: { borderBottomWidth: 2, borderBottomColor: "#007AFF", width: "80%", fontSize: 20, textAlign: "center", marginBottom: 30 },
+  btn: { backgroundColor: "#007AFF", padding: 15, borderRadius: 10, width: "80%", alignItems: "center" },
+  btnText: { color: "white", fontSize: 18, fontWeight: "bold" }
 });
