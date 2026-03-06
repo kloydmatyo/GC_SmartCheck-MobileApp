@@ -474,8 +474,33 @@ export class GradeStorageService {
 
   //  Offline Sync
 
+  static async getOfflineItemCount(): Promise<number> {
+    try {
+      const realm = await getRealm();
+      return realm.objects<OfflineGrade>("OfflineGrade").length;
+    } catch (error) {
+      console.error("[GradeStorageService] Failed to get offline item count", error);
+      return 0;
+    }
+  }
+
   static async syncOfflineQueue(): Promise<void> {
     try {
+      // ── Wait for Firebase Auth State To Restore ──
+      const { auth } = await import("../config/firebase");
+      await new Promise<void>((resolve) => {
+        const unsubscribe = auth.onAuthStateChanged((user: any) => {
+          unsubscribe();
+          resolve();
+        });
+      });
+
+      // If user is still not logged in after restore, we can't sync
+      if (!auth.currentUser) {
+        console.log("[GradeStorageService] Cannot sync: User is not logged in.");
+        return;
+      }
+
       const realm = await getRealm();
       const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade");
 
