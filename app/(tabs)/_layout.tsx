@@ -68,7 +68,9 @@ export default function TabLayout() {
         tabBarInactiveTintColor: tabColors.inactive,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarBackground: () => <View style={{ flex: 1, backgroundColor: tabColors.bg }} />,
+        tabBarBackground: () => (
+          <View style={{ flex: 1, backgroundColor: tabColors.bg }} />
+        ),
         tabBarStyle: {
           backgroundColor: tabColors.bg,
           borderTopWidth: 1,
@@ -168,7 +170,6 @@ export default function TabLayout() {
         name="generator"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
@@ -187,7 +188,6 @@ export default function TabLayout() {
         name="create-quiz"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
           unmountOnBlur: true,
         }}
       />
@@ -195,49 +195,42 @@ export default function TabLayout() {
         name="edit-answer-key"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="exam-preview"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="class-details"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="print-answer-sheet"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="batch-history"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="sync"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="edit-exam"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
