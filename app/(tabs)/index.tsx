@@ -6,12 +6,12 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
@@ -366,20 +366,6 @@ export default function HomeScreen() {
             </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Ionicons
-              name="trending-up"
-              size={24}
-              color="#00a550"
-              style={styles.statIcon}
-            />
-            {loading ? (
-              <View style={styles.skeletonValue} />
-            ) : (
-              <Text style={styles.statValue}>{stats.passRateToday}%</Text>
-            )}
-            <Text style={styles.statLabel}>Pass Rate</Text>
-          </View>
         </View>
 
         {/* Quick Actions */}
@@ -794,16 +780,16 @@ const styles = StyleSheet.create({
   // Stats
   statsContainer: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: 20,
-    gap: 10,
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
     marginBottom: 14,
   },
   statCard: {
-    width: "47%",
+    width: "31.5%",
     backgroundColor: "#f0ead6",
     borderRadius: 12,
-    padding: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 6,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#8cb09a",
@@ -811,6 +797,14 @@ const styles = StyleSheet.create({
   },
   statIcon: {
     marginBottom: 6,
+  },
+  statIconContainer: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
   },
   statValue: {
     fontSize: 22,

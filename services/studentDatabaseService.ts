@@ -8,7 +8,16 @@ import { auth, db } from "@/config/firebase";
 import { CacheMetadata, StudentExtended, SyncStatus } from "@/types/student";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 
 // Constants
 const CACHE_EXPIRATION_HOURS = 24;
@@ -22,6 +31,35 @@ const STORAGE_KEYS = {
 export class StudentDatabaseService {
   private static encryptionKey: string | null = null;
   private static cachedStudents: StudentExtended[] | null = null;
+
+  private static async resolveStudentDocId(
+    docIdOrStudentId: string,
+  ): Promise<string> {
+    await this.initializeDatabase();
+
+    const directMatch = this.cachedStudents?.find(
+      (student) =>
+        student.id === docIdOrStudentId || student.student_id === docIdOrStudentId,
+    );
+    if (directMatch?.id) {
+      return directMatch.id;
+    }
+
+    const studentsRef = collection(db, "students");
+    const snapshot = await getDocs(
+      query(
+        studentsRef,
+        where("student_id", "==", docIdOrStudentId),
+      ),
+    );
+
+    const match = snapshot.docs[0];
+    if (!match) {
+      throw new Error("Student record not found");
+    }
+
+    return match.id;
+  }
 
   /**
    * REQ 43: Initialize cache (load from AsyncStorage)
@@ -40,7 +78,7 @@ export class StudentDatabaseService {
         this.cachedStudents = JSON.parse(studentsJson);
         console.log(
           "[Cache] Loaded",
-          this.cachedStudents.length,
+          this.cachedStudents?.length ?? 0,
           "students from cache",
         );
       } else {
@@ -86,14 +124,9 @@ export class StudentDatabaseService {
     try {
       await this.initializeDatabase();
 
-      const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error("User must be authenticated");
-      }
-
       // Query Firestore for students
       const studentsRef = collection(db, "students");
-      let q = sectionId
+      const q = sectionId
         ? query(studentsRef, where("section", "==", sectionId))
         : query(studentsRef);
 
@@ -107,12 +140,15 @@ export class StudentDatabaseService {
         if (seenIds.has(studentId)) return; // skip duplicates
         seenIds.add(studentId);
         students.push({
+          id: doc.id,
           student_id: studentId,
           first_name: data.first_name || data.firstName || "",
           last_name: data.last_name || data.lastName || "",
+          grade: data.grade,
           email: data.email,
           section: data.section,
           is_active: data.is_active !== false,
+          createdBy: data.createdBy,
           created_at: data.created_at,
           updated_at: data.updated_at,
         });
@@ -150,6 +186,88 @@ export class StudentDatabaseService {
 
     const student = this.cachedStudents.find((s) => s.student_id === studentId);
     return student || null;
+  }
+
+  static async createStudent(
+    student: Pick<
+      StudentExtended,
+      "student_id" | "first_name" | "last_name" | "grade" | "email" | "section"
+    >,
+  ): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("User must be authenticated");
+    }
+
+    await this.initializeDatabase();
+
+    const trimmedId = student.student_id.trim();
+    if (!trimmedId) {
+      throw new Error("Student ID is required");
+    }
+
+    const duplicate = this.cachedStudents?.some(
+      (item) => item.student_id.toLowerCase() === trimmedId.toLowerCase(),
+    );
+    if (duplicate) {
+      throw new Error("A student with this ID already exists");
+    }
+
+    const payload: Omit<StudentExtended, "id"> = {
+      student_id: trimmedId,
+      first_name: student.first_name.trim(),
+      last_name: student.last_name.trim(),
+      grade: student.grade?.trim() || undefined,
+      email: student.email?.trim() || undefined,
+      section: student.section?.trim() || undefined,
+      is_active: true,
+      createdBy: currentUser.uid,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    await addDoc(collection(db, "students"), payload);
+    await this.downloadStudentDatabase();
+  }
+
+  static async updateStudent(
+    docIdOrStudentId: string,
+    updates: Partial<
+      Pick<
+        StudentExtended,
+        "first_name" | "last_name" | "grade" | "email" | "section" | "is_active"
+      >
+    >,
+  ): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("User must be authenticated");
+    }
+
+    const payload = {
+      ...updates,
+      first_name: updates.first_name?.trim(),
+      last_name: updates.last_name?.trim(),
+      grade: updates.grade?.trim(),
+      email: updates.email?.trim() || undefined,
+      section: updates.section?.trim() || undefined,
+      updated_at: new Date().toISOString(),
+    };
+
+    const docId = await this.resolveStudentDocId(docIdOrStudentId);
+    await updateDoc(doc(db, "students", docId), payload);
+    await this.downloadStudentDatabase();
+  }
+
+  static async deleteStudent(docIdOrStudentId: string): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error("User must be authenticated");
+    }
+
+    const docId = await this.resolveStudentDocId(docIdOrStudentId);
+    await deleteDoc(doc(db, "students", docId));
+    await this.downloadStudentDatabase();
   }
 
   /**

@@ -21,23 +21,41 @@ import {
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   ActivityIndicator,
   DeviceEventEmitter,
   FlatList,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function StudentsScreen() {
+  const insets = useSafeAreaInsets();
+  const sectionOptions = Array.from({ length: 26 }, (_, index) =>
+    String.fromCharCode(65 + index),
+  );
+  const emptyStudentForm = {
+    student_id: "",
+    first_name: "",
+    last_name: "",
+    grade: "",
+    email: "",
+    section: "",
+  };
+
   // REQ 33, 34: Search with debounce
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const searchTimeoutRef = useRef<NodeJS.Timeout>();
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // REQ 35: Filter state
   const [selectedSection, setSelectedSection] = useState<string | undefined>(
@@ -66,6 +84,18 @@ export default function StudentsScreen() {
 
   // REQ 22: Import modal state
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showStudentModal, setShowStudentModal] = useState(false);
+  const [studentModalMode, setStudentModalMode] = useState<"add" | "edit">(
+    "add",
+  );
+  const [selectedStudent, setSelectedStudent] = useState<StudentExtended | null>(
+    null,
+  );
+  const [pendingDeleteStudent, setPendingDeleteStudent] =
+    useState<StudentExtended | null>(null);
+  const [showSectionPicker, setShowSectionPicker] = useState(false);
+  const [studentForm, setStudentForm] = useState(emptyStudentForm);
+  const [isSavingStudent, setIsSavingStudent] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
   const loadDarkModePreference = React.useCallback(async () => {
@@ -128,6 +158,10 @@ export default function StudentsScreen() {
         modalOverlay: "rgba(0, 0, 0, 0.6)",
         studentCardBg: "#1f2b26",
         studentCardBorder: "#34483f",
+        formCard: "#1f3a2f",
+        formCardAlt: "#2a3a33",
+        formAccent: "#8fd1ad",
+        formSubtext: "#b9c9c0",
       }
     : {
         background: "#eef1ef",
@@ -156,7 +190,13 @@ export default function StudentsScreen() {
         modalOverlay: "rgba(0, 0, 0, 0.5)",
         studentCardBg: "#f0ead6",
         studentCardBorder: "#d4c5a0",
+        formCard: "#3d5a3d",
+        formCardAlt: "#2d4a2d",
+        formAccent: "#4CAF50",
+        formSubtext: "#B8D4B8",
       };
+  const pickerAccent = "#3f6b54";
+  const pickerAccentDark = "#2f4f3f";
 
   // REQ 35: Available sections for filter picker
   const [availableSections, setAvailableSections] = useState<string[]>([]);
@@ -249,7 +289,7 @@ export default function StudentsScreen() {
           await import("../../services/studentDatabaseService");
 
         // Convert sortBy to match SQLite method
-        const sortField = sortBy === "id" ? "student_id" : sortBy;
+        const sortField = sortBy === "student_id" ? "student_id" : sortBy;
 
         const result = await StudentDatabaseService.searchStudents(
           debouncedQuery || undefined,
@@ -304,12 +344,15 @@ export default function StudentsScreen() {
           if (seenIds.has(studentId)) return; // deduplicate
           seenIds.add(studentId);
           allStudents.push({
+            id: doc.id,
             student_id: studentId,
             first_name: data.first_name || data.firstName || "",
             last_name: data.last_name || data.lastName || "",
+            grade: data.grade,
             email: data.email,
             section: data.section,
             is_active: data.is_active !== false,
+            createdBy: data.createdBy,
             created_at: data.created_at,
             updated_at: data.updated_at,
           });
@@ -384,6 +427,159 @@ export default function StudentsScreen() {
     await loadStudents();
   };
 
+  const openAddStudentModal = () => {
+    setStudentModalMode("add");
+    setSelectedStudent(null);
+    setStudentForm(emptyStudentForm);
+    setShowStudentModal(true);
+  };
+
+  const openEditStudentModal = (student: StudentExtended) => {
+    setStudentModalMode("edit");
+    setSelectedStudent(student);
+    setStudentForm({
+      student_id: student.student_id,
+      first_name: student.first_name,
+      last_name: student.last_name,
+      grade: student.grade || "",
+      email: student.email || "",
+      section: student.section || "",
+    });
+    setShowStudentModal(true);
+  };
+
+  const closeStudentModal = () => {
+    if (isSavingStudent) return;
+    setShowStudentModal(false);
+    setShowSectionPicker(false);
+    setSelectedStudent(null);
+    setStudentForm(emptyStudentForm);
+  };
+
+  const sanitizeNameInput = (value: string) =>
+    value.replace(/[^A-Za-z\s'-]/g, "");
+
+  const sanitizeStudentIdInput = (value: string) => value.replace(/[^0-9]/g, "");
+
+  const sanitizeGradeInput = (value: string) => value.replace(/[^0-9]/g, "");
+
+  const isValidEmail = (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const handleSaveStudent = async () => {
+    if (
+      !studentForm.student_id.trim() ||
+      !studentForm.first_name.trim() ||
+      !studentForm.last_name.trim() ||
+      !studentForm.grade.trim() ||
+      !studentForm.section.trim()
+    ) {
+      Alert.alert("Missing fields", "Student ID, first name, last name, grade, and block are required.");
+      return;
+    }
+
+    if (!/^[A-Za-z\s'-]+$/.test(studentForm.first_name.trim())) {
+      Alert.alert(
+        "Invalid first name",
+        "First name can only contain letters, spaces, apostrophes, and hyphens.",
+      );
+      return;
+    }
+
+    if (!/^[A-Za-z\s'-]+$/.test(studentForm.last_name.trim())) {
+      Alert.alert(
+        "Invalid last name",
+        "Last name can only contain letters, spaces, apostrophes, and hyphens.",
+      );
+      return;
+    }
+
+    if (!/^\d+$/.test(studentForm.grade.trim())) {
+      Alert.alert("Invalid grade", "Grade must contain numbers only.");
+      return;
+    }
+
+    if (
+      studentForm.email.trim() &&
+      !isValidEmail(studentForm.email.trim())
+    ) {
+      Alert.alert("Invalid email", "Enter a valid email address or leave it blank.");
+      return;
+    }
+
+    try {
+      setIsSavingStudent(true);
+      const { StudentDatabaseService } =
+        await import("../../services/studentDatabaseService");
+
+      if (studentModalMode === "add") {
+        await StudentDatabaseService.createStudent(studentForm);
+      } else {
+        await StudentDatabaseService.updateStudent(selectedStudent?.id || selectedStudent?.student_id || studentForm.student_id, {
+          first_name: studentForm.first_name,
+          last_name: studentForm.last_name,
+          grade: studentForm.grade,
+          email: studentForm.email,
+          section: studentForm.section,
+        });
+      }
+
+      const sections = await StudentDatabaseService.getUniqueSections();
+      setAvailableSections(sections);
+      await loadStudents();
+      closeStudentModal();
+    } catch (error) {
+      console.warn("Failed to save student:", error);
+      const message =
+        error instanceof Error ? error.message : "Could not save student.";
+      const normalizedMessage = message.toLowerCase();
+
+      if (
+        normalizedMessage.includes("already exists") ||
+        normalizedMessage.includes("duplicate")
+      ) {
+        Alert.alert(
+          "Student ID already exists",
+          "Use a different Student ID or edit the existing student record instead.",
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Save failed",
+        message,
+      );
+    } finally {
+      setIsSavingStudent(false);
+    }
+  };
+
+  const handleDeleteStudent = (student: StudentExtended) => {
+    setPendingDeleteStudent(student);
+  };
+
+  const confirmDeleteStudent = async () => {
+    if (!pendingDeleteStudent) return;
+
+    try {
+      const { StudentDatabaseService } =
+        await import("../../services/studentDatabaseService");
+      await StudentDatabaseService.deleteStudent(
+        pendingDeleteStudent.id || pendingDeleteStudent.student_id,
+      );
+      setPendingDeleteStudent(null);
+      const sections = await StudentDatabaseService.getUniqueSections();
+      setAvailableSections(sections);
+      await loadStudents();
+    } catch (error) {
+      console.error("Failed to delete student:", error);
+      Alert.alert(
+        "Delete failed",
+        error instanceof Error ? error.message : "Could not delete student.",
+      );
+    }
+  };
+
   // REQ 42: Clear filters
   const handleClearFilters = () => {
     setSearchQuery("");
@@ -407,7 +603,7 @@ export default function StudentsScreen() {
   };
 
   const renderStudentCard = ({ item }: { item: StudentExtended }) => (
-    <TouchableOpacity
+    <View
       style={[
         styles.studentCard,
         { backgroundColor: colors.studentCardBg, borderColor: colors.studentCardBorder },
@@ -424,9 +620,14 @@ export default function StudentsScreen() {
           <Text style={[styles.studentId, { color: colors.textSecondary }]}>
             ID: {item.student_id}
           </Text>
+          {item.grade ? (
+            <Text style={[styles.studentMeta, { color: colors.textSecondary }]}>
+              Grade {item.grade}
+            </Text>
+          ) : null}
           {item.section && (
             <Text style={[styles.studentClass, { color: colors.textSecondary }]}>
-              {item.section}
+              Block {item.section}
             </Text>
           )}
         </View>
@@ -436,10 +637,24 @@ export default function StudentsScreen() {
               <Text style={styles.inactiveBadgeText}>Inactive</Text>
             </View>
           )}
-          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+          <TouchableOpacity
+            style={[styles.studentActionButton, { backgroundColor: colors.headerButtonBg }]}
+            onPress={() => openEditStudentModal(item)}
+          >
+            <Ionicons name="create-outline" size={16} color={colors.accent} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.studentActionButton,
+              { backgroundColor: darkModeEnabled ? "#3f2a2a" : "#ffebee" },
+            ]}
+            onPress={() => handleDeleteStudent(item)}
+          >
+            <Ionicons name="trash-outline" size={16} color="#d9534f" />
+          </TouchableOpacity>
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 
   // REQ 35: Filter dropdown modal
@@ -561,6 +776,80 @@ export default function StudentsScreen() {
           >
             <Text style={styles.applyButtonText}>Apply Filters</Text>
           </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderDeleteStudentModal = () => (
+    <Modal
+      visible={Boolean(pendingDeleteStudent)}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setPendingDeleteStudent(null)}
+    >
+      <View
+        style={[
+          styles.deleteModalOverlay,
+          { backgroundColor: colors.modalOverlay },
+        ]}
+      >
+        <View
+          style={[
+            styles.deleteModalCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: darkModeEnabled ? "#34483f" : "#d8dfda",
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.deleteModalIconWrap,
+              { backgroundColor: darkModeEnabled ? "#3f2a2a" : "#fde8e7" },
+            ]}
+          >
+            <Ionicons name="trash-outline" size={24} color="#d9534f" />
+          </View>
+
+          <Text style={[styles.deleteModalTitle, { color: colors.text }]}>
+            Delete student
+          </Text>
+          <Text
+            style={[styles.deleteModalMessage, { color: colors.textSecondary }]}
+          >
+            Delete {pendingDeleteStudent?.first_name} {pendingDeleteStudent?.last_name}?
+            This cannot be undone.
+          </Text>
+
+          <View style={styles.deleteModalActions}>
+            <TouchableOpacity
+              style={[
+                styles.deleteModalSecondaryButton,
+                {
+                  backgroundColor: darkModeEnabled ? "#22302a" : "#f3f7f4",
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={() => setPendingDeleteStudent(null)}
+            >
+              <Text
+                style={[
+                  styles.deleteModalSecondaryText,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                Cancel
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.deleteModalPrimaryButton}
+              onPress={confirmDeleteStudent}
+            >
+              <Text style={styles.deleteModalPrimaryText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -831,9 +1120,9 @@ export default function StudentsScreen() {
               {!searchQuery && (
                 <TouchableOpacity
                   style={[styles.emptyActionButton, { backgroundColor: colors.accent }]}
-                  onPress={() => setShowImportModal(true)}
+                  onPress={openAddStudentModal}
                 >
-                  <Text style={styles.emptyActionText}>Import Students</Text>
+                  <Text style={styles.emptyActionText}>Add Student</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -847,12 +1136,319 @@ export default function StudentsScreen() {
       {/* REQ 35: Filter modal */}
       {renderFilterModal()}
 
+      {renderDeleteStudentModal()}
+
       {/* REQ 22: Import modal */}
       <StudentImportModal
         visible={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={handleImportComplete}
       />
+
+      <Modal
+        visible={showStudentModal}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={closeStudentModal}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          enabled={Platform.OS === "ios"}
+          style={[
+            styles.modalKeyboardWrap,
+            { backgroundColor: colors.formCard },
+          ]}
+        >
+          <View
+            style={[
+              styles.modalOverlay,
+              styles.studentModalOverlay,
+              { backgroundColor: colors.formCard },
+            ]}
+          >
+            <View
+              style={[
+                styles.modalContent,
+                styles.studentModalContent,
+                { backgroundColor: colors.card, borderTopColor: colors.border },
+              ]}
+            >
+                <View
+                  style={[
+                    styles.modalHeader,
+                    styles.studentModalHeader,
+                    { paddingTop: insets.top + 12 },
+                    {
+                      borderBottomColor: darkModeEnabled ? "#34483f" : "#4d6a4d",
+                      backgroundColor: colors.formCard,
+                    },
+                  ]}
+              >
+                <View style={styles.modalTitleWrap}>
+                  <Text style={[styles.modalTitle, { color: "#E8F5E9" }]}>
+                    {studentModalMode === "add" ? "Add Student" : "Edit Student"}
+                  </Text>
+                  <Text style={[styles.modalEyebrow, { color: colors.formSubtext }]}>
+                    Student record details
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={closeStudentModal}
+                  disabled={isSavingStudent}
+                  style={[
+                    styles.modalCloseButton,
+                    { backgroundColor: colors.formCardAlt, borderColor: colors.formAccent },
+                  ]}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Ionicons name="close" size={20} color="#E8F5E9" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView
+                style={styles.studentFormBody}
+                contentContainerStyle={styles.studentFormContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+              {[
+                {
+                  label: "Student ID *",
+                  key: "student_id" as const,
+                  placeholder: "e.g., 2026-0001",
+                  autoCapitalize: "characters" as const,
+                },
+                {
+                  label: "First Name *",
+                  key: "first_name" as const,
+                  placeholder: "John",
+                  autoCapitalize: "words" as const,
+                },
+                {
+                  label: "Last Name *",
+                  key: "last_name" as const,
+                  placeholder: "Doe",
+                  autoCapitalize: "words" as const,
+                },
+                {
+                  label: "Grade *",
+                  key: "grade" as const,
+                  placeholder: "e.g., 10",
+                  autoCapitalize: "none" as const,
+                },
+                {
+                  label: "Email",
+                  key: "email" as const,
+                  placeholder: "john@example.com",
+                  autoCapitalize: "none" as const,
+                },
+              ].map((field) => (
+                <View key={field.key} style={styles.formGroup}>
+                  <Text style={[styles.formLabel, { color: colors.formSubtext }]}>
+                    {field.label}
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.formInput,
+                      {
+                        borderColor: darkModeEnabled ? "#34483f" : "#3d5a3d",
+                        backgroundColor: darkModeEnabled ? "#2a3a33" : "#2d4a2d",
+                        color: "#E8F5E9",
+                      },
+                      field.key === "student_id" && studentModalMode === "edit"
+                        ? styles.formInputDisabled
+                        : null,
+                    ]}
+                    value={studentForm[field.key]}
+                    onChangeText={(text) =>
+                      setStudentForm((prev) => ({
+                        ...prev,
+                        [field.key]:
+                          field.key === "student_id"
+                            ? sanitizeStudentIdInput(text)
+                            : field.key === "first_name" || field.key === "last_name"
+                            ? sanitizeNameInput(text)
+                            : field.key === "grade"
+                              ? sanitizeGradeInput(text)
+                              : text,
+                      }))
+                    }
+                    placeholder={field.placeholder}
+                    placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#B8D4B8"}
+                    editable={
+                      !(field.key === "student_id" && studentModalMode === "edit")
+                    }
+                    autoCapitalize={field.autoCapitalize}
+                    keyboardType={
+                      field.key === "email"
+                        ? "email-address"
+                        : field.key === "grade" || field.key === "student_id"
+                          ? "number-pad"
+                          : "default"
+                    }
+                  />
+                </View>
+              ))}
+
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: colors.formSubtext }]}>
+                  Block / Section *
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.sectionDropdown,
+                    {
+                      borderColor: showSectionPicker
+                        ? pickerAccent
+                        : darkModeEnabled
+                          ? "#34483f"
+                          : "#3d5a3d",
+                      backgroundColor: darkModeEnabled ? "#22302a" : "#2f4a38",
+                    },
+                  ]}
+                  onPress={() => setShowSectionPicker((current) => !current)}
+                >
+                  <Text
+                    style={[
+                      styles.sectionDropdownText,
+                      { color: studentForm.section ? "#E8F5E9" : colors.formSubtext },
+                    ]}
+                  >
+                    {studentForm.section || "Select block"}
+                  </Text>
+                  <Ionicons
+                    name={showSectionPicker ? "chevron-up" : "chevron-down"}
+                    size={18}
+                    color={showSectionPicker ? "#E8F5E9" : colors.formSubtext}
+                  />
+                </TouchableOpacity>
+
+                {showSectionPicker ? (
+                  <View
+                    style={[
+                      styles.sectionDropdownMenu,
+                      {
+                        backgroundColor: darkModeEnabled ? "#18211d" : "#edf3ef",
+                        borderColor: pickerAccentDark,
+                      },
+                    ]}
+                  >
+                    <ScrollView
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.sectionDropdownMenuContent}
+                    >
+                      {sectionOptions.map((option) => {
+                        const selected = studentForm.section === option;
+                        return (
+                          <TouchableOpacity
+                            key={option}
+                            style={[
+                              styles.sectionDropdownOption,
+                              {
+                                backgroundColor: selected
+                                  ? pickerAccent
+                                  : darkModeEnabled
+                                    ? "#22302a"
+                                    : "#f6faf7",
+                                borderColor: selected
+                                  ? "#58b56f"
+                                  : darkModeEnabled
+                                    ? "#2f4339"
+                                    : "#d2ddd7",
+                              },
+                            ]}
+                            onPress={() => {
+                              setStudentForm((prev) => ({ ...prev, section: option }));
+                              setShowSectionPicker(false);
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.sectionDropdownOptionText,
+                                { color: selected ? "#f4fbf7" : colors.text },
+                              ]}
+                            >
+                              Block {option}
+                            </Text>
+                            {selected ? (
+                              <Ionicons name="checkmark" size={16} color="#dff3e6" />
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+              </ScrollView>
+
+              <View
+                style={[
+                  styles.modalFooterActions,
+                  {
+                    borderTopColor: darkModeEnabled ? "#34483f" : "#4d6a4d",
+                    backgroundColor: colors.formCard,
+                    paddingBottom: Math.max(insets.bottom, 16),
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.modalSecondaryButton,
+                    {
+                      borderColor: darkModeEnabled ? "#34483f" : "#4d6a4d",
+                      backgroundColor: colors.formCardAlt,
+                    },
+                  ]}
+                  onPress={closeStudentModal}
+                  disabled={isSavingStudent}
+                >
+                  <Text style={[styles.modalSecondaryButtonText, { color: "#E8F5E9" }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalPrimaryButton,
+                    {
+                      backgroundColor: colors.formCardAlt,
+                      borderColor: colors.formAccent,
+                    },
+                    isSavingStudent && styles.modalPrimaryButtonDisabled,
+                  ]}
+                  onPress={handleSaveStudent}
+                  disabled={isSavingStudent}
+                >
+                  {isSavingStudent ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.modalPrimaryButtonText}>
+                      {studentModalMode === "add" ? "Add Student" : "Save Changes"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <TouchableOpacity
+        style={[
+          styles.fab,
+          {
+            backgroundColor: darkModeEnabled ? "#1f3a2f" : colors.primary,
+            shadowColor: darkModeEnabled ? "#000" : colors.primary,
+            borderWidth: darkModeEnabled ? 1 : 0,
+            borderColor: darkModeEnabled ? "#4f7a67" : "transparent",
+          },
+        ]}
+        onPress={openAddStudentModal}
+      >
+        <Ionicons name="add-circle" size={22} color="#fff" />
+        <Text style={styles.fabText}>New Student</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -1019,7 +1615,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 120,
   },
   studentCard: {
     backgroundColor: "#fff",
@@ -1056,6 +1652,11 @@ const styles = StyleSheet.create({
     color: "#666",
     marginBottom: 2,
   },
+  studentMeta: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 2,
+  },
   studentClass: {
     fontSize: 12,
     color: "#00a550",
@@ -1065,6 +1666,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  studentActionButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
   },
   inactiveBadge: {
     backgroundColor: "#ffebee",
@@ -1133,12 +1741,85 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "flex-end",
   },
+  modalKeyboardWrap: {
+    flex: 1,
+  },
+  studentModalOverlay: {
+    justifyContent: "flex-start",
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
   modalContent: {
     backgroundColor: "#fff",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingBottom: 40,
     borderTopWidth: 1,
+  },
+  deleteModalOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  deleteModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+  },
+  deleteModalIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  deleteModalTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  deleteModalMessage: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  deleteModalActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 24,
+  },
+  deleteModalSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  deleteModalSecondaryText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  deleteModalPrimaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#d9534f",
+  },
+  deleteModalPrimaryText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  studentModalContent: {
+    flex: 1,
+    maxHeight: "100%",
+    borderRadius: 0,
+    paddingBottom: 0,
+    overflow: "hidden",
   },
   modalHeader: {
     flexDirection: "row",
@@ -1148,10 +1829,31 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#e0e0e0",
   },
+  studentModalHeader: {
+    paddingRight: 16,
+    paddingVertical: 18,
+  },
+  modalTitleWrap: {
+    flex: 1,
+    paddingRight: 12,
+  },
   modalTitle: {
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#333",
+  },
+  modalEyebrow: {
+    fontSize: 12,
+    marginTop: 4,
+    letterSpacing: 0.3,
+  },
+  modalCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
   },
   filterSection: {
     padding: 20,
@@ -1209,6 +1911,125 @@ const styles = StyleSheet.create({
   applyButtonText: {
     fontSize: 16,
     fontWeight: "600",
+    color: "#fff",
+  },
+  studentFormBody: {
+    flex: 1,
+  },
+  studentFormContent: {
+    flexGrow: 1,
+    padding: 20,
+    paddingBottom: 24,
+  },
+  formGroup: {
+    marginBottom: 16,
+  },
+  formLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 8,
+    letterSpacing: 0.4,
+  },
+  formInput: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 15,
+  },
+  formInputDisabled: {
+    opacity: 0.78,
+  },
+  sectionDropdown: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionDropdownText: {
+    fontSize: 15,
+  },
+  sectionDropdownMenu: {
+    marginTop: 10,
+    borderWidth: 1.5,
+    borderRadius: 16,
+    maxHeight: 220,
+    overflow: "hidden",
+  },
+  sectionDropdownMenuContent: {
+    padding: 10,
+    gap: 8,
+  },
+  sectionDropdownOption: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionDropdownOptionText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  modalFooterActions: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  modalSecondaryButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  modalPrimaryButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    borderWidth: 1.5,
+  },
+  modalPrimaryButtonDisabled: {
+    opacity: 0.6,
+  },
+  modalPrimaryButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#E8F5E9",
+  },
+  fab: {
+    position: "absolute",
+    bottom: 78,
+    right: 18,
+    flexDirection: "row",
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: "center",
+    gap: 8,
+    elevation: 6,
+    shadowColor: "#3d5a3d",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+  },
+  fabText: {
+    fontSize: 16,
+    fontWeight: "700",
     color: "#fff",
   },
 });

@@ -106,6 +106,13 @@ export default function ClassesScreen() {
         primaryDark: "#2b3b34",
         cardBg: "#1f2b26",
         cardBorder: "#34483f",
+        recentHeaderBg: "#2a3d37",
+        recentHeaderText: "#dcebe3",
+        recentChevron: "#8fd1ad",
+        recentQuizCardBg: "#18211d",
+        recentQuizCardBorder: "#31443b",
+        recentQuizDate: "#8fa39a",
+        recentQuizTitle: "#e7f1eb",
       }
     : {
         screenBg: "#eef1ef",
@@ -116,6 +123,13 @@ export default function ClassesScreen() {
         primaryDark: "#2f4a38",
         cardBg: "#3d5a3d",
         cardBorder: "#2f4a38",
+        recentHeaderBg: "#324742",
+        recentHeaderText: "#d4e8dd",
+        recentChevron: "#8ad0ae",
+        recentQuizCardBg: "#d6c4ac",
+        recentQuizCardBorder: "#cab295",
+        recentQuizDate: "#6f624f",
+        recentQuizTitle: "#4f4538",
       };
 
   const modalColors = darkModeEnabled
@@ -294,8 +308,20 @@ export default function ClassesScreen() {
         <Text style={styles.viewButtonText}>View Class List</Text>
       </TouchableOpacity>
 
-      <View style={styles.recentRow}>
-        <Text style={styles.recentTitle}>Recent Quizzes</Text>
+      <View
+        style={[
+          styles.recentRow,
+          { backgroundColor: colors.recentHeaderBg },
+        ]}
+      >
+        <Text
+          style={[
+            styles.recentTitle,
+            { color: colors.recentHeaderText },
+          ]}
+        >
+          Recent Quizzes
+        </Text>
         <TouchableOpacity
           style={styles.recentToggle}
           onPress={() => {
@@ -309,7 +335,7 @@ export default function ClassesScreen() {
           <Ionicons
             name={collapsedRecent[item.id] ? "chevron-up" : "chevron-down"}
             size={16}
-            color="#8ad0ae"
+            color={colors.recentChevron}
           />
         </TouchableOpacity>
       </View>
@@ -320,17 +346,53 @@ export default function ClassesScreen() {
             showsHorizontalScrollIndicator={true}
             contentContainerStyle={styles.quizCardsRow}
           >
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 1</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 1
+              </Text>
             </View>
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 2</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 2
+              </Text>
             </View>
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 3</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 3
+              </Text>
             </View>
           </ScrollView>
         </>
