@@ -1,8 +1,10 @@
+import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
+import HistoryList from "./HistoryList";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
@@ -295,8 +297,8 @@ export default function CameraScanner({
             4. Tap capture when all bubbles are visible
           </Text>
         </View>
-      </View>
-    </SafeAreaView>
+      </CameraView>
+    </View>
   );
 }
 

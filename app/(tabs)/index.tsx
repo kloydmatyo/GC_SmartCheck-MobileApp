@@ -1,33 +1,17 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    orderBy,
-    query,
-    where,
-} from "firebase/firestore";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
     Image,
-    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
-    View
+    View,
 } from "react-native";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
@@ -82,92 +66,94 @@ export default function HomeScreen() {
   const loadDashboard = useCallback(() => {
     let cancelled = false;
     (async () => {
-    try {
-      setLoading(true);
-      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
-      if (!cancelled) {
-        setDarkModeEnabled(savedDarkMode === "true");
-      }
-
-      const currentUser = auth.currentUser;
-      if (!currentUser) return;
-
-      // Fetch user display name
-      if (currentUser.displayName) {
-        setUserName(currentUser.displayName);
-      }
-
-      // Fetch exams
-      const examsQuery = query(
-        collection(db, "exams"),
-        where("createdBy", "==", currentUser.uid),
-      );
-      const examsSnapshot = await getDocs(examsQuery);
-      const exams = examsSnapshot.docs
-        .map((doc) => {
-          const data = doc.data();
-          const createdDate = toDate(data.created_at || data.createdAt);
-          return {
-            id: doc.id,
-            title: data.title || "Untitled",
-            subject: data.subject || "",
-            date: formatDate(data.created_at || data.createdAt),
-            papers: data.scanned_papers || null,
-            status: normalizeStatus(data.status),
-            isArchived: data.isArchived || false,
-            createdAtTs: createdDate ? createdDate.getTime() : 0,
-            createdAtDate: createdDate,
-            generated_sheets: data.generated_sheets || [],
-          };
-        })
-        .filter((e) => !e.isArchived)
-        .sort((a, b) => b.createdAtTs - a.createdAtTs);
-
-      // Total answer sheets
-      const totalSheets = exams.reduce((sum, exam) => {
-        if (Array.isArray(exam.generated_sheets)) {
-          return (
-            sum +
-            exam.generated_sheets.reduce(
-              (s: number, sheet: any) => s + (sheet.sheet_count || 0),
-              0,
-            )
-          );
-        }
-        return sum;
-      }, 0);
-
-      // Total exams (non-archived)
-      const totalExams = exams.length;
-
-      // Fetch students from classes
-      let totalStudents = 0;
       try {
-        const classesQuery = query(
-          collection(db, "classes"),
+        setLoading(true);
+        const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+        if (!cancelled) {
+          setDarkModeEnabled(savedDarkMode === "true");
+        }
+
+        const currentUser = auth.currentUser;
+        if (!currentUser) return;
+
+        // Fetch user display name
+        if (currentUser.displayName) {
+          setUserName(currentUser.displayName);
+        }
+
+        // Fetch exams
+        const examsQuery = query(
+          collection(db, "exams"),
           where("createdBy", "==", currentUser.uid),
         );
-        const classesSnapshot = await getDocs(classesQuery);
-        totalStudents = classesSnapshot.docs.reduce((sum, doc) => {
-          const data = doc.data();
-          if (!data.isArchived) {
-            return sum + (data.students?.length || 0);
+        const examsSnapshot = await getDocs(examsQuery);
+        const exams = examsSnapshot.docs
+          .map((doc) => {
+            const data = doc.data();
+            const createdDate = toDate(data.created_at || data.createdAt);
+            return {
+              id: doc.id,
+              title: data.title || "Untitled",
+              subject: data.subject || "",
+              date: formatDate(data.created_at || data.createdAt),
+              papers: data.scanned_papers || null,
+              status: normalizeStatus(data.status),
+              isArchived: data.isArchived || false,
+              createdAtTs: createdDate ? createdDate.getTime() : 0,
+              createdAtDate: createdDate,
+              generated_sheets: data.generated_sheets || [],
+            };
+          })
+          .filter((e) => !e.isArchived)
+          .sort((a, b) => b.createdAtTs - a.createdAtTs);
+
+        // Total answer sheets
+        const totalSheets = exams.reduce((sum, exam) => {
+          if (Array.isArray(exam.generated_sheets)) {
+            return (
+              sum +
+              exam.generated_sheets.reduce(
+                (s: number, sheet: any) => s + (sheet.sheet_count || 0),
+                0,
+              )
+            );
           }
           return sum;
         }, 0);
-      } catch (e) {
-        console.warn("Could not fetch students:", e);
-      }
 
-      setStats({ totalExams, totalStudents, totalSheets });
-      setRecentExams(exams.slice(0, 3));
-    } catch (error) {
-      console.error("Error loading dashboard:", error);
-    } finally {
-      if (!cancelled) setLoading(false);
-    }
+        // Total exams (non-archived)
+        const totalExams = exams.length;
+
+        // Fetch students from classes
+        let totalStudents = 0;
+        try {
+          const classesQuery = query(
+            collection(db, "classes"),
+            where("createdBy", "==", currentUser.uid),
+          );
+          const classesSnapshot = await getDocs(classesQuery);
+          totalStudents = classesSnapshot.docs.reduce((sum, doc) => {
+            const data = doc.data();
+            if (!data.isArchived) {
+              return sum + (data.students?.length || 0);
+            }
+            return sum;
+          }, 0);
+        } catch (e) {
+          console.warn("Could not fetch students:", e);
+        }
+
+        setStats({ totalExams, totalStudents, totalSheets });
+        setRecentExams(exams.slice(0, 3));
+      } catch (error) {
+        console.error("Error loading dashboard:", error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useFocusEffect(loadDashboard);
@@ -249,14 +235,24 @@ export default function HomeScreen() {
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={[styles.headerTitle, { color: colors.title }]}>GCSC</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            GCSC
+          </Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={18} color={colors.icon} />
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={colors.icon}
+            />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="person-circle-outline" size={18} color={colors.icon} />
+            <Ionicons
+              name="person-circle-outline"
+              size={18}
+              color={colors.icon}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -290,7 +286,10 @@ export default function HomeScreen() {
           <View
             style={[
               styles.statCard,
-              { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
             ]}
           >
             <View
@@ -312,7 +311,10 @@ export default function HomeScreen() {
           <View
             style={[
               styles.statCard,
-              { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
             ]}
           >
             <View
@@ -321,7 +323,11 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons name="people-outline" size={18} color={colors.primary} />
+              <Ionicons
+                name="people-outline"
+                size={18}
+                color={colors.primary}
+              />
             </View>
             <Text style={[styles.statValue, { color: colors.value }]}>
               {loading ? "-" : stats.totalStudents}
@@ -334,7 +340,10 @@ export default function HomeScreen() {
           <View
             style={[
               styles.statCard,
-              { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
             ]}
           >
             <View
@@ -343,7 +352,11 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons name="document-outline" size={18} color={colors.primary} />
+              <Ionicons
+                name="document-outline"
+                size={18}
+                color={colors.primary}
+              />
             </View>
             <Text style={[styles.statValue, { color: colors.value }]}>
               {loading ? "-" : stats.totalSheets}
@@ -360,7 +373,7 @@ export default function HomeScreen() {
               color="#00a550"
               style={styles.statIcon}
             />
-            {loadingStats ? (
+            {loading ? (
               <View style={styles.skeletonValue} />
             ) : (
               <Text style={styles.statValue}>{stats.passRateToday}%</Text>
@@ -386,10 +399,28 @@ export default function HomeScreen() {
               onPress={() => router.push("/(tabs)/create-quiz")}
             >
               <View style={styles.quickActionIconWrap}>
-                <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                <Ionicons
+                  name="add-circle-outline"
+                  size={18}
+                  color={colors.primary}
+                />
               </View>
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Create Exam</Text>
-              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Start a new quiz setup</Text>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Create Exam
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Start a new quiz setup
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -403,10 +434,28 @@ export default function HomeScreen() {
               onPress={() => router.push("/(tabs)/students")}
             >
               <View style={styles.quickActionIconWrap}>
-                <Ionicons name="people-outline" size={18} color={colors.primary} />
+                <Ionicons
+                  name="people-outline"
+                  size={18}
+                  color={colors.primary}
+                />
               </View>
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Students</Text>
-              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Manage class rosters</Text>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Students
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Manage class rosters
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -420,10 +469,28 @@ export default function HomeScreen() {
               onPress={() => router.push("/(tabs)/generator")}
             >
               <View style={styles.quickActionIconWrap}>
-                <Ionicons name="document-text-outline" size={18} color={colors.primary} />
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color={colors.primary}
+                />
               </View>
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>Answer Sheets</Text>
-              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Generate sheet templates</Text>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Answer Sheets
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Generate sheet templates
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -437,10 +504,28 @@ export default function HomeScreen() {
               onPress={() => router.push("/(tabs)/quizzes")}
             >
               <View style={styles.quickActionIconWrap}>
-                <Ionicons name="book-outline" size={18} color={colors.primary} />
+                <Ionicons
+                  name="book-outline"
+                  size={18}
+                  color={colors.primary}
+                />
               </View>
-              <Text style={[styles.quickActionText, { color: colors.quickActionText }]}>All Exams</Text>
-              <Text style={[styles.quickActionSubtext, { color: colors.quickActionText }]}>Browse saved quizzes</Text>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                All Exams
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Browse saved quizzes
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -455,7 +540,14 @@ export default function HomeScreen() {
               ]}
               onPress={() => router.push("/(tabs)/batch-history")}
             >
-              <Text style={[styles.quickActionCenterText, { color: colors.quickActionText }]}>Batch History</Text>
+              <Text
+                style={[
+                  styles.quickActionCenterText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Batch History
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -466,32 +558,61 @@ export default function HomeScreen() {
             Recent Exams
           </Text>
           <TouchableOpacity onPress={() => router.push("/(tabs)/quizzes")}>
-            <Text style={[styles.viewAllText, { color: colors.title }]}>View All</Text>
+            <Text style={[styles.viewAllText, { color: colors.title }]}>
+              View All
+            </Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.examsContainer}>
           {loading ? (
             <>
-              <View style={[styles.examSkeleton, { backgroundColor: colors.cardIconBg }]} />
-              <View style={[styles.examSkeleton, { backgroundColor: colors.cardIconBg }]} />
-              <View style={[styles.examSkeleton, { backgroundColor: colors.cardIconBg }]} />
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
+              />
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
+              />
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
+              />
             </>
           ) : recentExams.length === 0 ? (
             <View
               style={[
                 styles.emptyExams,
-                { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+                {
+                  backgroundColor: colors.cardBg,
+                  borderColor: colors.cardBorder,
+                },
               ]}
             >
-              <Ionicons name="document-outline" size={36} color={colors.subtitle} />
+              <Ionicons
+                name="document-outline"
+                size={36}
+                color={colors.subtitle}
+              />
               <Text style={[styles.emptyExamsText, { color: colors.subtitle }]}>
                 No exams yet
               </Text>
               <TouchableOpacity
                 onPress={() => router.push("/(tabs)/create-quiz")}
               >
-                <Text style={[styles.emptyExamsLink, { color: colors.surfaceAccent }]}>
+                <Text
+                  style={[
+                    styles.emptyExamsLink,
+                    { color: colors.surfaceAccent },
+                  ]}
+                >
                   Create your first exam
                 </Text>
               </TouchableOpacity>
@@ -502,7 +623,10 @@ export default function HomeScreen() {
                 key={exam.id}
                 style={[
                   styles.examCard,
-                  { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+                  {
+                    backgroundColor: colors.cardBg,
+                    borderColor: colors.cardBorder,
+                  },
                 ]}
                 onPress={() =>
                   router.push(`/(tabs)/exam-preview?examId=${exam.id}`)
@@ -537,7 +661,9 @@ export default function HomeScreen() {
                       size={14}
                       color={colors.examMeta}
                     />
-                    <Text style={[styles.examInfoText, { color: colors.examMeta }]}>
+                    <Text
+                      style={[styles.examInfoText, { color: colors.examMeta }]}
+                    >
                       {exam.date}
                     </Text>
                   </View>
@@ -547,7 +673,9 @@ export default function HomeScreen() {
                       size={14}
                       color={colors.examMeta}
                     />
-                    <Text style={[styles.examInfoText, { color: colors.examMeta }]}>
+                    <Text
+                      style={[styles.examInfoText, { color: colors.examMeta }]}
+                    >
                       {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
                     </Text>
                   </View>
