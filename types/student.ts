@@ -4,12 +4,15 @@
 
 // ── Student Extended ──────────────────────────────────────────────
 export interface StudentExtended {
+  id?: string;
   student_id: string;
   first_name: string;
   last_name: string;
+  grade?: string;
   email?: string;
   section?: string;
   is_active: boolean;
+  createdBy?: string;
   created_at?: string;
   updated_at?: string;
 }

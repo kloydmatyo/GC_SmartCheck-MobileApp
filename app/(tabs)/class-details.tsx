@@ -106,6 +106,11 @@ export default function ClassDetailsScreen() {
         surface: "#1a2520",
         surfaceSoft: "#1f2b26",
         surfaceMuted: "#22302a",
+        quizCardBg: "#18211d",
+        quizCardBorder: "#2f4139",
+        quizBadgeBg: "#284136",
+        quizBadgeText: "#d7ebe1",
+        quizActionBg: "#24352d",
         border: "#34483f",
         borderSoft: "#2b3b34",
         text: "#e7f1eb",
@@ -129,6 +134,11 @@ export default function ClassDetailsScreen() {
         surface: COLORS.white,
         surfaceSoft: "#4f715f",
         surfaceMuted: "#f4f5f2",
+        quizCardBg: "#3f6b54",
+        quizCardBorder: "#355b49",
+        quizBadgeBg: "#2d4f3e",
+        quizBadgeText: "#d8ebdf",
+        quizActionBg: "#1f3449",
         border: "#d5dfd9",
         borderSoft: "#3f5f4f",
         text: "#24362f",
@@ -695,10 +705,8 @@ export default function ClassDetailsScreen() {
                 style={[
                   styles.quizCard,
                   {
-                    backgroundColor: darkModeEnabled
-                      ? colors.surfaceMuted
-                      : "#3f6b54",
-                    borderColor: darkModeEnabled ? colors.border : "#355b49",
+                    backgroundColor: colors.quizCardBg,
+                    borderColor: colors.quizCardBorder,
                   },
                 ]}
               >
@@ -734,27 +742,35 @@ export default function ClassDetailsScreen() {
                     style={[
                       styles.quizStudentsBadge,
                       {
-                        backgroundColor: darkModeEnabled
-                          ? "#35523f"
-                          : "#2d4f3e",
+                        backgroundColor: colors.quizBadgeBg,
                       },
                     ]}
                   >
                     <Text
                       style={[
                         styles.quizStudentsBadgeText,
-                        { color: darkModeEnabled ? colors.text : "#d8ebdf" },
+                        { color: colors.quizBadgeText },
                       ]}
                     >
                       {quiz.students} STUDENTS
                     </Text>
                   </View>
                   <View style={styles.quizRightActions}>
-                    <TouchableOpacity style={styles.quizActionBtn}>
+                    <TouchableOpacity
+                      style={[
+                        styles.quizActionBtn,
+                        { backgroundColor: colors.quizActionBg },
+                      ]}
+                    >
                       <Ionicons name="share-social-outline" size={12} color="#fff" />
                       <Text style={styles.quizActionText}>Share</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.quizActionBtn}>
+                    <TouchableOpacity
+                      style={[
+                        styles.quizActionBtn,
+                        { backgroundColor: colors.quizActionBg },
+                      ]}
+                    >
                       <Ionicons name="download-outline" size={12} color="#fff" />
                       <Text style={styles.quizActionText}>Export</Text>
                     </TouchableOpacity>
