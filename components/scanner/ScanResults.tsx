@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import React, { useState } from "react";
 import {
+  Alert,
   Image,
   Modal,
   ScrollView,
@@ -70,6 +74,116 @@ export default function ScanResults({
 
   // REQ 14, 15: Handle NULL grades
   const isNullGrade = result.score === null;
+
+  const exportToPDF = async () => {
+    try {
+      let imageHtml = "";
+      if (imageUri) {
+        let base64Image = "";
+        try {
+          base64Image = await FileSystem.readAsStringAsync(imageUri, {
+            encoding: "base64",
+          });
+          imageHtml = `<img src="data:image/jpeg;base64,${base64Image}" style="max-height: 400px; max-width: 100%; border: 1px solid #ddd; border-radius: 8px; object-fit: contain;" />`;
+        } catch (e) {
+          console.warn("Failed to load image for PDF:", e);
+        }
+      }
+
+      const answersHtml = details
+        .map((item: any) => {
+          const studentAns = item.studentAnswer || item.selectedAnswer || "—";
+          const correctAns = item.correctAnswer || "—";
+          const isCorrect = item.isCorrect ?? false;
+          const color = isCorrect ? "#4CAF50" : "#F44336";
+          return `
+          <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 10px; text-align: center;"><b>${item.questionNumber}</b></td>
+            <td style="padding: 10px; text-align: center; color: ${color}; font-weight: bold;">${studentAns}</td>
+            <td style="padding: 10px; text-align: center;">${correctAns}</td>
+          </tr>
+        `;
+        })
+        .join("");
+
+      const htmlContent = `
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
+            <style>
+              body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
+              h1 { color: #3B5943; text-align: center; margin-bottom: 5px; font-size: 24px; }
+              h2 { text-align: center; color: #666; font-size: 16px; margin-top: 0; font-weight: normal; }
+              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3B5943; padding-bottom: 15px; margin-bottom: 25px; }
+              .score-box { background-color: #3B5943; color: white; padding: 15px 20px; border-radius: 8px; text-align: center; min-width: 100px; }
+              .score-text { font-size: 28px; font-weight: bold; }
+              .student-info { background-color: #f5f5f5; padding: 15px 20px; border-radius: 8px; font-size: 18px; font-weight: bold; text-align: center; flex: 1; margin-right: 20px; }
+              .section-title { font-size: 18px; margin-bottom: 15px; font-weight: bold; border-bottom: 2px solid #eee; padding-bottom: 8px; color: #444; }
+              .image-container { text-align: center; margin-bottom: 40px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+              th { background-color: #f5f5f5; padding: 12px; text-align: center; border-bottom: 2px solid #ddd; font-weight: bold; color: #555; }
+            </style>
+          </head>
+          <body>
+            <h1>GORDON COLLEGE</h1>
+            <h2>OLONGAPO CITY &mdash; SmartCheck Result</h2>
+            
+            <div class="header">
+              <div class="student-info">
+                Student ID:<br/>
+                <span style="font-size: 24px; color: #1A237E; letter-spacing: 2px;">
+                  ${result.studentId && result.studentId !== "00000000" ? result.studentId : "N/A"}
+                </span>
+              </div>
+              <div class="score-box">
+                <div style="font-size: 12px; margin-bottom: 5px; opacity: 0.9;">SCORE</div>
+                <span class="score-text">${result.score} / ${result.totalPoints}</span>
+              </div>
+            </div>
+
+            ${imageHtml
+          ? `
+            <div class="image-container">
+              <div class="section-title">Original Scanned Sheet</div>
+              ${imageHtml}
+            </div>`
+          : ""
+        }
+
+            <div class="answers-container">
+              <div class="section-title">Scan Breakdown (${totalQuestions} Questions)</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item #</th>
+                    <th>Scanned</th>
+                    <th>Key</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${answersHtml}
+                </tbody>
+              </table>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const { uri: pdfUri } = await Print.printToFileAsync({ html: htmlContent });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(pdfUri, {
+          mimeType: "application/pdf",
+          dialogTitle: "Share Scan Result",
+          UTI: "com.adobe.pdf",
+        });
+      }
+    } catch (error) {
+      console.error("PDF Export failed:", error);
+      Alert.alert("Export Error", "Failed to generate PDF. Please try again.");
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -168,7 +282,7 @@ export default function ScanResults({
             Scanned {totalQuestions}-Question Sheet
           </Text>
           {details.length > 0 ? (
-            details.map((item) => {
+            details.map((item: any) => {
               // Handle both field name variations
               const studentAns =
                 item.studentAnswer || item.selectedAnswer || "—";
@@ -237,6 +351,10 @@ export default function ScanResults({
       <View style={styles.footer}>
         <TouchableOpacity style={styles.btnSecondary} onPress={onClose}>
           <Text style={styles.btnTextSecondary}>Discard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.btnExport} onPress={exportToPDF}>
+          <Ionicons name="document-text" size={18} color="white" />
+          <Text style={styles.btnTextExport}>Export</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.btnPrimary} onPress={onScanAnother}>
           <Text style={styles.btnTextPrimary}>Next Scan</Text>
@@ -428,7 +546,19 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
   },
+  btnExport: {
+    flex: 1.2,
+    backgroundColor: "#2196F3",
+    padding: 16,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  btnTextExport: { color: "white", fontWeight: "bold", fontSize: 13 },
   btnTextPrimary: { color: "white", fontWeight: "bold" },
   btnTextSecondary: { color: "#666" },
 });
