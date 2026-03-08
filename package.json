@@ -18,6 +18,7 @@
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
+    "@realm/react": "^0.20.0",
     "@shopify/react-native-skia": "^2.5.1",
     "dotenv": "^17.3.1",
     "expo": "~54.0.33",
@@ -55,6 +56,7 @@
     "react-native-web": "~0.21.0",
     "react-native-webview": "^13.16.0",
     "react-native-worklets": "0.5.1",
+    "realm": "^20.2.0"
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

@@ -17,7 +17,6 @@ export default function CameraScanner({
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
-  const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -30,10 +29,6 @@ export default function CameraScanner({
   if (showHistory) {
     return <HistoryList onClose={() => setShowHistory(false)} />;
   }
-
-  const toggleCameraFacing = () => {
-    setFacing((current) => (current === "back" ? "front" : "back"));
-  };
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
@@ -189,7 +184,7 @@ export default function CameraScanner({
       <CameraView
         ref={cameraRef}
         style={styles.camera}
-        facing={facing}
+        facing="back"
         enableTorch={torch}
       >
         {/* Overlay for Zipgrade answer sheet alignment */}
@@ -357,9 +352,12 @@ const styles = StyleSheet.create({
     marginLeft: 15,
     fontWeight: "500",
   },
-  scanButton: {
-    backgroundColor: "#007AFF",
-    flexDirection: "row",
+  captureButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#22c55e",
+    justifyContent: "center",
     alignItems: "center",
     justifyContent: "center",
     padding: 18,

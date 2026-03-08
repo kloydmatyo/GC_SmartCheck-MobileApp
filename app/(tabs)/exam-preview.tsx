@@ -465,7 +465,7 @@ export default function ExamPreviewScreen() {
                     { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
                   ]}
                 >
-                  <Text style={[styles.configLabel, { color: colors.text }]}>Questions/Column</Text>
+                  <Text style={[styles.configLabel, { color: colors.text }]}>Questions Rows</Text>
                   <Text style={[styles.configValue, { color: colors.title }]}>
                     {exam.templateLayout.questionsPerColumn}
                   </Text>

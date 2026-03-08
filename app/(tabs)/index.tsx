@@ -1,12 +1,25 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
   Image,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -156,7 +169,107 @@ export default function HomeScreen() {
     };
   }, []);
 
-  useFocusEffect(loadDashboard);
+  // ── Load recent exams from Firestore (this instructor only) ───────────
+  const loadRecentExams = useCallback(async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      setLoadingExams(false);
+      return;
+    }
+    setLoadingExams(true);
+    setExamsError(null);
+    try {
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", uid),
+        orderBy("created_at", "desc"),
+      );
+      const snap = await getDocs(q);
+      const exams: RecentExam[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title ?? "Untitled Exam",
+          subject: data.subject ?? data.course_subject ?? "—",
+          date: data.created_at
+            ? new Date(data.created_at).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+            : "—",
+          papers: data.scanned_papers ?? null,
+          status: data.status ?? "Draft",
+        };
+      });
+      setRecentExams(exams);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load exams.";
+      setExamsError(msg);
+    } finally {
+      setLoadingExams(false);
+      setRefreshing(false);
+    }
+  }, []);
+  // ── Pull-to-refresh handler ──────────────────────────────────────────────
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    subscribeStats();
+    loadRecentExams();
+  }, [subscribeStats, loadRecentExams]);
+  // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      subscribeStats();
+      loadRecentExams();
+      return () => {
+        unsubscribeRef.current?.();
+        unsubscribeRef.current = null;
+      };
+    }, [subscribeStats, loadRecentExams]),
+  );
+
+  // ── Manual Sync from Header ──────────────────────────────────────────────
+  const handleManualSync = async () => {
+    setIsManualSyncing(true);
+    try {
+      const netState = await NetInfo.fetch();
+      if (!netState.isConnected || !netState.isInternetReachable) {
+        Toast.show({
+          type: "error",
+          text1: "Offline",
+          text2: "Please connect to the internet to sync data.",
+        });
+        return;
+      }
+
+      const count = await GradeStorageService.getOfflineItemCount();
+      if (count === 0) {
+        Toast.show({
+          type: "info",
+          text1: "Up to Date",
+          text2: "No offline data to sync.",
+        });
+        return;
+      }
+
+      await GradeStorageService.syncOfflineQueue();
+      Toast.show({
+        type: "success",
+        text1: "Sync Complete",
+        text2: `Successfully synced ${count} items.`,
+      });
+      onRefresh(); // Refresh stats/exams since we've added new records
+    } catch (e) {
+      Toast.show({
+        type: "error",
+        text1: "Sync Failed",
+        text2: "An error occurred during sync.",
+      });
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -240,6 +353,17 @@ export default function HomeScreen() {
           </Text>
         </View>
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={handleManualSync}
+            disabled={isManualSyncing}
+          >
+            {isManualSyncing ? (
+              <ActivityIndicator size={18} color="#24362f" />
+            ) : (
+              <Ionicons name="sync-outline" size={18} color="#24362f" />
+            )}
+          </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
             <Ionicons
               name="notifications-outline"
@@ -399,32 +523,59 @@ export default function HomeScreen() {
               >
                 Create Exam
               </Text>
-              <Text
-                style={[
-                  styles.quickActionSubtext,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Start a new quiz setup
-              </Text>
-            </TouchableOpacity>
+              <Text style={styles.hiloLabel}>Lowest Score</Text>
+            </View>
+          </View>
+        )}
 
-            <TouchableOpacity
-              style={[
-                styles.quickActionCard,
-                {
-                  backgroundColor: colors.quickActionBg,
-                  borderColor: colors.quickActionBorder,
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/students")}
-            >
-              <View style={styles.quickActionIconWrap}>
-                <Ionicons
-                  name="people-outline"
-                  size={18}
-                  color={colors.primary}
-                />
+        {/* Score Distribution Summary */}
+        {!loadingStats &&
+          stats.totalStudentsGraded > 0 &&
+          (() => {
+            const dist = stats.distribution;
+            const total = stats.totalStudentsGraded;
+            const maxCount = Math.max(
+              dist.A,
+              dist.B,
+              dist.C,
+              dist.D,
+              dist.F,
+              1,
+            );
+            const grades: {
+              label: string;
+              key: keyof typeof dist;
+              color: string;
+            }[] = [
+                { label: "A (≥90%)", key: "A", color: "#00a550" },
+                { label: "B (80–89%)", key: "B", color: "#4a90e2" },
+                { label: "C (70–79%)", key: "C", color: "#f5a623" },
+                { label: "D (60–69%)", key: "D", color: "#e67e22" },
+                { label: "F (<60%)", key: "F", color: "#e74c3c" },
+              ];
+            return (
+              <View style={styles.distSection}>
+                <Text style={styles.distTitle}>Score Distribution</Text>
+                {grades.map(({ label, key, color }) => (
+                  <View key={key} style={styles.distRow}>
+                    <Text style={styles.distLabel}>{label}</Text>
+                    <View style={styles.distBarBg}>
+                      <View
+                        style={[
+                          styles.distBarFill,
+                          {
+                            width: `${Math.round((dist[key] / maxCount) * 100)}%`,
+                            backgroundColor: color,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.distCount}>
+                      {dist[key]} (
+                      {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                    </Text>
+                  </View>
+                ))}
               </View>
               <Text
                 style={[
@@ -540,14 +691,14 @@ export default function HomeScreen() {
 
         {/* Recent Exams */}
         <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>
-            Recent Exams
-          </Text>
-          <TouchableOpacity onPress={() => router.push("/(tabs)/quizzes")}>
-            <Text style={[styles.viewAllText, { color: colors.title }]}>
-              View All
-            </Text>
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>Recent Exams</Text>
+          {recentExams.length > 5 && (
+            <TouchableOpacity onPress={() => setShowAllExams((prev) => !prev)}>
+              <Text style={styles.viewAllText}>
+                {showAllExams ? "Show Less" : `View All (${recentExams.length})`}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.examsContainer}>
@@ -604,7 +755,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            recentExams.map((exam) => (
+            (showAllExams ? recentExams : recentExams.slice(0, 5)).map((exam) => (
               <TouchableOpacity
                 key={exam.id}
                 style={[
@@ -677,7 +828,18 @@ export default function HomeScreen() {
           )}
         </View>
 
-        <View style={{ height: 90 }} />
+        <View style={styles.buttonRow}>
+          {/* New Quiz Button */}
+          <TouchableOpacity
+            style={styles.newQuizButton}
+            onPress={() => router.push("/(tabs)/generator")}
+          >
+            <Ionicons name="add-circle" size={24} color="#fff" />
+            <Text style={styles.newQuizButtonText}>New Quiz</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* New Quiz FAB — floating bottom right */}
@@ -760,6 +922,18 @@ const styles = StyleSheet.create({
     color: "#6c7d74",
   },
   scanButton: {
+    flexDirection: "row",
+    backgroundColor: "#3d5a3d",
+    marginHorizontal: 10,
+    paddingVertical: 14,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+    elevation: 3,
+  },
+  historyButton: {
     flexDirection: "row",
     backgroundColor: "#3d5a3d",
     marginHorizontal: 10,
@@ -982,14 +1156,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
-
-  // FAB
-  fab: {
-    position: "absolute",
-    bottom: 66,
-    right: 14,
+  buttonRow: {
     flexDirection: "row",
-    backgroundColor: "#3d5a3d",
+    gap: 12,
+    marginHorizontal: 20,
+    marginTop: 18,
+    marginBottom: 20,
+  },
+  newQuizButton: {
+    flexDirection: "row",
+    backgroundColor: "#2f8a74",
     paddingHorizontal: 18,
     paddingVertical: 13,
     borderRadius: 14,
