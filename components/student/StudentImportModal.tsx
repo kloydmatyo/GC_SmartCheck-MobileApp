@@ -4,22 +4,23 @@
  * Requirements: 22-32 (Bulk Student Import System)
  */
 
-import React, { useState } from 'react';
+import { StudentImportService } from "@/services/studentImportService";
+import { ImportResult } from "@/types/student";
+import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as XLSX from "xlsx";
+import React, { useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Alert
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
-import { StudentImportService } from '@/services/studentImportService';
-import { ImportResult, ImportValidationError } from '@/types/student';
+    ActivityIndicator,
+    Alert,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
 
 interface StudentImportModalProps {
   visible: boolean;
@@ -27,8 +28,13 @@ interface StudentImportModalProps {
   onImportComplete: (result: ImportResult) => void;
 }
 
-export function StudentImportModal({ visible, onClose, onImportComplete }: StudentImportModalProps) {
-  const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+export function StudentImportModal({
+  visible,
+  onClose,
+  onImportComplete,
+}: StudentImportModalProps) {
+  const [selectedFile, setSelectedFile] =
+    useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -40,13 +46,13 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: [
-          'text/csv',
-          'text/comma-separated-values',
-          'text/plain',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          "text/csv",
+          "text/comma-separated-values",
+          "text/plain",
+          "application/vnd.ms-excel",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ],
-        copyToCacheDirectory: true
+        copyToCacheDirectory: true,
       });
 
       if (result.canceled) return;
@@ -58,7 +64,7 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       if (fileSize == null) {
         try {
           const info = await FileSystem.getInfoAsync(file.uri);
-          fileSize = info.exists && 'size' in info ? info.size : undefined;
+          fileSize = info.exists && "size" in info ? info.size : undefined;
         } catch {
           fileSize = undefined;
         }
@@ -66,9 +72,9 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
 
       if (fileSize == null) {
         Alert.alert(
-          'File Error',
-          'Could not determine file size. Please try a different file.',
-          [{ text: 'OK' }]
+          "File Error",
+          "Could not determine file size. Please try a different file.",
+          [{ text: "OK" }],
         );
         return;
       }
@@ -77,25 +83,22 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       const errors = StudentImportService.validateFile(
         file.uri,
         fileSize,
-        file.mimeType || 'text/csv'
+        file.mimeType || "text/csv",
       );
 
       if (errors.length > 0) {
-        Alert.alert(
-          'Invalid File',
-          errors.map(e => e.error).join('\n'),
-          [{ text: 'OK' }]
-        );
+        Alert.alert("Invalid File", errors.map((e) => e.error).join("\n"), [
+          { text: "OK" },
+        ]);
         return;
       }
 
       setSelectedFile(file);
       setResult(null);
       setProgress(0);
-
     } catch (error) {
-      console.error('File picker error:', error);
-      Alert.alert('Error', 'Failed to select file');
+      console.error("File picker error:", error);
+      Alert.alert("Error", "Failed to select file");
     }
   };
 
@@ -110,19 +113,19 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       setProgress(0);
 
       // Detect XLSX and convert to CSV before processing
-      const mimeType = selectedFile.mimeType || '';
+      const mimeType = selectedFile.mimeType || "";
       const isXlsx =
-        mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-        selectedFile.name?.toLowerCase().endsWith('.xlsx');
+        mimeType ===
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        selectedFile.name?.toLowerCase().endsWith(".xlsx");
 
       let fileContent: string;
 
       if (isXlsx) {
         const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
-          encoding: FileSystem.EncodingType.Base64
+          encoding: FileSystem.EncodingType.Base64,
         });
-        const XLSX = await import('xlsx');
-        const wb = XLSX.read(base64, { type: 'base64' });
+        const wb = XLSX.read(base64, { type: "base64" });
         const firstSheet = wb.Sheets[wb.SheetNames[0]];
         fileContent = XLSX.utils.sheet_to_csv(firstSheet);
       } else {
@@ -134,9 +137,9 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       const importResult = await StudentImportService.processImport(
         selectedFile.uri,
         selectedFile.size || 0,
-        selectedFile.mimeType || 'text/csv',
+        selectedFile.mimeType || "text/csv",
         fileContent,
-        (progress) => setProgress(progress) // REQ 29: Progress bar
+        (progress) => setProgress(progress), // REQ 29: Progress bar
       );
 
       setResult(importResult);
@@ -144,22 +147,24 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
       // Show completion alert
       if (importResult.errorCount === 0) {
         Alert.alert(
-          'Import Successful',
+          "Import Successful",
           `Successfully imported ${importResult.successCount} students`,
-          [{ text: 'OK' }]
+          [{ text: "OK" }],
         );
         onImportComplete(importResult);
       } else {
         Alert.alert(
-          'Import Completed with Errors',
+          "Import Completed with Errors",
           `Imported: ${importResult.successCount}\nErrors: ${importResult.errorCount}\nWarnings: ${importResult.warningCount}`,
-          [{ text: 'View Details' }]
+          [{ text: "View Details" }],
         );
       }
-
     } catch (error) {
-      console.error('Import error:', error);
-      Alert.alert('Import Failed', error instanceof Error ? error.message : 'Unknown error');
+      console.error("Import error:", error);
+      Alert.alert(
+        "Import Failed",
+        error instanceof Error ? error.message : "Unknown error",
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -186,21 +191,24 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
         <Text style={styles.errorTitle}>
           {result.errorCount} Errors, {result.warningCount} Warnings
         </Text>
-        
+
         <ScrollView style={styles.errorList} nestedScrollEnabled>
           {result.errors.map((error, index) => (
-            <View 
-              key={index} 
+            <View
+              key={index}
               style={[
                 styles.errorItem,
-                { borderLeftColor: error.severity === 'error' ? '#e74c3c' : '#ff9800' }
+                {
+                  borderLeftColor:
+                    error.severity === "error" ? "#e74c3c" : "#ff9800",
+                },
               ]}
             >
               <View style={styles.errorHeader}>
-                <Ionicons 
-                  name={error.severity === 'error' ? 'close-circle' : 'warning'} 
-                  size={16} 
-                  color={error.severity === 'error' ? '#e74c3c' : '#ff9800'}
+                <Ionicons
+                  name={error.severity === "error" ? "close-circle" : "warning"}
+                  size={16}
+                  color={error.severity === "error" ? "#e74c3c" : "#ff9800"}
                 />
                 <Text style={styles.errorRow}>Row {error.rowNumber}</Text>
               </View>
@@ -225,29 +233,29 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
     return (
       <View style={styles.summarySection}>
         <Text style={styles.summaryTitle}>Import Summary</Text>
-        
+
         <View style={styles.summaryGrid}>
           <View style={styles.summaryItem}>
             <Text style={styles.summaryValue}>{result.totalRows}</Text>
             <Text style={styles.summaryLabel}>Total Rows</Text>
           </View>
-          
-          <View style={[styles.summaryItem, { backgroundColor: '#e8f5e9' }]}>
-            <Text style={[styles.summaryValue, { color: '#00a550' }]}>
+
+          <View style={[styles.summaryItem, { backgroundColor: "#e8f5e9" }]}>
+            <Text style={[styles.summaryValue, { color: "#00a550" }]}>
               {result.successCount}
             </Text>
             <Text style={styles.summaryLabel}>Imported</Text>
           </View>
-          
-          <View style={[styles.summaryItem, { backgroundColor: '#ffebee' }]}>
-            <Text style={[styles.summaryValue, { color: '#e74c3c' }]}>
+
+          <View style={[styles.summaryItem, { backgroundColor: "#ffebee" }]}>
+            <Text style={[styles.summaryValue, { color: "#e74c3c" }]}>
               {result.errorCount}
             </Text>
             <Text style={styles.summaryLabel}>Errors</Text>
           </View>
-          
-          <View style={[styles.summaryItem, { backgroundColor: '#fff3e0' }]}>
-            <Text style={[styles.summaryValue, { color: '#ff9800' }]}>
+
+          <View style={[styles.summaryItem, { backgroundColor: "#fff3e0" }]}>
+            <Text style={[styles.summaryValue, { color: "#ff9800" }]}>
               {result.duplicateCount}
             </Text>
             <Text style={styles.summaryLabel}>Duplicates</Text>
@@ -273,17 +281,18 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Select CSV File</Text>
             <Text style={styles.sectionHint}>
-              File should contain: student_id, first_name, last_name, email (optional), section (optional)
+              File should contain: student_id, first_name, last_name, email
+              (optional), section (optional)
             </Text>
-            
-            <TouchableOpacity 
-              style={styles.fileButton} 
+
+            <TouchableOpacity
+              style={styles.fileButton}
               onPress={handlePickFile}
               disabled={isProcessing}
             >
               <Ionicons name="document-attach" size={24} color="#00a550" />
               <Text style={styles.fileButtonText}>
-                {selectedFile ? selectedFile.name : 'Choose File'}
+                {selectedFile ? selectedFile.name : "Choose File"}
               </Text>
             </TouchableOpacity>
 
@@ -304,9 +313,15 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
                 Processing... {Math.round(progress)}%
               </Text>
               <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${progress}%` }]} />
+                <View
+                  style={[styles.progressFill, { width: `${progress}%` }]}
+                />
               </View>
-              <ActivityIndicator size="large" color="#00a550" style={{ marginTop: 16 }} />
+              <ActivityIndicator
+                size="large"
+                color="#00a550"
+                style={{ marginTop: 16 }}
+              />
             </View>
           )}
 
@@ -319,20 +334,20 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
 
         {/* Action Buttons */}
         <View style={styles.footer}>
-          <TouchableOpacity 
-            style={[styles.button, styles.cancelButton]} 
+          <TouchableOpacity
+            style={[styles.button, styles.cancelButton]}
             onPress={handleClose}
             disabled={isProcessing}
           >
             <Text style={styles.cancelButtonText}>Cancel</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={[
-              styles.button, 
+              styles.button,
               styles.importButton,
-              (!selectedFile || isProcessing) && styles.buttonDisabled
-            ]} 
+              (!selectedFile || isProcessing) && styles.buttonDisabled,
+            ]}
             onPress={handleProcessImport}
             disabled={!selectedFile || isProcessing}
           >
@@ -348,139 +363,139 @@ export function StudentImportModal({ visible, onClose, onImportComplete }: Stude
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: "#f5f5f5",
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: "#e0e0e0",
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#333',
+    fontWeight: "700",
+    color: "#333",
   },
   content: {
     flex: 1,
   },
   section: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     padding: 16,
     marginVertical: 8,
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
     marginBottom: 8,
   },
   sectionHint: {
     fontSize: 12,
-    color: '#666',
+    color: "#666",
     marginBottom: 16,
   },
   fileButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 16,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: "#f0f0f0",
     borderRadius: 8,
     borderWidth: 2,
-    borderColor: '#00a550',
-    borderStyle: 'dashed',
+    borderColor: "#00a550",
+    borderStyle: "dashed",
   },
   fileButtonText: {
     fontSize: 16,
-    color: '#00a550',
-    fontWeight: '600',
+    color: "#00a550",
+    fontWeight: "600",
     marginLeft: 8,
   },
   fileInfo: {
     marginTop: 12,
     padding: 12,
-    backgroundColor: '#e8f5e9',
+    backgroundColor: "#e8f5e9",
     borderRadius: 8,
   },
   fileName: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
   },
   fileSize: {
     fontSize: 12,
-    color: '#666',
+    color: "#666",
     marginTop: 4,
   },
   progressSection: {
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     marginVertical: 8,
   },
   progressText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
     marginBottom: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: "#e0e0e0",
     borderRadius: 4,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   progressFill: {
-    height: '100%',
-    backgroundColor: '#00a550',
+    height: "100%",
+    backgroundColor: "#00a550",
   },
   summarySection: {
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     marginVertical: 8,
   },
   summaryTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
     marginBottom: 16,
   },
   summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
   },
   summaryItem: {
     flex: 1,
-    minWidth: '45%',
+    minWidth: "45%",
     padding: 12,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: "#f5f5f5",
     borderRadius: 8,
-    alignItems: 'center',
+    alignItems: "center",
   },
   summaryValue: {
     fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
+    fontWeight: "700",
+    color: "#333",
   },
   summaryLabel: {
     fontSize: 12,
-    color: '#666',
+    color: "#666",
     marginTop: 4,
   },
   errorSection: {
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     marginVertical: 8,
   },
   errorTitle: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#e74c3c',
+    fontWeight: "600",
+    color: "#e74c3c",
     marginBottom: 12,
   },
   errorList: {
@@ -488,69 +503,69 @@ const styles = StyleSheet.create({
   },
   errorItem: {
     padding: 12,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: "#f5f5f5",
     borderRadius: 8,
     borderLeftWidth: 4,
     marginBottom: 8,
   },
   errorHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 4,
   },
   errorRow: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
     marginLeft: 6,
   },
   errorField: {
     fontSize: 12,
-    color: '#666',
+    color: "#666",
     marginTop: 4,
   },
   errorMessage: {
     fontSize: 13,
-    color: '#333',
+    color: "#333",
     marginTop: 4,
   },
   errorValue: {
     fontSize: 12,
-    color: '#999',
+    color: "#999",
     marginTop: 4,
-    fontStyle: 'italic',
+    fontStyle: "italic",
   },
   footer: {
-    flexDirection: 'row',
+    flexDirection: "row",
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: "#e0e0e0",
     gap: 12,
   },
   button: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 14,
     borderRadius: 8,
   },
   cancelButton: {
-    backgroundColor: '#f0f0f0',
+    backgroundColor: "#f0f0f0",
   },
   cancelButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
+    fontWeight: "600",
+    color: "#666",
   },
   importButton: {
-    backgroundColor: '#00a550',
+    backgroundColor: "#00a550",
   },
   importButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: "600",
+    color: "#fff",
     marginLeft: 8,
   },
   buttonDisabled: {
