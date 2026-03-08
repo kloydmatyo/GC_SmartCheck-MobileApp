@@ -15,6 +15,7 @@ import {
     ActivityIndicator,
     Alert,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -61,7 +62,7 @@ export function StudentImportModal({
 
       // Resolve file size — DocumentPicker may return undefined on some Android versions
       let fileSize = file.size;
-      if (fileSize == null) {
+      if (fileSize == null && Platform.OS !== "web") {
         try {
           const info = await FileSystem.getInfoAsync(file.uri);
           fileSize = info.exists && "size" in info ? info.size : undefined;
@@ -70,7 +71,8 @@ export function StudentImportModal({
         }
       }
 
-      if (fileSize == null) {
+      // On web the File object always carries size; skip the hard-block
+      if (fileSize == null && Platform.OS !== "web") {
         Alert.alert(
           "File Error",
           "Could not determine file size. Please try a different file.",
@@ -121,16 +123,35 @@ export function StudentImportModal({
 
       let fileContent: string;
 
-      if (isXlsx) {
-        const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const wb = XLSX.read(base64, { type: "base64" });
-        const firstSheet = wb.Sheets[wb.SheetNames[0]];
-        fileContent = XLSX.utils.sheet_to_csv(firstSheet);
+      if (Platform.OS === "web") {
+        // Web: use the browser File API (expo-file-system is native-only)
+        const webFile = (selectedFile as unknown as { file: File }).file;
+        if (!webFile) {
+          throw new Error(
+            "Could not access file object. Please try again.",
+          );
+        }
+        if (isXlsx) {
+          const buffer = await webFile.arrayBuffer();
+          const wb = XLSX.read(buffer, { type: "array" });
+          const firstSheet = wb.Sheets[wb.SheetNames[0]];
+          fileContent = XLSX.utils.sheet_to_csv(firstSheet);
+        } else {
+          fileContent = await webFile.text();
+        }
       } else {
-        // Read file content
-        fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
+        // Native: use expo-file-system/legacy
+        if (isXlsx) {
+          const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          const wb = XLSX.read(base64, { type: "base64" });
+          const firstSheet = wb.Sheets[wb.SheetNames[0]];
+          fileContent = XLSX.utils.sheet_to_csv(firstSheet);
+        } else {
+          // Read file content
+          fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
+        }
       }
 
       // REQ 24-32: Process with validation, duplicates, batch insert, etc.
