@@ -473,6 +473,37 @@ export default function EditExamScreen() {
         true,
       );
 
+      // Update template if it exists
+      try {
+        const { collection, query, where, getDocs, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+        const templatesQuery = query(
+          collection(db, "templates"),
+          where("examId", "==", examId)
+        );
+        const templatesSnapshot = await getDocs(templatesQuery);
+        
+        if (!templatesSnapshot.empty) {
+          const templateDoc = templatesSnapshot.docs[0];
+          const templateUpdateData: any = {
+            examName: updateData.title,
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser.uid,
+          };
+          
+          // Update template name if exam title changed
+          if (changes.title) {
+            templateUpdateData.name = `${updateData.title}_Template`;
+            templateUpdateData.description = `Answer sheet template for ${updateData.title}`;
+          }
+          
+          await updateDoc(doc(db, "templates", templateDoc.id), templateUpdateData);
+          console.log("Template updated successfully");
+        }
+      } catch (templateError) {
+        console.error("Error updating template:", templateError);
+        // Don't fail the exam update if template update fails
+      }
+
       const endTime = Date.now();
       const duration = endTime - startTime;
 
