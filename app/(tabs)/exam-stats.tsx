@@ -13,11 +13,13 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 
+import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
 import {
   ExportDateFilter,
   ExportFormat,
   GradeExportService,
 } from "@/services/gradeExportService";
+import { ReportPdfService } from "@/services/reportPdfService";
 
 import {
   DashboardDateFilter,
@@ -125,6 +127,12 @@ export default function ExamStatsScreen() {
   const [exportStage, setExportStage] = useState("");
   const [exportPercent, setExportPercent] = useState(0);
 
+  // ── PDF report viewer state ───────────────────────────────────────────────
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportViewerVisible, setReportViewerVisible] = useState(false);
+  const [reportHtml, setReportHtml] = useState("");
+  const [reportViewerTitle, setReportViewerTitle] = useState("");
+
   const handleExport = useCallback(() => {
     if (!examId || exporting) return;
 
@@ -197,6 +205,38 @@ export default function ExamStatsScreen() {
       setExportPercent(0);
     }
   };
+  const handleGenerateReport = useCallback(async () => {
+    if (!examId || reportGenerating) return;
+    setReportGenerating(true);
+    try {
+      const result = await ReportPdfService.generateClassSummaryReport(
+        examId as string,
+      );
+      if (result.success && result.previewHtml) {
+        const decoded = examTitle ? decodeURIComponent(examTitle) : "Exam";
+        setReportViewerTitle(`${decoded} — Class Summary`);
+        setReportHtml(result.previewHtml);
+        setReportViewerVisible(true);
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Report Failed",
+          text2: result.message,
+          visibilityTime: 4000,
+        });
+      }
+    } catch (err: any) {
+      Toast.show({
+        type: "error",
+        text1: "Report Error",
+        text2: err.message ?? "Something went wrong.",
+        visibilityTime: 4000,
+      });
+    } finally {
+      setReportGenerating(false);
+    }
+  }, [examId, examTitle, reportGenerating]);
+
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const subscribe = useCallback(
@@ -208,16 +248,16 @@ export default function ExamStatsScreen() {
       const dateFrom =
         dateFilter === "today"
           ? (() => {
-            const d = new Date();
-            d.setHours(0, 0, 0, 0);
-            return d;
-          })()
-          : dateFilter === "week"
-            ? (() => {
               const d = new Date();
-              d.setDate(d.getDate() - 7);
+              d.setHours(0, 0, 0, 0);
               return d;
             })()
+          : dateFilter === "week"
+            ? (() => {
+                const d = new Date();
+                d.setDate(d.getDate() - 7);
+                return d;
+              })()
             : undefined;
 
       const unsub = DashboardService.subscribeExamStats(
@@ -265,22 +305,31 @@ export default function ExamStatsScreen() {
     key: keyof NonNullable<typeof stats>["distribution"];
     color: string;
   }[] = [
-      { label: "A  ≥90%", key: "A", color: "#00a550" },
-      { label: "B  80–89%", key: "B", color: "#4a90e2" },
-      { label: "C  70–79%", key: "C", color: "#f5a623" },
-      { label: "D  60–69%", key: "D", color: "#e67e22" },
-      { label: "F  <60%", key: "F", color: "#e74c3c" },
-    ];
+    { label: "A  ≥90%", key: "A", color: "#00a550" },
+    { label: "B  80–89%", key: "B", color: "#4a90e2" },
+    { label: "C  70–79%", key: "C", color: "#f5a623" },
+    { label: "D  60–69%", key: "D", color: "#e67e22" },
+    { label: "F  <60%", key: "F", color: "#e74c3c" },
+  ];
 
   const grades =
     sortByCount && stats
       ? [...BASE_GRADES].sort(
-        (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
-      )
+          (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
+        )
       : BASE_GRADES;
 
   return (
     <View style={styles.container}>
+      {/* ── PDF Report Viewer Modal ───────────────────────────────────── */}
+      <ReportPdfViewer
+        visible={reportViewerVisible}
+        onClose={() => setReportViewerVisible(false)}
+        html={reportHtml}
+        title={reportViewerTitle}
+        fileName="GC_ClassSummary"
+      />
+
       {/* ── Export progress overlay (#6) ─────────────────────── */}
       {exporting && (
         <View style={styles.exportOverlay}>
@@ -290,10 +339,7 @@ export default function ExamStatsScreen() {
             {/* Progress bar */}
             <View style={styles.exportBarBg}>
               <View
-                style={[
-                  styles.exportBarFill,
-                  { width: `${exportPercent}%` },
-                ]}
+                style={[styles.exportBarFill, { width: `${exportPercent}%` }]}
               />
             </View>
             <Text style={styles.exportPercentText}>{exportPercent}%</Text>
@@ -309,17 +355,35 @@ export default function ExamStatsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        <TouchableOpacity
-          onPress={handleExport}
-          style={styles.backBtn}
-          disabled={exporting || !stats || stats.totalGraded === 0}
-        >
-          <Ionicons
-            name={exporting ? "hourglass-outline" : "download-outline"}
-            size={24}
-            color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
-          />
-        </TouchableOpacity>
+        {/* Right: Report + Export buttons */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={handleGenerateReport}
+            style={styles.backBtn}
+            disabled={reportGenerating || !stats || stats.totalGraded === 0}
+          >
+            {reportGenerating ? (
+              <ActivityIndicator size="small" color="#00a550" />
+            ) : (
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleExport}
+            style={styles.backBtn}
+            disabled={exporting || !stats || stats.totalGraded === 0}
+          >
+            <Ionicons
+              name={exporting ? "hourglass-outline" : "download-outline"}
+              size={24}
+              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Date filter chips */}
@@ -526,6 +590,10 @@ const styles = StyleSheet.create({
   backBtn: {
     padding: 4,
     width: 36,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   headerTitle: {
     flex: 1,
