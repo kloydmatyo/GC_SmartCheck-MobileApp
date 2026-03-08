@@ -7,10 +7,8 @@ import {
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, AppStateStatus, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
 import * as NavigationBar from "expo-navigation-bar";
-import { useEffect, useRef } from "react";
-import { AppState, AppStateStatus, Platform } from "react-native";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 

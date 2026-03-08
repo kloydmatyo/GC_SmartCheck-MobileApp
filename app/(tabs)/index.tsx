@@ -4,17 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, orderBy, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -523,10 +513,7 @@ export default function HomeScreen() {
               >
                 Create Exam
               </Text>
-              <Text style={styles.hiloLabel}>Lowest Score</Text>
-            </View>
-          </View>
-        )}
+            </TouchableOpacity>
 
         {/* Score Distribution Summary */}
         {!loadingStats &&
@@ -554,46 +541,33 @@ export default function HomeScreen() {
                 { label: "F (<60%)", key: "F", color: "#e74c3c" },
               ];
             return (
-              <View style={styles.distSection}>
-                <Text style={styles.distTitle}>Score Distribution</Text>
-                {grades.map(({ label, key, color }) => (
-                  <View key={key} style={styles.distRow}>
-                    <Text style={styles.distLabel}>{label}</Text>
-                    <View style={styles.distBarBg}>
-                      <View
-                        style={[
-                          styles.distBarFill,
-                          {
-                            width: `${Math.round((dist[key] / maxCount) * 100)}%`,
-                            backgroundColor: color,
-                          },
-                        ]}
-                      />
+              <>
+                <View style={styles.distSection}>
+                  <Text style={styles.distTitle}>Score Distribution</Text>
+                  {grades.map(({ label, key, color }) => (
+                    <View key={key} style={styles.distRow}>
+                      <Text style={styles.distLabel}>{label}</Text>
+                      <View style={styles.distBarBg}>
+                        <View
+                          style={[
+                            styles.distBarFill,
+                            {
+                              width: `${Math.round((dist[key] / maxCount) * 100)}%`,
+                              backgroundColor: color,
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.distCount}>
+                        {dist[key]} (
+                        {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                      </Text>
                     </View>
-                    <Text style={styles.distCount}>
-                      {dist[key]} (
-                      {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              <Text
-                style={[
-                  styles.quickActionText,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Students
-              </Text>
-              <Text
-                style={[
-                  styles.quickActionSubtext,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Manage class rosters
-              </Text>
-            </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            );
+          })()}
 
             <TouchableOpacity
               style={[
