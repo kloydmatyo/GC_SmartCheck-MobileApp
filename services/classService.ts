@@ -29,6 +29,7 @@ export class ClassService {
       const newClass = {
         ...classData,
         students: classData.students || [],
+        isArchived: classData.isArchived || false,
         createdBy: currentUser.uid,
         created_at: new Date().toISOString(),
         createdAt: Timestamp.now(),
@@ -74,6 +75,7 @@ export class ClassService {
           section_block: data.section_block,
           semester: data.semester,
           students: data.students || [],
+          isArchived: data.isArchived || false,
           createdBy: data.createdBy,
           created_at: data.created_at,
           createdAt: data.createdAt?.toDate(),
@@ -112,6 +114,7 @@ export class ClassService {
         section_block: data.section_block,
         semester: data.semester,
         students: data.students || [],
+        isArchived: data.isArchived || false,
         createdBy: data.createdBy,
         created_at: data.created_at,
         createdAt: data.createdAt?.toDate(),

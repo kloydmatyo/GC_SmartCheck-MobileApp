@@ -1,466 +1,371 @@
-import { auth, db } from "@/config/firebase";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { OfflineStorageService } from "@/services/offlineStorageService";
+import { auth } from "@/config/firebase";
+import { ResultsService } from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useMemo, useState } from "react";
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    where,
-} from "firebase/firestore";
-import React, { useCallback, useState } from "react";
-import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Share,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import Toast from "react-native-toast-message";
 
-interface Quiz {
+type ResultRow = {
   id: string;
-  title: string;
-  class: string;
-  date: string;
-  papers: number | null;
-  status: "Draft" | "Scheduled" | "Active" | "Completed";
-  isDownloaded?: boolean;
+  studentName: string;
+  classLabel: string;
+  examLabel: string;
+  percentage: number;
+  dateLabel: string;
+  correctLabel: string;
+};
+
+const MOCK_RESULTS: ResultRow[] = [
+  {
+    id: "mock-1",
+    studentName: "Jess Taylor",
+    classLabel: "BSIT 3B",
+    examLabel: "Chapter Test",
+    percentage: 95,
+    dateLabel: "3/8/2026",
+    correctLabel: "19/20 correct",
+  },
+  {
+    id: "mock-2",
+    studentName: "Sarah Davis",
+    classLabel: "BSIT 3B",
+    examLabel: "Chapter Test",
+    percentage: 55,
+    dateLabel: "3/8/2026",
+    correctLabel: "11/20 correct",
+  },
+  {
+    id: "mock-3",
+    studentName: "Alyssa Cruz",
+    classLabel: "BSIT 3B",
+    examLabel: "Chapter Test",
+    percentage: 88,
+    dateLabel: "3/8/2026",
+    correctLabel: "18/20 correct",
+  },
+  {
+    id: "mock-4",
+    studentName: "Darren Lim",
+    classLabel: "BSIT 3B",
+    examLabel: "Chapter Test",
+    percentage: 73,
+    dateLabel: "3/8/2026",
+    correctLabel: "15/20 correct",
+  },
+  {
+    id: "mock-5",
+    studentName: "Bea Mendoza",
+    classLabel: "BSIT 3B",
+    examLabel: "Chapter Test",
+    percentage: 90,
+    dateLabel: "3/8/2026",
+    correctLabel: "18/20 correct",
+  },
+  {
+    id: "mock-6",
+    studentName: "Marco Reyes",
+    classLabel: "BSCS 2A",
+    examLabel: "Midterm Exam",
+    percentage: 84,
+    dateLabel: "3/7/2026",
+    correctLabel: "42/50 correct",
+  },
+  {
+    id: "mock-7",
+    studentName: "Nina Flores",
+    classLabel: "BSCS 2A",
+    examLabel: "Midterm Exam",
+    percentage: 91,
+    dateLabel: "3/7/2026",
+    correctLabel: "46/50 correct",
+  },
+  {
+    id: "mock-8",
+    studentName: "Paolo Santos",
+    classLabel: "BSCS 2A",
+    examLabel: "Midterm Exam",
+    percentage: 67,
+    dateLabel: "3/7/2026",
+    correctLabel: "34/50 correct",
+  },
+  {
+    id: "mock-9",
+    studentName: "Lara Gomez",
+    classLabel: "BSCS 2A",
+    examLabel: "Midterm Exam",
+    percentage: 78,
+    dateLabel: "3/7/2026",
+    correctLabel: "39/50 correct",
+  },
+  {
+    id: "mock-10",
+    studentName: "Ken Bautista",
+    classLabel: "BSCS 2A",
+    examLabel: "Midterm Exam",
+    percentage: 93,
+    dateLabel: "3/7/2026",
+    correctLabel: "47/50 correct",
+  },
+];
+
+const MOCK_CLASS_FILTERS = [
+  "All Classes",
+  ...Array.from(new Set(MOCK_RESULTS.map((item) => item.classLabel))),
+];
+
+function scoreTone(value: number) {
+  if (value >= 85) return { badge: "#D8F3E7", text: "#20A86B" };
+  if (value >= 70) return { badge: "#F5E8B8", text: "#D68B11" };
+  return { badge: "#F9D7D9", text: "#E24E5C" };
 }
 
-export default function QuizzesScreen() {
-  const router = useRouter();
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
-  const [filter, setFilter] = useState<
-    "All" | "Draft" | "Scheduled" | "Active" | "Completed"
-  >("All");
-  const [showFilterMenu, setShowFilterMenu] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
-
-  // Fetch quizzes from Firebase
-  const loadQuizzes = async () => {
-    try {
-      setLoading(true);
-      const currentUser = auth.currentUser;
-
-      if (!currentUser) {
-        console.log("No user logged in");
-        setQuizzes([]);
-        return;
-      }
-
-      const q = query(
-        collection(db, "exams"),
-        where("createdBy", "==", currentUser.uid),
-      );
-
-      const querySnapshot = await getDocs(q);
-      const examsList: Quiz[] = [];
-
-      // Check which exams are downloaded
-      const downloadedExams = await OfflineStorageService.getDownloadedExams();
-      const downloadedIds = new Set(downloadedExams.map((e) => e.id));
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-
-        // Map status to proper case
-        let status: "Draft" | "Scheduled" | "Active" | "Completed" = "Draft";
-        if (data.status) {
-          const statusLower = data.status.toLowerCase();
-          switch (statusLower) {
-            case "draft":
-              status = "Draft";
-              break;
-            case "scheduled":
-              status = "Scheduled";
-              break;
-            case "active":
-              status = "Active";
-              break;
-            case "completed":
-              status = "Completed";
-              break;
-            default:
-              status = "Draft";
-          }
-        }
-
-        examsList.push({
-          id: doc.id,
-          title: data.title || "Untitled Exam",
-          class: data.subject || data.className || "No Subject",
-          date: data.created_at
-            ? typeof data.created_at === "string"
-              ? new Date(data.created_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : data.createdAt?.toDate?.()?.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }) || "No Date"
-            : "No Date",
-          papers: data.scanned_papers || null,
-          status: status,
-          isDownloaded: downloadedIds.has(doc.id),
-        });
-      });
-
-      setQuizzes(examsList);
-    } catch (error) {
-      console.error("Error fetching quizzes:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Reload quizzes when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      loadQuizzes();
-      (async () => {
-        try {
-          const savedDarkMode = await AsyncStorage.getItem(
-            DARK_MODE_STORAGE_KEY,
-          );
-          setDarkModeEnabled(savedDarkMode === "true");
-        } catch (error) {
-          console.warn("Failed to load dark mode preference:", error);
-        }
-      })();
-    }, []),
-  );
-
-  const colors = darkModeEnabled
-    ? {
-        screenBg: "#111815",
-        headerBg: "#1a2520",
-        headerBorder: "#2b3b34",
-        title: "#e7f1eb",
-        primary: "#1f3a2f",
-        primaryDark: "#2b3b34",
-        cardBg: "#1f2b26",
-        cardBorder: "#34483f",
-      }
-    : {
-        screenBg: "#eef1ef",
-        headerBg: "#fff",
-        headerBorder: "#d8dfda",
-        title: "#24362f",
-        primary: "#3d5a3d",
-        primaryDark: "#2f4a38",
-        cardBg: "#3d5a3d",
-        cardBorder: "#2f4a38",
-      };
-
-  const filteredQuizzes = quizzes.filter((q) => {
-    const matchesFilter = filter === "All" ? true : q.status === filter;
-
-    const matchesSearch =
-      q.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      q.class.toLowerCase().includes(searchQuery.toLowerCase());
-
-    return matchesFilter && matchesSearch;
+function formatDateLabel(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No date";
+  return date.toLocaleDateString("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
   });
+}
 
-  // Download exam for offline access
-  const handleDownloadExam = async (examId: string) => {
+export default function ResultsScreen() {
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedClass, setSelectedClass] = useState("All Classes");
+  const [results, setResults] = useState<ResultRow[]>([]);
+  const [classFilters, setClassFilters] = useState<string[]>(["All Classes"]);
+
+  const loadResults = useCallback(() => {
+    let active = true;
+
+    (async () => {
+      try {
+        setLoading(true);
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          if (active) {
+            setResults([]);
+            setClassFilters(["All Classes"]);
+          }
+          return;
+        }
+
+        const payload = await ResultsService.getUnifiedResults();
+        const mappedResults = payload.rows.map((item) => ({
+          id: item.id,
+          studentName: item.studentName,
+          classLabel: item.classLabel,
+          examLabel: item.examLabel,
+          percentage: item.percentage,
+          dateLabel: formatDateLabel(item.dateValue),
+          correctLabel: item.correctLabel,
+          sortValue: item.sortValue,
+        }));
+
+        if (!active) return;
+        setResults(mappedResults);
+        setClassFilters(payload.classFilters);
+      } catch (error) {
+        console.error("Error loading results:", error);
+        if (active) {
+          setResults([]);
+          setClassFilters(["All Classes"]);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useFocusEffect(loadResults);
+
+  const filteredResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return results.filter((item) => {
+      const matchesClass =
+        selectedClass === "All Classes" || item.classLabel === selectedClass;
+      const matchesSearch =
+        !q ||
+        item.studentName.toLowerCase().includes(q) ||
+        item.classLabel.toLowerCase().includes(q) ||
+        item.examLabel.toLowerCase().includes(q);
+
+      return matchesClass && matchesSearch;
+    });
+  }, [results, searchQuery, selectedClass]);
+
+  const displayResults = filteredResults.length
+    ? filteredResults
+    : MOCK_RESULTS.filter((item) => {
+        const q = searchQuery.trim().toLowerCase();
+        const matchesClass =
+          selectedClass === "All Classes" || item.classLabel === selectedClass;
+        const matchesSearch =
+          !q ||
+          item.studentName.toLowerCase().includes(q) ||
+          item.classLabel.toLowerCase().includes(q) ||
+          item.examLabel.toLowerCase().includes(q);
+
+        return matchesClass && matchesSearch;
+      });
+
+  const displayClassFilters = results.length ? classFilters : MOCK_CLASS_FILTERS;
+
+  const handleExport = useCallback(async () => {
+    if (!filteredResults.length) {
+      Toast.show({
+        type: "info",
+        text1: "No Results",
+        text2: "There are no results to export.",
+      });
+      return;
+    }
+
+    const header = [
+      "Student Name",
+      "Class",
+      "Exam",
+      "Percentage",
+      "Date",
+      "Correct",
+    ];
+    const escapeCsv = (value: string | number) =>
+      `"${String(value ?? "").replace(/"/g, '""')}"`;
+
+    const rows = filteredResults.map((item) => [
+      item.studentName,
+      item.classLabel,
+      item.examLabel,
+      `${item.percentage}%`,
+      item.dateLabel,
+      item.correctLabel,
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) => row.map(escapeCsv).join(","))
+      .join("\n");
+
     try {
-      setDownloadingIds((prev) => new Set(prev).add(examId));
-
-      // Fetch full exam data from Firebase
-      const examDoc = await getDoc(doc(db, "exams", examId));
-      if (!examDoc.exists()) {
-        Alert.alert("Error", "Exam not found");
-        return;
-      }
-
-      const data = examDoc.data();
-      const examData = {
-        id: examDoc.id,
-        title: data.title || "Untitled Exam",
-        description: data.description || "",
-        questions: data.questions || [],
-        answerKey: data.answerKey || null,
-        createdBy: data.createdBy || "",
-        createdAt: data.createdAt?.toDate?.() || new Date(),
-        updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        version: data.version || 1,
-      };
-
-      await OfflineStorageService.downloadExam(examData);
-
-      // Update UI
-      setQuizzes((prev) =>
-        prev.map((q) => (q.id === examId ? { ...q, isDownloaded: true } : q)),
-      );
-
-      Alert.alert("Success", "Exam downloaded for offline access!");
-    } catch (error: any) {
-      console.error("Error downloading exam:", error);
-
-      // Check if error is due to offline
-      if (
-        error?.message?.includes("offline") ||
-        error?.code === "unavailable"
-      ) {
-        Alert.alert(
-          "No Internet Connection",
-          "You need to be online to download exams for offline access.",
-        );
-      } else {
-        Alert.alert("Error", "Failed to download exam. Please try again.");
-      }
-    } finally {
-      setDownloadingIds((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(examId);
-        return newSet;
+      await Share.share({
+        title: "Results Export",
+        message: csv,
+      });
+    } catch (error) {
+      console.error("Error exporting results:", error);
+      Toast.show({
+        type: "error",
+        text1: "Export Failed",
+        text2: "Unable to export results right now.",
       });
     }
-  };
-
-  // Remove downloaded exam
-  const handleRemoveDownload = async (examId: string) => {
-    try {
-      await OfflineStorageService.deleteDownloadedExam(examId);
-
-      // Update UI
-      setQuizzes((prev) =>
-        prev.map((q) => (q.id === examId ? { ...q, isDownloaded: false } : q)),
-      );
-
-      Alert.alert("Success", "Offline copy removed");
-    } catch (error) {
-      console.error("Error removing download:", error);
-      Alert.alert("Error", "Failed to remove offline copy");
-    }
-  };
-
-  const renderQuizCard = ({ item }: { item: Quiz }) => (
-    <TouchableOpacity
-      style={[
-        styles.quizCard,
-        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
-      ]}
-      onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
-    >
-      <View style={styles.quizHeader}>
-        <View style={styles.titleContainer}>
-          <Text style={styles.quizTitle}>{item.title}</Text>
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: getStatusColor(item.status) },
-            ]}
-          >
-            <Text style={styles.statusText}>{item.status}</Text>
-          </View>
-        </View>
-        <View style={styles.scanBadge}>
-          <Text style={styles.scanText}>SCAN</Text>
-          <Ionicons name="scan-outline" size={30} color="#e5f4ea" />
-        </View>
-      </View>
-      <Text style={styles.quizClass}>{item.class}</Text>
-      <View style={styles.quizMeta}>
-        <View style={styles.quizInfo}>
-          <Ionicons name="calendar-outline" size={12} color="#cde2d8" />
-          <Text style={styles.quizMetaText}>{item.date}</Text>
-        </View>
-      </View>
-      <View style={styles.quizFooter}>
-        <View style={styles.countBadge}>
-          <Text style={styles.countBadgeText}>
-            {item.papers ? `${item.papers}` : "--"} PAPERS
-          </Text>
-        </View>
-        <View style={styles.actionsRow}>
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              item.isDownloaded && styles.actionButtonDownloaded,
-            ]}
-            onPress={() =>
-              item.isDownloaded
-                ? handleRemoveDownload(item.id)
-                : handleDownloadExam(item.id)
-            }
-            disabled={downloadingIds.has(item.id)}
-          >
-            {downloadingIds.has(item.id) ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons
-                  name={
-                    item.isDownloaded
-                      ? "cloud-done-outline"
-                      : "cloud-download-outline"
-                  }
-                  size={12}
-                  color="#fff"
-                />
-                <Text style={styles.actionText}>
-                  {item.isDownloaded ? "Offline" : "Download"}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="share-social-outline" size={12} color="#fff" />
-            <Text style={styles.actionText}>Share</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const getStatusColor = (status: string): string => {
-    switch (status) {
-      case "Draft":
-        return "#9e9e9e";
-      case "Scheduled":
-        return "#ff9800";
-      case "Active":
-        return "#00a550";
-      case "Completed":
-        return "#4a90e2";
-      default:
-        return "#666";
-    }
-  };
-
-  if (loading) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
-        <View
-          style={[
-            styles.header,
-            {
-              backgroundColor: colors.headerBg,
-              borderBottomColor: colors.headerBorder,
-            },
-          ]}
-        >
-          <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#00a550" />
-          <Text style={styles.loadingText}>Loading exams...</Text>
-        </View>
-      </View>
-    );
-  }
+  }, [filteredResults]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: colors.headerBg,
-            borderBottomColor: colors.headerBorder,
-          },
-        ]}
-      >
-        <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>All Results</Text>
+        <TouchableOpacity
+          style={styles.exportButton}
+          onPress={handleExport}
+        >
+          <Ionicons name="download-outline" size={18} color="#19B97C" />
+          <Text style={styles.exportText}>Export</Text>
+        </TouchableOpacity>
       </View>
 
-      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
-        <Ionicons name="search" size={16} color="#d6e9de" />
+      <View style={styles.searchWrap}>
+        <Ionicons name="search-outline" size={22} color="#C4CAD5" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search Quizzes"
-          placeholderTextColor="#b8d4c4"
+          placeholder="Search by student, class, or exam..."
+          placeholderTextColor="#C4CAD5"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
       </View>
 
-      <View style={styles.filterContainer}>
-        <TouchableOpacity
-          style={[styles.filterTrigger, { backgroundColor: colors.primary }]}
-          onPress={() => setShowFilterMenu((prev) => !prev)}
-        >
-          <Text style={styles.filterTriggerText}>Filter: {filter}</Text>
-          <Ionicons
-            name={showFilterMenu ? "chevron-up" : "chevron-down"}
-            size={16}
-            color="#d7e9df"
-          />
-        </TouchableOpacity>
-        {showFilterMenu && (
-          <View style={[styles.filterMenu, { backgroundColor: colors.primaryDark }]}>
-            {(
-              ["All", "Draft", "Scheduled", "Active", "Completed"] as const
-            ).map((status) => (
-              <TouchableOpacity
-                key={status}
-                style={[
-                  styles.filterMenuItem,
-                  filter === status && styles.filterMenuItemActive,
-                ]}
-                onPress={() => {
-                  setFilter(status);
-                  setShowFilterMenu(false);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.filterMenuText,
-                    filter === status && styles.filterMenuTextActive,
-                  ]}
-                >
-                  {status}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </View>
-
-      {/* Quizzes List */}
-      <FlatList
-        data={filteredQuizzes}
-        renderItem={renderQuizCard}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="book-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyText}>No exams found</Text>
-            <Text style={styles.emptySubtext}>
-              Create your first exam to get started
-            </Text>
-          </View>
-        }
-      />
-
-      <TouchableOpacity
-        style={[
-          styles.newQuizButton,
-          { backgroundColor: colors.primary, shadowColor: colors.primary },
-        ]}
-        onPress={() => router.push("/(tabs)/create-quiz")}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
       >
-        <Ionicons name="add-circle" size={22} color="#fff" />
-        <Text style={styles.newQuizText}>New Quiz</Text>
-      </TouchableOpacity>
+        {displayClassFilters.map((filter) => (
+          <TouchableOpacity
+            key={filter}
+            style={[
+              styles.chip,
+              selectedClass === filter && styles.chipActive,
+            ]}
+            onPress={() => setSelectedClass(filter)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                selectedClass === filter && styles.chipTextActive,
+              ]}
+            >
+              {filter}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#20BE7B" />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.listContent}>
+          {displayResults.map((item) => {
+            const tone = scoreTone(item.percentage);
+            return (
+              <TouchableOpacity key={item.id} style={styles.resultCard} activeOpacity={0.88}>
+                <View style={[styles.scoreCircle, { backgroundColor: tone.badge }]}>
+                  <Text style={[styles.scoreCircleText, { color: tone.text }]}>
+                    {item.percentage}%
+                  </Text>
+                </View>
+                <View style={styles.resultBody}>
+                  <Text style={styles.resultName}>{item.studentName}</Text>
+                  <Text style={styles.resultMeta}>
+                    {item.classLabel} • {item.examLabel}
+                  </Text>
+                  <View style={styles.resultFooter}>
+                    <Text style={styles.resultDate}>{item.dateLabel}</Text>
+                    <Text style={styles.resultCorrect}>{item.correctLabel}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+
+          {!displayResults.length && (
+            <View style={styles.emptyState}>
+              <Ionicons name="clipboard-outline" size={44} color="#C5CBD6" />
+              <Text style={styles.emptyTitle}>No results found</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      <Toast />
     </View>
   );
 }
@@ -468,238 +373,142 @@ export default function QuizzesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#eef1ef",
+    backgroundColor: "#F7F7F8",
+    paddingTop: 56,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingTop: 56,
-    paddingBottom: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#d8dfda",
+    paddingHorizontal: 20,
+    marginBottom: 20,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: "800",
-    color: "#24362f",
+    color: "#111827",
   },
-  searchContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#3d5a3d",
-    marginHorizontal: 8,
-    marginTop: 8,
-    marginBottom: 8,
-    borderRadius: 10,
-    paddingHorizontal: 10,
+  exportButton: {
     height: 40,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 8,
-    color: "#eaf6ef",
-    fontSize: 14,
-  },
-  filterContainer: {
-    position: "relative",
-    paddingHorizontal: 8,
-    paddingBottom: 6,
-    zIndex: 10,
-  },
-  filterTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#3d5a3d",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 38,
-  },
-  filterTriggerText: {
-    color: "#eaf6ef",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  filterMenu: {
-    marginTop: 6,
-    backgroundColor: "#2f4a38",
-    borderRadius: 10,
-    padding: 6,
-    borderWidth: 1,
-    borderColor: "#355b49",
-  },
-  filterMenuItem: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  filterMenuItemActive: {
-    backgroundColor: "#2f8a74",
-  },
-  filterMenuText: {
-    color: "#d7e9df",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  filterMenuTextActive: {
-    color: "#fff",
-  },
-  listContent: {
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 90,
-  },
-  quizCard: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#2f4a38",
-  },
-  quizHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 4,
-  },
-  titleContainer: {
-    flex: 1,
-    marginRight: 8,
-  },
-  quizTitle: {
-    fontSize: 27,
-    fontWeight: "800",
-    color: "#ecf7f1",
-    marginBottom: 6,
-  },
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
     borderRadius: 12,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "600",
-  },
-  scanBadge: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-    minWidth: 44,
-    minHeight: 44,
-    paddingHorizontal: 6,
-  },
-  scanText: {
-    color: "#d1e6db",
-    fontSize: 9,
-    fontWeight: "700",
-  },
-  quizClass: {
-    fontSize: 13,
-    color: "#cce2d7",
-    marginBottom: 6,
-  },
-  quizMeta: {
-    marginBottom: 10,
-  },
-  quizFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  quizInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  quizMetaText: {
-    fontSize: 12,
-    color: "#d5e9de",
-  },
-  countBadge: {
-    backgroundColor: "#2d4f3e",
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  countBadgeText: {
-    color: "#d8ebdf",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#1f3449",
-    borderRadius: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  actionButtonDownloaded: {
-    backgroundColor: "#00a550",
-  },
-  actionText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#666",
-  },
-  emptyContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#999",
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#ccc",
-    marginTop: 4,
-  },
-  newQuizButton: {
-    position: "absolute",
-    right: 14,
-    bottom: 66,
-    backgroundColor: "#3d5a3d",
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+    backgroundColor: "#EBFBF3",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    elevation: 6,
-    shadowColor: "#3d5a3d",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
   },
-  newQuizText: {
-    color: "#fff",
-    fontSize: 16,
+  exportText: {
+    fontSize: 14,
     fontWeight: "700",
+    color: "#19B97C",
+  },
+  searchWrap: {
+    marginHorizontal: 20,
+    height: 54,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: "#1F2937",
+  },
+  chipsRow: {
+    paddingHorizontal: 20,
+    gap: 10,
+    paddingBottom: 12,
+  },
+  chip: {
+    paddingHorizontal: 18,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F2F4F7",
+    justifyContent: "center",
+  },
+  chipActive: {
+    backgroundColor: "#20BE7B",
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#253041",
+  },
+  chipTextActive: {
+    color: "#FFFFFF",
+  },
+  loadingWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingTop: 2,
+    paddingBottom: 120,
+    gap: 14,
+  },
+  resultCard: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  scoreCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  scoreCircleText: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  resultBody: {
+    flex: 1,
+  },
+  resultName: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 3,
+  },
+  resultMeta: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginBottom: 8,
+  },
+  resultFooter: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  resultDate: {
+    fontSize: 11,
+    color: "#9CA3AF",
+  },
+  resultCorrect: {
+    fontSize: 11,
+    color: "#19B97C",
+    fontWeight: "700",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#6B7280",
   },
 });

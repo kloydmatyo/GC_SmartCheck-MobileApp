@@ -35,13 +35,15 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
-  const { examId } = useLocalSearchParams();
+  const params = useLocalSearchParams<{ examId?: string; classId?: string; tab?: string }>();
+  const examId = params.examId;
+  const classId = params.classId;
+  const returnTab = params.tab || "exams";
 
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
-  const goToExamPreview = () =>
-    router.replace(
-      `/(tabs)/exam-preview?examId=${examId}&refresh=${Date.now()}`,
-    );
+  const goBack = () =>
+    classId
+      ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=${returnTab}`)
+      : router.replace("/(tabs)/quizzes");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -115,7 +117,7 @@ export default function EditAnswerKeyScreen() {
       }
     : {
         bg: "#f5f5f5",
-        headerBg: "#3d5a3d",
+        headerBg: "#ffffff",
         cardBg: "#ffffff",
         border: "#e0e0e0",
         title: "#333333",
@@ -247,7 +249,7 @@ export default function EditAnswerKeyScreen() {
               type: "error",
               title: "Error",
               message: "Exam not found",
-              onClose: goToQuizzes,
+              onClose: goBack,
             });
             return;
           }
@@ -261,7 +263,7 @@ export default function EditAnswerKeyScreen() {
               type: "error",
               title: "Edit Restricted",
               message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
-              onClose: goToQuizzes,
+              onClose: goBack,
             });
             return;
           }
@@ -311,7 +313,7 @@ export default function EditAnswerKeyScreen() {
           title: "Offline",
           message:
             "This exam is not available offline. Please connect to the internet or download it first.",
-          onClose: goToQuizzes,
+          onClose: goBack,
         });
         return;
       }
@@ -410,7 +412,7 @@ export default function EditAnswerKeyScreen() {
             title: "Saved Offline",
             message:
               "Answer key saved offline. Changes will sync when you're back online.",
-            onClose: goToQuizzes,
+            onClose: goBack,
           });
         }
         return;
@@ -494,7 +496,7 @@ export default function EditAnswerKeyScreen() {
         type: "success",
         title: "Success",
         message: "Answer key saved successfully!",
-        onClose: goToQuizzes,
+        onClose: goBack,
       });
     } catch (error) {
       console.error("Error saving answer key:", error);
@@ -532,13 +534,13 @@ export default function EditAnswerKeyScreen() {
         style={[
           styles.questionCard,
           {
-            backgroundColor: darkModeEnabled ? "#1f2b26" : "#fff",
-            borderColor: darkModeEnabled ? "#34483f" : "#e0e0e0",
+            backgroundColor: darkModeEnabled ? "#1f2b26" : "#F7F7F8",
+            borderColor: darkModeEnabled ? "#34483f" : "#E8EBF0",
           },
         ]}
       >
-        <Text style={[styles.questionNumber, { color: darkModeEnabled ? "#e7f1eb" : "#333" }]}>
-          Question {item.questionNumber}
+        <Text style={[styles.questionNumber, { color: darkModeEnabled ? "#e7f1eb" : "#98A1B2" }]}>
+          {item.questionNumber}.
         </Text>
         <View style={styles.choicesContainer}>
           {choices.map((choice) => (
@@ -575,14 +577,25 @@ export default function EditAnswerKeyScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.bg }]}>
         <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
-          <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={darkModeEnabled ? "#fff" : "#1D2433"}
+            />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Edit Answer Key</Text>
-          <View style={styles.placeholder} />
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: darkModeEnabled ? "#fff" : "#1D2433" },
+            ]}
+          >
+            Set Answer Key
+          </Text>
+          <View style={styles.closeButton} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2d7a5f" />
+          <ActivityIndicator size="large" color="#20BE7B" />
           <Text style={styles.loadingText}>Loading answer key...</Text>
         </View>
       </View>
@@ -593,17 +606,24 @@ export default function EditAnswerKeyScreen() {
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
-        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+        <TouchableOpacity style={styles.backButton} onPress={goBack}>
+          <Ionicons
+            name="arrow-back"
+            size={24}
+            color={darkModeEnabled ? "#fff" : "#1D2433"}
+          />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Answer Key</Text>
-        {isOffline ? (
-          <View style={styles.offlineBadge}>
-            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
-          </View>
-        ) : (
-          <View style={styles.placeholder} />
-        )}
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: darkModeEnabled ? "#fff" : "#1D2433" },
+          ]}
+        >
+          Set Answer Key
+        </Text>
+        <TouchableOpacity style={styles.closeButton} onPress={goBack}>
+          <Ionicons name="close" size={20} color="#A8AFBC" />
+        </TouchableOpacity>
       </View>
 
       {/* Questions List */}
@@ -639,7 +659,7 @@ export default function EditAnswerKeyScreen() {
                 size={24}
                 color="#fff"
               />
-              <Text style={styles.saveButtonText}>Save Answer Key</Text>
+              <Text style={styles.saveButtonText}>Save Exam</Text>
             </>
           )}
         </TouchableOpacity>
@@ -692,26 +712,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#3d5a3d",
+    backgroundColor: "#FFFFFF",
     paddingTop: 56,
     paddingBottom: 16,
     paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
   },
   backButton: {
     padding: 4,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    color: "#fff",
+    fontWeight: "800",
+    color: "#1D2433",
   },
-  placeholder: {
-    width: 32,
-  },
-  offlineBadge: {
-    backgroundColor: "#ff9800",
-    borderRadius: 16,
-    padding: 6,
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F3F5F8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   loadingContainer: {
     flex: 1,
@@ -724,46 +746,53 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   listContent: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 8,
     paddingBottom: 100,
   },
   questionCard: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    minHeight: 104,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderColor: "#E8EBF0",
   },
   questionNumber: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 12,
+    width: 42,
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: "700",
+    color: "#98A1B2",
+    textAlign: "left",
+    fontVariant: ["tabular-nums"],
   },
   choicesContainer: {
     flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
+    gap: 10,
+    flex: 1,
+    justifyContent: "space-between",
+    marginLeft: 14,
   },
   choiceButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#e0e0e0",
+    borderWidth: 1,
+    borderColor: "#D9DEE7",
   },
   choiceButtonSelected: {
-    backgroundColor: "#2d7a5f",
-    borderColor: "#2d7a5f",
+    backgroundColor: "#20BE7B",
+    borderColor: "#20BE7B",
   },
   choiceText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
-    color: "#666",
+    color: "#8F98A8",
   },
   choiceTextSelected: {
     color: "#fff",
@@ -779,7 +808,7 @@ const styles = StyleSheet.create({
     borderTopColor: "#e0e0e0",
   },
   saveButton: {
-    backgroundColor: "#2d7a5f",
+    backgroundColor: "#20BE7B",
     borderRadius: 12,
     padding: 16,
     flexDirection: "row",

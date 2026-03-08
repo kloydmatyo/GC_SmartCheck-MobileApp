@@ -20,6 +20,7 @@ export interface Class {
   created_at: string;
   createdAt: Date;
   updatedAt: Date;
+  isArchived?: boolean;
 }
 
 export interface CreateClassData {
@@ -32,4 +33,5 @@ export interface CreateClassData {
   section_block: string;
   semester: string;
   students?: Student[];
+  isArchived?: boolean;
 }

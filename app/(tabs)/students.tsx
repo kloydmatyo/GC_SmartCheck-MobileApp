@@ -7,7 +7,8 @@ import { CacheSyncIndicator } from "@/components/student/CacheSyncIndicator";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
-import { StudentExtended } from "@/types/student";
+import { ClassService } from "@/services/classService";
+import { ImportResult, StudentExtended } from "@/types/student";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
@@ -84,6 +85,12 @@ export default function StudentsScreen() {
 
   // REQ 22: Import modal state
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importClassOptions, setImportClassOptions] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [selectedImportClassId, setSelectedImportClassId] = useState<string | null>(
+    null,
+  );
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [studentModalMode, setStudentModalMode] = useState<"add" | "edit">(
     "add",
@@ -265,6 +272,20 @@ export default function StudentsScreen() {
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
 
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
+      setSelectedImportClassId((current) =>
+        current && mappedClasses.some((item) => item.id === current)
+          ? current
+          : mappedClasses[0]?.id || null,
+      );
+
       await loadStudents();
     } catch (error) {
       console.error("Failed to initialize:", error);
@@ -400,6 +421,19 @@ export default function StudentsScreen() {
       await StudentDatabaseService.downloadStudentDatabase();
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
+      setSelectedImportClassId((current) =>
+        current && mappedClasses.some((item) => item.id === current)
+          ? current
+          : mappedClasses[0]?.id || null,
+      );
       await loadStudents();
     } catch (error) {
       console.error("Refresh failed:", error);
@@ -413,7 +447,33 @@ export default function StudentsScreen() {
     }
   };
 
-  const handleImportComplete = async () => {
+  const handleImportComplete = async (result: ImportResult) => {
+
+    if (selectedImportClassId && result.processedRows?.length) {
+      try {
+        const classData = await ClassService.getClassById(selectedImportClassId);
+        if (classData) {
+          const merged = [...classData.students];
+          const seen = new Set(merged.map((student) => student.student_id));
+
+          result.processedRows.forEach((row) => {
+            if (seen.has(row.studentId)) return;
+            seen.add(row.studentId);
+            merged.push({
+              student_id: row.studentId,
+              first_name: row.firstName,
+              last_name: row.lastName,
+              email: row.email,
+            });
+          });
+
+          await ClassService.updateClass(selectedImportClassId, { students: merged });
+        }
+      } catch (error) {
+        console.error("Failed to attach imported students to class:", error);
+      }
+    }
+
     setShowImportModal(false);
     // Refresh section list so newly imported sections appear in the filter immediately
     try {
@@ -421,6 +481,14 @@ export default function StudentsScreen() {
         await import("../../services/studentDatabaseService");
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
     } catch {
       // non-critical — sections will update on next pull-to-refresh
     }
@@ -1143,6 +1211,9 @@ export default function StudentsScreen() {
         visible={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={handleImportComplete}
+        classOptions={importClassOptions}
+        selectedClassId={selectedImportClassId}
+        onSelectClass={setSelectedImportClassId}
       />
 
       <Modal
