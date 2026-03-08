@@ -27,6 +27,14 @@ export default function RootLayout() {
   const [isSyncing, setIsSyncing] = useState(false);
   const isSyncingRef = useRef(false);
 
+  // Hide Android navigation bar
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setVisibilityAsync("hidden");
+      NavigationBar.setBehaviorAsync("overlay-swipe");
+    }
+  }, []);
+
   const performSync = async () => {
     if (isSyncingRef.current) return;
 

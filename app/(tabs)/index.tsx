@@ -17,6 +17,17 @@ import {
   View,
 } from "react-native";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
+import Toast from "react-native-toast-message";
+import { GradeStorageService } from "@/services/gradeStorageService";
+
+interface RecentExam {
+  id: string;
+  title: string;
+  subject: string;
+  date: string;
+  papers: number | null;
+  status: string;
+}
 
 const toDate = (value: any): Date | null => {
   if (!value) return null;
@@ -65,6 +76,11 @@ export default function HomeScreen() {
   const [recentExams, setRecentExams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState("Faculty User");
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingExams, setLoadingExams] = useState(false);
+  const [examsError, setExamsError] = useState<string | null>(null);
+  const [showAllExams, setShowAllExams] = useState(false);
 
   const loadDashboard = useCallback(() => {
     let cancelled = false;
@@ -204,19 +220,13 @@ export default function HomeScreen() {
   // ── Pull-to-refresh handler ──────────────────────────────────────────────
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    subscribeStats();
     loadRecentExams();
-  }, [subscribeStats, loadRecentExams]);
+  }, [loadRecentExams]);
   // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
   useFocusEffect(
     useCallback(() => {
-      subscribeStats();
       loadRecentExams();
-      return () => {
-        unsubscribeRef.current?.();
-        unsubscribeRef.current = null;
-      };
-    }, [subscribeStats, loadRecentExams]),
+    }, [loadRecentExams]),
   );
 
   // ── Manual Sync from Header ──────────────────────────────────────────────
@@ -513,61 +523,15 @@ export default function HomeScreen() {
               >
                 Create Exam
               </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                New quiz or test
+              </Text>
             </TouchableOpacity>
-
-        {/* Score Distribution Summary */}
-        {!loadingStats &&
-          stats.totalStudentsGraded > 0 &&
-          (() => {
-            const dist = stats.distribution;
-            const total = stats.totalStudentsGraded;
-            const maxCount = Math.max(
-              dist.A,
-              dist.B,
-              dist.C,
-              dist.D,
-              dist.F,
-              1,
-            );
-            const grades: {
-              label: string;
-              key: keyof typeof dist;
-              color: string;
-            }[] = [
-                { label: "A (≥90%)", key: "A", color: "#00a550" },
-                { label: "B (80–89%)", key: "B", color: "#4a90e2" },
-                { label: "C (70–79%)", key: "C", color: "#f5a623" },
-                { label: "D (60–69%)", key: "D", color: "#e67e22" },
-                { label: "F (<60%)", key: "F", color: "#e74c3c" },
-              ];
-            return (
-              <>
-                <View style={styles.distSection}>
-                  <Text style={styles.distTitle}>Score Distribution</Text>
-                  {grades.map(({ label, key, color }) => (
-                    <View key={key} style={styles.distRow}>
-                      <Text style={styles.distLabel}>{label}</Text>
-                      <View style={styles.distBarBg}>
-                        <View
-                          style={[
-                            styles.distBarFill,
-                            {
-                              width: `${Math.round((dist[key] / maxCount) * 100)}%`,
-                              backgroundColor: color,
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.distCount}>
-                        {dist[key]} (
-                        {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </>
-            );
-          })()}
 
             <TouchableOpacity
               style={[
@@ -802,21 +766,10 @@ export default function HomeScreen() {
           )}
         </View>
 
-        <View style={styles.buttonRow}>
-          {/* New Quiz Button */}
-          <TouchableOpacity
-            style={styles.newQuizButton}
-            onPress={() => router.push("/(tabs)/generator")}
-          >
-            <Ionicons name="add-circle" size={24} color="#fff" />
-            <Text style={styles.newQuizButtonText}>New Quiz</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={{ height: 20 }} />
+        <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* New Quiz FAB — floating bottom right */}
+      {/* Floating New Quiz Button */}
       <TouchableOpacity
         style={[
           styles.fab,
@@ -1151,10 +1104,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 8,
   },
+  fab: {
+    position: "absolute",
+    bottom: 80,
+    right: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 30,
+    elevation: 8,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    gap: 8,
+  },
   fabText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "700",
-    color: "#fff",
   },
 });
