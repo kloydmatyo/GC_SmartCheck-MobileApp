@@ -17,6 +17,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Modal,
     StyleSheet,
     Text,
     TextInput,
@@ -45,6 +46,8 @@ export default function QuizzesScreen() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [quizToDelete, setQuizToDelete] = useState<Quiz | null>(null);
 
   // Fetch quizzes from Firebase
   const loadQuizzes = async () => {
@@ -249,6 +252,93 @@ export default function QuizzesScreen() {
     }
   };
 
+  // Delete quiz/exam
+  const confirmDelete = (quiz: Quiz) => {
+    setQuizToDelete(quiz);
+    setShowDeleteDialog(true);
+  };
+
+  const handleDeleteQuiz = async () => {
+    if (!quizToDelete) return;
+
+    try {
+      const { deleteDoc, doc, collection, query, where, getDocs } =
+        await import("firebase/firestore");
+
+      // Delete the exam document first
+      await deleteDoc(doc(db, "exams", quizToDelete.id));
+
+      // Delete associated answer keys (with individual error handling)
+      try {
+        const answerKeysQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", quizToDelete.id)
+        );
+        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+
+        // Delete each answer key individually to handle permission errors
+        for (const answerKeyDoc of answerKeysSnapshot.docs) {
+          try {
+            await deleteDoc(answerKeyDoc.ref);
+          } catch (keyError) {
+            console.log(
+              `Could not delete answer key ${answerKeyDoc.id}:`,
+              keyError
+            );
+          }
+        }
+      } catch (answerKeysError) {
+        console.log("Error querying answer keys:", answerKeysError);
+      }
+
+      // Delete associated templates (with individual error handling)
+      try {
+        const templatesQuery = query(
+          collection(db, "templates"),
+          where("examId", "==", quizToDelete.id)
+        );
+        const templatesSnapshot = await getDocs(templatesQuery);
+
+        // Delete each template individually to handle permission errors
+        for (const templateDoc of templatesSnapshot.docs) {
+          try {
+            await deleteDoc(templateDoc.ref);
+          } catch (templateError) {
+            console.log(
+              `Could not delete template ${templateDoc.id}:`,
+              templateError
+            );
+          }
+        }
+      } catch (templatesError) {
+        console.log("Error querying templates:", templatesError);
+      }
+
+      // Remove from offline storage if downloaded
+      if (quizToDelete.isDownloaded) {
+        try {
+          await OfflineStorageService.deleteDownloadedExam(quizToDelete.id);
+        } catch (offlineError) {
+          console.log("Error removing from offline storage:", offlineError);
+        }
+      }
+
+      // Update UI
+      setQuizzes((prev) => prev.filter((q) => q.id !== quizToDelete.id));
+
+      Alert.alert("Success", `"${quizToDelete.title}" has been deleted`);
+    } catch (error) {
+      console.error("Error deleting quiz:", error);
+      Alert.alert(
+        "Error",
+        "Failed to delete quiz. Please check your permissions."
+      );
+    } finally {
+      setShowDeleteDialog(false);
+      setQuizToDelete(null);
+    }
+  };
+
   const renderQuizCard = ({ item }: { item: Quiz }) => (
     <TouchableOpacity
       style={[
@@ -322,6 +412,13 @@ export default function QuizzesScreen() {
           <TouchableOpacity style={styles.actionButton}>
             <Ionicons name="share-social-outline" size={12} color="#fff" />
             <Text style={styles.actionText}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => confirmDelete(item)}
+          >
+            <Ionicons name="trash-outline" size={12} color="#fff" />
+            <Text style={styles.actionText}>Delete</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -461,6 +558,49 @@ export default function QuizzesScreen() {
         <Ionicons name="add-circle" size={22} color="#fff" />
         <Text style={styles.newQuizText}>New Quiz</Text>
       </TouchableOpacity>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteDialog}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteDialog(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={48} color="#ef4444" />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.title }]}>Delete Quiz</Text>
+            <Text style={[styles.modalMessage, { color: colors.subtitle }]}>
+              Are you sure you want to delete "{quizToDelete?.title}"?
+              {"\n\n"}
+              This will permanently delete:
+              {"\n"}• The exam
+              {"\n"}• All answer keys
+              {"\n"}• Associated templates
+              {"\n"}• Offline copies
+              {"\n\n"}
+              This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel, { borderColor: colors.cardBorder }]}
+                onPress={() => setShowDeleteDialog(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.subtitle }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonDelete]}
+                onPress={handleDeleteQuiz}
+              >
+                <Ionicons name="trash-outline" size={18} color="#fff" />
+                <Text style={[styles.modalButtonText, styles.modalButtonDeleteText]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -702,4 +842,64 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
   },
+  deleteButton: {
+    backgroundColor: "#dc2626",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    alignItems: "center",
+  },
+  modalHeader: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 6,
+  },
+  modalButtonCancel: {
+    borderWidth: 1,
+  },
+  modalButtonDelete: {
+    backgroundColor: "#dc2626",
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalButtonDeleteText: {
+    color: "#fff",
+  },
 });
+

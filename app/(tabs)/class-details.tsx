@@ -436,45 +436,6 @@ export default function ClassDetailsScreen() {
                   </Text>
                 </View>
               </View>
-
-              <View style={styles.infoRow}>
-                <Ionicons name="calendar-outline" size={20} color="#d2e8dc" />
-                <View style={styles.infoContent}>
-                  <Text style={[styles.infoLabel, styles.infoLabelOnDark]}>
-                    Schedule
-                  </Text>
-                  <Text style={[styles.infoValue, styles.infoValueOnDark]}>
-                    {Array.isArray(classData.schedule_day)
-                      ? classData.schedule_day.join(", ")
-                      : classData.schedule_day}{" "}
-                    {classData.schedule_time}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.infoRow}>
-                <Ionicons name="school-outline" size={20} color="#d2e8dc" />
-                <View style={styles.infoContent}>
-                  <Text style={[styles.infoLabel, styles.infoLabelOnDark]}>
-                    School Year
-                  </Text>
-                  <Text style={[styles.infoValue, styles.infoValueOnDark]}>
-                    {classData.school_year}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.infoRow}>
-                <Ionicons name="time-outline" size={20} color="#d2e8dc" />
-                <View style={styles.infoContent}>
-                  <Text style={[styles.infoLabel, styles.infoLabelOnDark]}>
-                    Semester
-                  </Text>
-                  <Text style={[styles.infoValue, styles.infoValueOnDark]}>
-                    {classData.semester}
-                  </Text>
-                </View>
-              </View>
             </View>
           </>
         )}

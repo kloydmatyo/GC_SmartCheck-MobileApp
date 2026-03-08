@@ -354,6 +354,41 @@ export default function CreateQuizScreen() {
       console.log("Creating answer key with ID:", answerKeyId);
       await setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData);
       console.log("Answer key created successfully");
+
+      // Create template automatically
+      try {
+        console.log("Creating template for exam...");
+        const templateData = {
+          name: `${quizName.trim()}_Template`,
+          description: `Answer sheet template for ${quizName.trim()}`,
+          numQuestions: numQuestions,
+          choicesPerQuestion: 5, // A-E
+          layout:
+            numQuestions === 20
+              ? "quad"
+              : numQuestions === 50
+                ? "double"
+                : "single",
+          includeStudentId: true,
+          studentIdLength: 10,
+          createdBy: currentUser.uid,
+          instructorId: instructorId,
+          classId: selectedClass?.id || null,
+          className: selectedClass?.class_name || null,
+          examId: examRef.id,
+          examName: quizName.trim(),
+          examCode: examCode,
+          createdAt: serverTimestamp(),
+          isArchived: false,
+        };
+
+        await addDoc(collection(db, "templates"), templateData);
+        console.log("Template created successfully");
+      } catch (templateError) {
+        console.error("Error creating template:", templateError);
+        // Don't fail the exam creation if template fails
+      }
+
       console.log("=== Quiz Creation Complete ===");
 
       setCreatedExamId(examRef.id);

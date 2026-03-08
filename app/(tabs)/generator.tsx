@@ -13,12 +13,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import AnswerSheetGenerator from "../../components/generator/AnswerSheetGenerator";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 
 export default function GeneratorTab() {
   const router = useRouter();
-  const [showGenerator, setShowGenerator] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const topInset =
     Platform.OS === "android" ? (StatusBar.currentHeight || 0) : 0;
@@ -67,15 +65,6 @@ export default function GeneratorTab() {
         icon: "#3d5a3d",
       };
 
-  if (showGenerator) {
-    return (
-      <AnswerSheetGenerator
-        onClose={() => setShowGenerator(false)}
-        darkModeEnabled={darkModeEnabled}
-      />
-    );
-  }
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.screenBg }]}>
       <ScrollView
@@ -103,9 +92,9 @@ export default function GeneratorTab() {
 
         <View style={styles.header}>
           <Ionicons name="document-text" size={50} color={colors.icon} />
-          <Text style={[styles.title, { color: colors.title }]}>Answer Sheet Generator</Text>
+          <Text style={[styles.title, { color: colors.title }]}>Answer Sheet Templates</Text>
           <Text style={[styles.subtitle, { color: colors.subtitle }]}>
-            Create Zipgrade-compatible answer sheets for testing
+            Manage and download Zipgrade-compatible answer sheets
           </Text>
         </View>
 
@@ -117,19 +106,19 @@ export default function GeneratorTab() {
         >
           <View style={styles.feature}>
             <Ionicons name="document-outline" size={24} color={colors.icon} />
-            <Text style={[styles.featureText, { color: colors.title }]}>Generate blank answer sheets</Text>
+            <Text style={[styles.featureText, { color: colors.title }]}>Download blank answer sheets</Text>
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="flask" size={24} color={colors.icon} />
+            <Ionicons name="archive" size={24} color={colors.icon} />
             <Text style={[styles.featureText, { color: colors.title }]}>
-              Create pre-filled test sheets
+              Archive and restore templates
             </Text>
           </View>
 
           <View style={styles.feature}>
-            <Ionicons name="grid" size={24} color={colors.icon} />
-            <Text style={[styles.featureText, { color: colors.title }]}>Multiple template options</Text>
+            <Ionicons name="search" size={24} color={colors.icon} />
+            <Text style={[styles.featureText, { color: colors.title }]}>Search and filter templates</Text>
           </View>
 
           <View style={styles.feature}>
@@ -140,10 +129,10 @@ export default function GeneratorTab() {
 
         <TouchableOpacity
           style={[styles.generateButton, { backgroundColor: colors.primary, shadowColor: colors.primary }]}
-          onPress={() => setShowGenerator(true)}
+          onPress={() => router.push("/(tabs)/template-preview")}
         >
-          <Ionicons name="add-circle" size={24} color="white" />
-          <Text style={styles.generateButtonText}>Create Answer Sheet</Text>
+          <Ionicons name="eye" size={24} color="white" />
+          <Text style={styles.generateButtonText}>Preview Templates</Text>
         </TouchableOpacity>
 
         <View
@@ -182,13 +171,13 @@ export default function GeneratorTab() {
         >
           <Text style={[styles.instructionsTitle, { color: colors.title }]}>How to use:</Text>
           <Text style={[styles.instructionText, { color: colors.subtitle }]}>
-            1. Select a template (20, 50, or 100 questions)
+            1. Templates are automatically created when you create an exam
           </Text>
           <Text style={[styles.instructionText, { color: colors.subtitle }]}>
-            2. Configure exam ID and version
+            2. Browse and search your templates
           </Text>
           <Text style={[styles.instructionText, { color: colors.subtitle }]}>
-            3. Generate blank or pre-filled test sheets
+            3. Download PDFs for printing
           </Text>
           <Text style={[styles.instructionText, { color: colors.subtitle }]}>
             4. Print and use with the scanner
