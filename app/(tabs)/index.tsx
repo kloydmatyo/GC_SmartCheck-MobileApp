@@ -445,11 +445,7 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons
-                name="people-outline"
-                size={18}
-                color="#24362f"
-              />
+              <Ionicons name="people-outline" size={18} color="#24362f" />
             </View>
             <Text style={[styles.statValue, { color: colors.value }]}>
               {loading ? "-" : stats.totalStudents}
@@ -474,11 +470,7 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons
-                name="document-outline"
-                size={18}
-                color="#24362f"
-              />
+              <Ionicons name="document-outline" size={18} color="#24362f" />
             </View>
             <Text style={[styles.statLabel, { color: colors.subtitle }]}>
               Answer Sheets
