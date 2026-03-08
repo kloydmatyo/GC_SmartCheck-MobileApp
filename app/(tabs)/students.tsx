@@ -9,24 +9,25 @@ import { auth, db } from "@/config/firebase";
 import { StudentExtended } from "@/types/student";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where
+    collection,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    RefreshControl,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 export default function StudentsScreen() {
@@ -141,14 +142,7 @@ export default function StudentsScreen() {
     try {
       setIsLoading(true);
 
-      if (!auth.currentUser) {
-        console.error("User not authenticated");
-        setStudents([]);
-        setTotalCount(0);
-        return;
-      }
-
-      // REQ 36: Use SQLite for indexed server-side queries
+      // REQ 36: Use SQLite/cache for indexed queries (no auth required for local read)
       try {
         const { StudentDatabaseService } =
           await import("../../services/studentDatabaseService");
@@ -173,6 +167,14 @@ export default function StudentsScreen() {
           "[Students] SQLite query failed, falling back to Firestore:",
           sqliteError,
         );
+
+        // Guard Firestore fallback — requires authentication
+        if (!auth.currentUser) {
+          console.warn("[Students] Not authenticated — skipping Firestore fallback");
+          setStudents([]);
+          setTotalCount(0);
+          return;
+        }
 
         // Fallback to Firestore if SQLite fails
         const studentsRef = collection(db, "students");
@@ -268,7 +270,7 @@ export default function StudentsScreen() {
       Alert.alert(
         "Refresh Failed",
         "Could not sync with the server. Showing cached data.",
-        [{ text: 'OK' }]
+        [{ text: "OK" }],
       );
     } finally {
       setIsRefreshing(false);

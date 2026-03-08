@@ -5,14 +5,22 @@
  */
 
 import { auth, db } from "@/config/firebase";
-import { collection, addDoc, doc, query, where, getDocs, writeBatch } from "firebase/firestore";
-import { 
-  ImportRow, 
-  ImportValidationError, 
-  ImportResult, 
-  ImportSession,
-  StudentExtended 
+import {
+    ImportResult,
+    ImportRow,
+    ImportSession,
+    ImportValidationError,
+    StudentExtended,
 } from "@/types/student";
+import {
+    addDoc,
+    collection,
+    doc,
+    getDocs,
+    query,
+    where,
+    writeBatch,
+} from "firebase/firestore";
 import { StudentValidationService } from "./studentValidationService";
 // Offline cache disabled due to SQLite compatibility issues
 // import { StudentDatabaseService } from "./studentDatabaseService";
@@ -20,26 +28,35 @@ import { StudentValidationService } from "./studentValidationService";
 // File validation constants
 const IMPORT_CONFIG = {
   MAX_FILE_SIZE: 5 * 1024 * 1024, // 5MB
-  ALLOWED_TYPES: ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  ALLOWED_TYPES: [
+    "text/csv",
+    "text/plain",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ],
   BATCH_SIZE: 100,
-  REQUIRED_FIELDS: ['student_id', 'first_name', 'last_name']
+  REQUIRED_FIELDS: ["student_id", "first_name", "last_name"],
 };
 
 export class StudentImportService {
   /**
    * REQ 23: Validate file type and size
    */
-  static validateFile(fileUri: string, fileSize: number, mimeType: string): ImportValidationError[] {
+  static validateFile(
+    fileUri: string,
+    fileSize: number,
+    mimeType: string,
+  ): ImportValidationError[] {
     const errors: ImportValidationError[] = [];
 
     // Check file size
     if (fileSize > IMPORT_CONFIG.MAX_FILE_SIZE) {
       errors.push({
         rowNumber: 0,
-        field: 'file',
+        field: "file",
         value: `${fileSize} bytes`,
         error: `File size exceeds maximum of ${IMPORT_CONFIG.MAX_FILE_SIZE / 1024 / 1024}MB`,
-        severity: 'error'
+        severity: "error",
       });
     }
 
@@ -47,10 +64,10 @@ export class StudentImportService {
     if (!IMPORT_CONFIG.ALLOWED_TYPES.includes(mimeType.toLowerCase())) {
       errors.push({
         rowNumber: 0,
-        field: 'file',
+        field: "file",
         value: mimeType,
-        error: 'Invalid file type. Only CSV and Excel files are allowed',
-        severity: 'error'
+        error: "Invalid file type. Only CSV and Excel files are allowed",
+        severity: "error",
       });
     }
 
@@ -58,53 +75,75 @@ export class StudentImportService {
   }
 
   /**
+   * Normalize a single CSV header cell to its canonical machine-key form.
+   * Handles: BOM, quotes, leading/trailing spaces, parenthetical notes like
+   * "(optional)", mixed capitalisation, and spaces-vs-underscores.
+   *
+   * Examples:
+   *   "Student ID"       → "student_id"
+   *   "First Name"       → "first_name"
+   *   "Email (Optional)" → "email"
+   *   "  Section  "      → "section"
+   */
+  private static normalizeHeader(raw: string): string {
+    return raw
+      .replace(/^\uFEFF/, "") // BOM
+      .replace(/["']/g, "") // strip surrounding quotes
+      .trim()
+      .toLowerCase()
+      .replace(/\s*\([^)]*\)/g, "") // strip parenthetical: "(optional)", etc.
+      .trim()
+      .replace(/\s+/g, "_"); // spaces → underscores
+  }
+
+  /**
    * REQ 24: Parse CSV file content
    */
   static parseCSV(fileContent: string): ImportRow[] {
-    const lines = fileContent.trim().split('\n');
+    const lines = fileContent.trim().split("\n");
     if (lines.length === 0) return [];
 
-    // Parse header
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    
+    // Parse header using normalizer so template-style column names are accepted
+    const headers = lines[0].split(",").map((h) => this.normalizeHeader(h));
+
     // Parse rows
     const rows: ImportRow[] = [];
-    
+
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim());
-      
+      const values = lines[i].split(",").map((v) => v.trim());
+
       if (values.length < headers.length) continue; // Skip incomplete rows
 
       const row: ImportRow = {
         rowNumber: i + 1,
-        studentId: '',
-        firstName: '',
-        lastName: '',
+        studentId: "",
+        firstName: "",
+        lastName: "",
         email: undefined,
-        section: undefined
+        section: undefined,
       };
 
       headers.forEach((header, index) => {
-        const value = values[index] || '';
-        
+        const value = values[index] || "";
+
         switch (header) {
-          case 'student_id':
-          case 'studentid':
-          case 'id':
+          case "student_id":
+          case "studentid":
+          case "id":
             row.studentId = value;
             break;
-          case 'first_name':
-          case 'firstname':
+          case "first_name":
+          case "firstname":
             row.firstName = value;
             break;
-          case 'last_name':
-          case 'lastname':
+          case "last_name":
+          case "lastname":
             row.lastName = value;
             break;
-          case 'email':
+          case "email":
             row.email = value;
             break;
-          case 'section':
+          case "section":
             row.section = value;
             break;
         }
@@ -123,57 +162,60 @@ export class StudentImportService {
     const errors: ImportValidationError[] = [];
 
     // Validate required fields
-    if (!row.studentId || row.studentId.trim() === '') {
+    if (!row.studentId || row.studentId.trim() === "") {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'student_id',
+        field: "student_id",
         value: row.studentId,
-        error: 'Student ID is required',
-        severity: 'error'
+        error: "Student ID is required",
+        severity: "error",
       });
     }
 
-    if (!row.firstName || row.firstName.trim() === '') {
+    if (!row.firstName || row.firstName.trim() === "") {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'first_name',
+        field: "first_name",
         value: row.firstName,
-        error: 'First name is required',
-        severity: 'error'
+        error: "First name is required",
+        severity: "error",
       });
     }
 
-    if (!row.lastName || row.lastName.trim() === '') {
+    if (!row.lastName || row.lastName.trim() === "") {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'last_name',
+        field: "last_name",
         value: row.lastName,
-        error: 'Last name is required',
-        severity: 'error'
+        error: "Last name is required",
+        severity: "error",
       });
     }
 
     // Validate student ID format
-    if (row.studentId && !StudentValidationService.isValidIdFormat(row.studentId)) {
+    if (
+      row.studentId &&
+      !StudentValidationService.isValidIdFormat(row.studentId)
+    ) {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'student_id',
+        field: "student_id",
         value: row.studentId,
-        error: 'Invalid student ID format (must be 8 digits)',
-        severity: 'error'
+        error: "Invalid student ID format (must be 8 digits)",
+        severity: "error",
       });
     }
 
     // Validate email format
-    if (row.email && row.email.trim() !== '') {
+    if (row.email && row.email.trim() !== "") {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(row.email)) {
         errors.push({
           rowNumber: row.rowNumber,
-          field: 'email',
+          field: "email",
           value: row.email,
-          error: 'Invalid email format',
-          severity: 'warning'
+          error: "Invalid email format",
+          severity: "warning",
         });
       }
     }
@@ -182,20 +224,20 @@ export class StudentImportService {
     if (row.firstName && row.firstName.length > 100) {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'first_name',
+        field: "first_name",
         value: row.firstName,
-        error: 'First name exceeds maximum length of 100 characters',
-        severity: 'warning'
+        error: "First name exceeds maximum length of 100 characters",
+        severity: "warning",
       });
     }
 
     if (row.lastName && row.lastName.length > 100) {
       errors.push({
         rowNumber: row.rowNumber,
-        field: 'last_name',
+        field: "last_name",
         value: row.lastName,
-        error: 'Last name exceeds maximum length of 100 characters',
-        severity: 'warning'
+        error: "Last name exceeds maximum length of 100 characters",
+        severity: "warning",
       });
     }
 
@@ -205,15 +247,17 @@ export class StudentImportService {
   /**
    * REQ 26: Duplicate detection query
    */
-  static async checkForDuplicates(rows: ImportRow[]): Promise<Map<string, number[]>> {
+  static async checkForDuplicates(
+    rows: ImportRow[],
+  ): Promise<Map<string, number[]>> {
     const duplicates = new Map<string, number[]>();
 
     // Check for duplicates within the file
     const idMap = new Map<string, number[]>();
-    
-    rows.forEach(row => {
+
+    rows.forEach((row) => {
       if (!row.studentId) return;
-      
+
       if (!idMap.has(row.studentId)) {
         idMap.set(row.studentId, []);
       }
@@ -231,16 +275,15 @@ export class StudentImportService {
     try {
       const studentIds = Array.from(idMap.keys());
       const existingIds = await this.checkExistingStudents(studentIds);
-      
-      existingIds.forEach(studentId => {
+
+      existingIds.forEach((studentId) => {
         const rowNumbers = idMap.get(studentId) || [];
         if (rowNumbers.length > 0) {
           duplicates.set(`existing_${studentId}`, rowNumbers);
         }
       });
-
     } catch (error) {
-      console.error('[Import] Duplicate check failed:', error);
+      console.error("[Import] Duplicate check failed:", error);
     }
 
     return duplicates;
@@ -249,17 +292,19 @@ export class StudentImportService {
   /**
    * Check which student IDs already exist in Firestore
    */
-  private static async checkExistingStudents(studentIds: string[]): Promise<string[]> {
+  private static async checkExistingStudents(
+    studentIds: string[],
+  ): Promise<string[]> {
     try {
-      const studentsRef = collection(db, 'students');
+      const studentsRef = collection(db, "students");
       const existing: string[] = [];
 
       // Query in batches of 10 (Firestore 'in' query limit)
       for (let i = 0; i < studentIds.length; i += 10) {
         const batch = studentIds.slice(i, i + 10);
-        const q = query(studentsRef, where('student_id', 'in', batch));
+        const q = query(studentsRef, where("student_id", "in", batch));
         const querySnapshot = await getDocs(q);
-        
+
         querySnapshot.forEach((doc: any) => {
           const data = doc.data();
           existing.push(data.student_id);
@@ -267,9 +312,8 @@ export class StudentImportService {
       }
 
       return existing;
-
     } catch (error) {
-      console.error('[Import] Failed to check existing students:', error);
+      console.error("[Import] Failed to check existing students:", error);
       return [];
     }
   }
@@ -280,40 +324,49 @@ export class StudentImportService {
   static validateCSVHeaders(fileContent: string): ImportValidationError[] {
     const errors: ImportValidationError[] = [];
     // Strip UTF-8 BOM (\uFEFF) that Excel-exported CSV files prepend
-    const stripped = fileContent.replace(/^\uFEFF/, '');
-    const firstLine = stripped.trim().split('\n')[0] || '';
-    const headers = firstLine.split(',').map(h => h.trim().toLowerCase().replace(/["']/g, ''));
+    const stripped = fileContent.replace(/^\uFEFF/, "");
+    const firstLine = stripped.trim().split("\n")[0] || "";
+    // Use normalizeHeader so template headers like "Student ID", "First Name",
+    // "Email (Optional)" are accepted alongside machine-key equivalents.
+    const headers = firstLine.split(",").map((h) => this.normalizeHeader(h));
     const headerSet = new Set(headers);
 
-    const hasStudentId = headerSet.has('student_id') || headerSet.has('studentid') || headerSet.has('id');
-    const hasFirstName = headerSet.has('first_name') || headerSet.has('firstname');
-    const hasLastName = headerSet.has('last_name') || headerSet.has('lastname');
+    const hasStudentId =
+      headerSet.has("student_id") ||
+      headerSet.has("studentid") ||
+      headerSet.has("id");
+    const hasFirstName =
+      headerSet.has("first_name") || headerSet.has("firstname");
+    const hasLastName = headerSet.has("last_name") || headerSet.has("lastname");
 
     if (!hasStudentId) {
       errors.push({
         rowNumber: 0,
-        field: 'header',
+        field: "header",
         value: firstLine,
-        error: 'Missing required column: student_id (accepted: student_id, studentid, id)',
-        severity: 'error'
+        error:
+          "Missing required column: student_id (accepted: student_id, studentid, id)",
+        severity: "error",
       });
     }
     if (!hasFirstName) {
       errors.push({
         rowNumber: 0,
-        field: 'header',
+        field: "header",
         value: firstLine,
-        error: 'Missing required column: first_name (accepted: first_name, firstname)',
-        severity: 'error'
+        error:
+          "Missing required column: first_name (accepted: first_name, firstname)",
+        severity: "error",
       });
     }
     if (!hasLastName) {
       errors.push({
         rowNumber: 0,
-        field: 'header',
+        field: "header",
         value: firstLine,
-        error: 'Missing required column: last_name (accepted: last_name, lastname)',
-        severity: 'error'
+        error:
+          "Missing required column: last_name (accepted: last_name, lastname)",
+        severity: "error",
       });
     }
 
@@ -328,7 +381,7 @@ export class StudentImportService {
     fileSize: number,
     mimeType: string,
     fileContent: string,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
   ): Promise<ImportResult> {
     const sessionId = `import_${Date.now()}`;
     const timestamp = new Date().toISOString();
@@ -336,11 +389,11 @@ export class StudentImportService {
     // REQ 30: Create import session
     const session: ImportSession = {
       id: sessionId,
-      filename: fileUri.split('/').pop() || 'unknown',
+      filename: fileUri.split("/").pop() || "unknown",
       fileSize,
       startedAt: timestamp,
-      status: 'processing',
-      userId: auth.currentUser?.uid
+      status: "processing",
+      userId: auth.currentUser?.uid,
     };
 
     try {
@@ -356,7 +409,7 @@ export class StudentImportService {
           errors: fileErrors,
           processedRows: [],
           sessionId,
-          timestamp
+          timestamp,
         };
       }
 
@@ -372,7 +425,7 @@ export class StudentImportService {
           errors: headerErrors,
           processedRows: [],
           sessionId,
-          timestamp
+          timestamp,
         };
       }
 
@@ -386,7 +439,7 @@ export class StudentImportService {
       const allErrors: ImportValidationError[] = [];
       const validRows: ImportRow[] = [];
 
-      rows.forEach(row => {
+      rows.forEach((row) => {
         const rowErrors = this.validateRow(row);
         if (rowErrors.length > 0) {
           allErrors.push(...rowErrors);
@@ -403,15 +456,15 @@ export class StudentImportService {
 
       // Add duplicate errors
       duplicates.forEach((rowNumbers, studentId) => {
-        rowNumbers.forEach(rowNumber => {
+        rowNumbers.forEach((rowNumber) => {
           allErrors.push({
             rowNumber,
-            field: 'student_id',
-            value: studentId.replace('existing_', ''),
-            error: studentId.startsWith('existing_') 
-              ? 'Student ID already exists in database'
-              : 'Duplicate student ID in import file',
-            severity: 'error'
+            field: "student_id",
+            value: studentId.replace("existing_", ""),
+            error: studentId.startsWith("existing_")
+              ? "Student ID already exists in database"
+              : "Duplicate student ID in import file",
+            severity: "error",
           });
         });
       });
@@ -419,8 +472,10 @@ export class StudentImportService {
       onProgress?.(50);
 
       // Filter out rows with errors or duplicates
-      const rowsToInsert = validRows.filter(row => {
-        const hasDuplicate = Array.from(duplicates.values()).some(nums => nums.includes(row.rowNumber));
+      const rowsToInsert = validRows.filter((row) => {
+        const hasDuplicate = Array.from(duplicates.values()).some((nums) =>
+          nums.includes(row.rowNumber),
+        );
         return !hasDuplicate;
       });
 
@@ -434,8 +489,10 @@ export class StudentImportService {
       onProgress?.(100);
 
       // Count errors and warnings
-      const errorCount = allErrors.filter(e => e.severity === 'error').length;
-      const warningCount = allErrors.filter(e => e.severity === 'warning').length;
+      const errorCount = allErrors.filter((e) => e.severity === "error").length;
+      const warningCount = allErrors.filter(
+        (e) => e.severity === "warning",
+      ).length;
 
       const result: ImportResult = {
         totalRows,
@@ -446,17 +503,16 @@ export class StudentImportService {
         errors: allErrors,
         processedRows: rowsToInsert,
         sessionId,
-        timestamp
+        timestamp,
       };
 
       // REQ 30: Log import session
       await this.logImportSession(session, result);
 
       return result;
-
     } catch (error) {
-      console.error('[Import] Processing failed:', error);
-      
+      console.error("[Import] Processing failed:", error);
+
       // REQ 31: Rollback mechanism
       await this.rollbackImport(sessionId);
 
@@ -469,7 +525,7 @@ export class StudentImportService {
    */
   private static async insertStudentsBatch(
     rows: ImportRow[],
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
   ): Promise<number> {
     try {
       let insertedCount = 0;
@@ -482,10 +538,12 @@ export class StudentImportService {
 
         // Use Firestore batch write
         const firestoreBatch = writeBatch(db);
-        const studentsRef = collection(db, 'students');
+        const studentsRef = collection(db, "students");
 
-        batch.forEach(row => {
-          const studentData: Omit<StudentExtended, 'student_id'> & { student_id: string } = {
+        batch.forEach((row) => {
+          const studentData: Omit<StudentExtended, "student_id"> & {
+            student_id: string;
+          } = {
             student_id: row.studentId,
             first_name: row.firstName,
             last_name: row.lastName,
@@ -493,7 +551,7 @@ export class StudentImportService {
             section: row.section,
             is_active: true,
             created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
           };
 
           const newDocRef = doc(studentsRef); // auto-generate Firestore doc ID
@@ -510,16 +568,19 @@ export class StudentImportService {
 
       // REQ 30: Sync offline cache after import
       try {
-        const { StudentDatabaseService } = await import('@/services/studentDatabaseService');
+        const { StudentDatabaseService } =
+          await import("@/services/studentDatabaseService");
         await StudentDatabaseService.downloadStudentDatabase();
       } catch (cacheError) {
-        console.warn('[Import] Offline cache sync failed (non-critical):', cacheError);
+        console.warn(
+          "[Import] Offline cache sync failed (non-critical):",
+          cacheError,
+        );
       }
 
       return insertedCount;
-
     } catch (error) {
-      console.error('[Import] Batch insert failed:', error);
+      console.error("[Import] Batch insert failed:", error);
       throw error;
     }
   }
@@ -527,22 +588,24 @@ export class StudentImportService {
   /**
    * REQ 30: Log import session
    */
-  private static async logImportSession(session: ImportSession, result: ImportResult): Promise<void> {
+  private static async logImportSession(
+    session: ImportSession,
+    result: ImportResult,
+  ): Promise<void> {
     try {
       const completedSession: ImportSession = {
         ...session,
         completedAt: new Date().toISOString(),
-        status: result.errorCount > 0 ? 'completed' : 'completed',
-        result
+        status: result.errorCount > 0 ? "completed" : "completed",
+        result,
       };
 
       // REQ 28: Save import session to Firestore
-      console.log('[Import] Session logged:', completedSession);
-      
-      await addDoc(collection(db, 'import_sessions'), completedSession);
+      console.log("[Import] Session logged:", completedSession);
 
+      await addDoc(collection(db, "import_sessions"), completedSession);
     } catch (error) {
-      console.error('[Import] Failed to log session:', error);
+      console.error("[Import] Failed to log session:", error);
     }
   }
 
@@ -552,17 +615,16 @@ export class StudentImportService {
   private static async rollbackImport(sessionId: string): Promise<void> {
     try {
       console.log(`[Import] Rolling back session: ${sessionId}`);
-      
+
       // In production, this would:
       // 1. Query all students added in this session
       // 2. Delete them from Firestore
       // 3. Update session status to 'rolled_back'
-      
-      // For now, just log the rollback attempt
-      console.log('[Import] Rollback completed');
 
+      // For now, just log the rollback attempt
+      console.log("[Import] Rollback completed");
     } catch (error) {
-      console.error('[Import] Rollback failed:', error);
+      console.error("[Import] Rollback failed:", error);
     }
   }
 
@@ -578,7 +640,7 @@ export class StudentImportService {
       section: row.section,
       is_active: true,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     };
   }
 }
