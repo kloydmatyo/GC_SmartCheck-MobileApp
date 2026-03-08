@@ -1,28 +1,99 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
-import React from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Tabs, useFocusEffect } from "expo-router";
+import React, { useCallback, useState } from "react";
+import { DeviceEventEmitter, View } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 
 export default function TabLayout() {
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+
+  const loadDarkModePreference = useCallback(async () => {
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    } catch (error) {
+      console.warn("Failed to load dark mode preference:", error);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        await loadDarkModePreference();
+        if (!active) return;
+      })();
+      return () => {
+        active = false;
+      };
+    }, [loadDarkModePreference]),
+  );
+
+  React.useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      "darkModeChanged",
+      (value: boolean) => {
+        setDarkModeEnabled(Boolean(value));
+      },
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const tabColors = darkModeEnabled
+    ? {
+        active: "#8fd1ad",
+        inactive: "#9db1a6",
+        bg: "#1a2520",
+        border: "#2b3b34",
+        shadow: "#000000",
+      }
+    : {
+        active: "#00a550",
+        inactive: "#666",
+        bg: "#f5f5f5",
+        border: "#e0e0e0",
+        shadow: "#000000",
+      };
+
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#00a550",
-        tabBarInactiveTintColor: "#666",
+        sceneStyle: {
+          backgroundColor: darkModeEnabled ? "#111815" : "#f5f5f5",
+        },
+        tabBarActiveTintColor: tabColors.active,
+        tabBarInactiveTintColor: tabColors.inactive,
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarBackground: () => (
+          <View style={{ flex: 1, backgroundColor: tabColors.bg }} />
+        ),
         tabBarStyle: {
-          backgroundColor: "#f5f5f5",
+          backgroundColor: tabColors.bg,
           borderTopWidth: 1,
-          borderTopColor: "#e0e0e0",
+          borderTopColor: tabColors.border,
           height: 60,
           paddingBottom: 8,
           paddingTop: 8,
+          paddingHorizontal: 0,
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+          shadowColor: tabColors.shadow,
+          shadowOffset: { width: 0, height: -3 },
+          shadowOpacity: darkModeEnabled ? 0.35 : 0.08,
+          shadowRadius: 8,
+          elevation: 12,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "500",
+          fontSize: 11,
+          fontWeight: "600",
+          marginTop: 2,
+        },
+        tabBarIconStyle: {
+          marginTop: 2,
         },
       }}
     >
@@ -33,7 +104,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "home" : "home-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -46,7 +117,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "school" : "school-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -59,7 +130,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "book" : "book-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -72,7 +143,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "people" : "people-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -85,7 +156,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "settings" : "settings-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -125,7 +196,7 @@ export default function TabLayout() {
         name="create-quiz"
         options={{
           href: null,
-          tabBarStyle: { display: "none" },
+          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen
@@ -148,6 +219,12 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="print-answer-sheet"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="batch-history"
         options={{
           href: null,
         }}

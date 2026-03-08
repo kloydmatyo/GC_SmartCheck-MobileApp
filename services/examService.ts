@@ -4,6 +4,26 @@ import { ExamPreviewData } from "../types/exam";
 import { AuditLogService } from "./auditLogService";
 
 export class ExamService {
+  private static isNetworkRelatedError(error: any): boolean {
+    const text = [
+      error?.message ?? "",
+      error?.code ?? "",
+      error?.name ?? "",
+      String(error ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      text.includes("network") ||
+      text.includes("offline") ||
+      text.includes("unavailable") ||
+      text.includes("deadline-exceeded") ||
+      text.includes("loadbundlefromserverrequesterror") ||
+      text.includes("could not load bundle")
+    );
+  }
+
   /**
    * Fetch exam configuration by ID from Firebase
    */
@@ -32,19 +52,38 @@ export class ExamService {
       console.log("[ExamService] Exam examId field:", examData.examId);
       console.log("[ExamService] Exam document ID:", examSnap.id);
 
-      // Fetch answer key - try multiple strategies to find it
+      // Fetch answer key - prefer the most recently updated answer key for this exam
       let answerKeyData = null;
       let answerKeyId = null;
+      const { collection, query, where, getDocs } = await import(
+        "firebase/firestore"
+      );
+      const answerKeysQuery = query(
+        collection(db, "answerKeys"),
+        where("examId", "==", examId),
+      );
+      const answerKeysSnapshot = await getDocs(answerKeysQuery);
 
-      // Strategy 1: Try the timestamp-based ID
-      const timestampBasedId = `ak_${examId}_${examData.createdAt?.toMillis() || Date.now()}`;
-      let answerKeyRef = doc(db, "answerKeys", timestampBasedId);
-      let answerKeySnap = await getDoc(answerKeyRef);
+      if (!answerKeysSnapshot.empty) {
+        let selected = answerKeysSnapshot.docs[0];
+        let selectedScore =
+          Number(selected.data().updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
+          Number(selected.data().version ?? 1);
 
-      if (answerKeySnap.exists()) {
-        answerKeyData = answerKeySnap.data();
-        answerKeyId = answerKeySnap.id;
-        console.log("[ExamService] Found answer key with timestamp-based ID");
+        answerKeysSnapshot.docs.slice(1).forEach((candidate) => {
+          const data = candidate.data();
+          const score =
+            Number(data.updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
+            Number(data.version ?? 1);
+          if (score > selectedScore) {
+            selected = candidate;
+            selectedScore = score;
+          }
+        });
+
+        answerKeyData = selected.data();
+        answerKeyId = selected.id;
+        console.log("[ExamService] Found latest answer key via query:", answerKeyId);
       } else {
         // Strategy 2: Query for answer key by examId
         console.log(
@@ -371,11 +410,7 @@ export class ExamService {
         return newVersion;
       } catch (updateError: any) {
         // Handle network errors specifically
-        if (
-          updateError.code === "unavailable" ||
-          updateError.message?.includes("network") ||
-          updateError.message?.includes("offline")
-        ) {
+        if (this.isNetworkRelatedError(updateError)) {
           throw new Error(
             "Network error: Unable to save changes. Please check your internet connection.",
           );
@@ -386,11 +421,7 @@ export class ExamService {
       console.error("Error updating exam:", error);
 
       // Re-throw with more context
-      if (
-        error.message?.includes("network") ||
-        error.message?.includes("offline") ||
-        error.code === "unavailable"
-      ) {
+      if (this.isNetworkRelatedError(error)) {
         throw new Error("Network error: " + error.message);
       }
 
@@ -452,11 +483,7 @@ export class ExamService {
         return newVersion;
       } catch (updateError: any) {
         // Handle network errors specifically
-        if (
-          updateError.code === "unavailable" ||
-          updateError.message?.includes("network") ||
-          updateError.message?.includes("offline")
-        ) {
+        if (this.isNetworkRelatedError(updateError)) {
           throw new Error(
             "Network error: Unable to save changes. Please check your internet connection.",
           );
@@ -467,11 +494,7 @@ export class ExamService {
       console.error("Error updating exam:", error);
 
       // Re-throw with more context
-      if (
-        error.message?.includes("network") ||
-        error.message?.includes("offline") ||
-        error.code === "unavailable"
-      ) {
+      if (this.isNetworkRelatedError(error)) {
         throw new Error("Network error: " + error.message);
       }
 

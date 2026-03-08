@@ -40,6 +40,13 @@ module.exports = {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       package: "com.anonymous.gcsmartcheckmobileapp",
+      navigationBar: {
+        visible: "immersive",
+        barStyle: "light-content",
+        backgroundColor: "#00000000",
+      },
+      softwareKeyboardLayoutMode: "pan",
+      userInterfaceStyle: "automatic",
     },
     web: {
       output: "static",

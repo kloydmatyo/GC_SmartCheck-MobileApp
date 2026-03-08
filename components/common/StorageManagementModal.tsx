@@ -91,6 +91,28 @@ export default function StorageManagementModal({
     );
   };
 
+  const handleEmergencyClear = () => {
+    Alert.alert(
+      "Emergency Clear",
+      "This will remove ALL app data from storage, including settings. Use this if you're getting 'Row too big' errors. This action cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear Everything",
+          style: "destructive",
+          onPress: async () => {
+            await OfflineStorageService.emergencyClear();
+            Alert.alert(
+              "Success",
+              "All storage cleared. Please restart the app.",
+            );
+            onClose();
+          },
+        },
+      ],
+    );
+  };
+
   const handleTestLimits = async () => {
     try {
       setLoading(true);

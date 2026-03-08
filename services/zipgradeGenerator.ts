@@ -141,7 +141,7 @@ export class ZipgradeGenerator {
     const svgWidth = 612; // 8.5 inches at 72 DPI
     const svgHeight = 792; // 11 inches at 72 DPI
 
-    let svg = `<?xml version="1.0" encoding="UTF-8"?>
+let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>

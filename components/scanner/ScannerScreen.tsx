@@ -3,14 +3,15 @@ import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Platform,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -291,11 +292,20 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     <View style={styles.container}>
       {currentState === "exam-select" && (
         <View style={styles.examSelector}>
-          <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-            <Ionicons name="close" size={32} color="black" />
-          </TouchableOpacity>
-          <View style={styles.content}>
-            <Text style={styles.title}>Enter Exam Code</Text>
+          <View style={styles.topBar}>
+            <TouchableOpacity onPress={handleClose} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={22} color="#3d5a3d" />
+              <Text style={styles.backButtonText}>Back</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.examSelectorContent}>
+            <Ionicons name="document-text" size={56} color="#3d5a3d" />
+            <Text style={styles.examSelectorTitle}>Select Exam</Text>
+            <Text style={styles.examSelectorSubtitle}>
+              Enter the Exam ID before scanning answer sheets
+            </Text>
+
             <TextInput
               style={styles.input}
               placeholder="e.g. MATH-101"
@@ -409,11 +419,28 @@ const styles = StyleSheet.create({
   // ── Exam Selector ──
   examSelector: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#eef1ef",
+  },
+  topBar: {
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 8 : 12,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#d8dfda",
+    backgroundColor: "#fff",
   },
   backButton: {
-    padding: 20,
-    alignSelf: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  backButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#3d5a3d",
   },
   examSelectorContent: {
     flex: 1,
@@ -439,7 +466,7 @@ const styles = StyleSheet.create({
     width: "100%",
     backgroundColor: "white",
     borderWidth: 1.5,
-    borderColor: "#007AFF",
+    borderColor: "#3d5a3d",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -449,7 +476,7 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     width: "100%",
-    backgroundColor: "#007AFF",
+    backgroundColor: "#3d5a3d",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -458,7 +485,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   confirmButtonDisabled: {
-    backgroundColor: "#b0c8f0",
+    backgroundColor: "#95bba6",
   },
   confirmButtonText: {
     color: "white",

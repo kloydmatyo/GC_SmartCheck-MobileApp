@@ -1,8 +1,11 @@
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
 import {
   collection,
   doc,
@@ -21,99 +24,149 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
-import Toast from "react-native-toast-message";
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
-import HistoryList from "@/components/scanner/HistoryList";
-import ScannerScreen from "@/components/scanner/ScannerScreen";
-import {
-  DashboardService,
-  HomeDashboardStats,
-} from "@/services/dashboardService";
-import { GradeStorageService } from "@/services/gradeStorageService";
+const toDate = (value: any): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value?.toDate === "function") return value.toDate();
 
-interface RecentExam {
-  id: string;
-  title: string;
-  subject: string;
-  date: string;
-  papers: number | null;
-  status: string;
-}
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const formatDate = (value: any): string => {
+  const parsed = toDate(value);
+  if (!parsed) return "No date";
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const normalizeStatus = (
+  value: any,
+): "Draft" | "Scheduled" | "Active" | "Completed" => {
+  switch (String(value || "").toLowerCase()) {
+    case "scheduled":
+      return "Scheduled";
+    case "active":
+      return "Active";
+    case "completed":
+      return "Completed";
+    default:
+      return "Draft";
+  }
+};
 
 export default function HomeScreen() {
   const [showScanner, setShowScanner] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-
   const router = useRouter();
-  const [userName, setUserName] = useState("Faculty");
-  const [stats, setStats] = useState<HomeDashboardStats>({
-    scannedToday: 0,
-    avgScoreToday: 0,
-    passRateToday: 0,
-    totalAllTime: 0,
-    totalStudentsGraded: 0,
-    highestScore: 0,
-    lowestScore: 0,
-    distribution: { A: 0, B: 0, C: 0, D: 0, F: 0 },
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+
+  const [stats, setStats] = useState({
+    totalExams: 0,
+    totalStudents: 0,
+    totalSheets: 0,
   });
-  const [recentExams, setRecentExams] = useState<RecentExam[]>([]);
-  const [loadingStats, setLoadingStats] = useState(true);
-  const [loadingExams, setLoadingExams] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const [examsError, setExamsError] = useState<string | null>(null);
-  const [showAllExams, setShowAllExams] = useState(false);
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const [recentExams, setRecentExams] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState("Faculty User");
 
-  // ── Resolve faculty full name from Firestore ──────────────────────────
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) return;
+  const loadDashboard = useCallback(() => {
+    let cancelled = false;
+    (async () => {
       try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setUserName(
-            data.fullName ??
-            user.displayName ??
-            user.email?.split("@")[0] ??
-            "Faculty",
-          );
-        } else {
-          setUserName(
-            user.displayName ?? user.email?.split("@")[0] ?? "Faculty",
-          );
+        setLoading(true);
+        const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+        if (!cancelled) {
+          setDarkModeEnabled(savedDarkMode === "true");
         }
-      } catch {
-        setUserName(user.displayName ?? user.email?.split("@")[0] ?? "Faculty");
+
+        const currentUser = auth.currentUser;
+        if (!currentUser) return;
+
+        // Fetch user display name
+        if (currentUser.displayName) {
+          setUserName(currentUser.displayName);
+        }
+
+        // Fetch exams
+        const examsQuery = query(
+          collection(db, "exams"),
+          where("createdBy", "==", currentUser.uid),
+        );
+        const examsSnapshot = await getDocs(examsQuery);
+        const exams = examsSnapshot.docs
+          .map((doc) => {
+            const data = doc.data();
+            const createdDate = toDate(data.created_at || data.createdAt);
+            return {
+              id: doc.id,
+              title: data.title || "Untitled",
+              subject: data.subject || "",
+              date: formatDate(data.created_at || data.createdAt),
+              papers: data.scanned_papers || null,
+              status: normalizeStatus(data.status),
+              isArchived: data.isArchived || false,
+              createdAtTs: createdDate ? createdDate.getTime() : 0,
+              createdAtDate: createdDate,
+              generated_sheets: data.generated_sheets || [],
+            };
+          })
+          .filter((e) => !e.isArchived)
+          .sort((a, b) => b.createdAtTs - a.createdAtTs);
+
+        // Total answer sheets
+        const totalSheets = exams.reduce((sum, exam) => {
+          if (Array.isArray(exam.generated_sheets)) {
+            return (
+              sum +
+              exam.generated_sheets.reduce(
+                (s: number, sheet: any) => s + (sheet.sheet_count || 0),
+                0,
+              )
+            );
+          }
+          return sum;
+        }, 0);
+
+        // Total exams (non-archived)
+        const totalExams = exams.length;
+
+        // Fetch students from classes
+        let totalStudents = 0;
+        try {
+          const classesQuery = query(
+            collection(db, "classes"),
+            where("createdBy", "==", currentUser.uid),
+          );
+          const classesSnapshot = await getDocs(classesQuery);
+          totalStudents = classesSnapshot.docs.reduce((sum, doc) => {
+            const data = doc.data();
+            if (!data.isArchived) {
+              return sum + (data.students?.length || 0);
+            }
+            return sum;
+          }, 0);
+        } catch (e) {
+          console.warn("Could not fetch students:", e);
+        }
+
+        setStats({ totalExams, totalStudents, totalSheets });
+        setRecentExams(exams.slice(0, 3));
+      } catch (error) {
+        console.error("Error loading dashboard:", error);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    });
-    return unsubscribe;
-  }, []);
-
-  // ── Real-time home dashboard stats via onSnapshot ─────────────────────
-  const subscribeStats = useCallback(() => {
-    // Clean up previous listener
-    unsubscribeRef.current?.();
-    setLoadingStats(true);
-    setStatsError(null);
-
-    const unsubscribe = DashboardService.subscribeHomeStats(
-      (newStats) => {
-        setStats(newStats);
-        setLoadingStats(false);
-        setRefreshing(false);
-      },
-      (err) => {
-        setStatsError(err.message || "Failed to load stats.");
-        setLoadingStats(false);
-        setRefreshing(false);
-      },
-    );
-    unsubscribeRef.current = unsubscribe;
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ── Load recent exams from Firestore (this instructor only) ───────────
@@ -220,18 +273,16 @@ export default function HomeScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case "Draft":
+        return "#9e9e9e";
+      case "Scheduled":
+        return "#ff9800";
       case "Active":
         return "#00a550";
       case "Completed":
         return "#4a90e2";
-      case "Upcoming":
-        return "#e74c3c";
-      case "Scheduled":
-        return "#ff9800";
-      case "Draft":
-        return "#9e9e9e";
       default:
-        return "#666";
+        return "#9e9e9e";
     }
   };
 
@@ -239,19 +290,67 @@ export default function HomeScreen() {
     return <ScannerScreen onClose={() => setShowScanner(false)} />;
   }
 
-  if (showHistory) {
-    return <HistoryList onClose={() => setShowHistory(false)} />;
-  }
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        subtitle: "#9db1a6",
+        icon: "#dce8e1",
+        primary: "#3f6b54",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+        cardIconBg: "#2a3a33",
+        value: "#8fd1ad",
+        examTitle: "#e3eee8",
+        examMeta: "#a3b6ab",
+        surfaceAccent: "#2f8a74",
+        quickActionBg: "#1f3a2f",
+        quickActionBorder: "#4f7a67",
+        quickActionText: "#e8f6ee",
+      }
+    : {
+        screenBg: "#eef1ef",
+        headerBg: "#fff",
+        headerBorder: "#d8dfda",
+        title: "#24362f",
+        subtitle: "#6c7d74",
+        icon: "#24362f",
+        primary: "#3d5a3d",
+        cardBg: "#f0ead6",
+        cardBorder: "#8cb09a",
+        cardIconBg: "#dbe7df",
+        value: "#2f6a50",
+        examTitle: "#333",
+        examMeta: "#666",
+        surfaceAccent: "#2f8a74",
+        quickActionBg: "#3d5a3d",
+        quickActionBorder: "#3d5a3d",
+        quickActionText: "#ffffff",
+      };
+
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
+      {/* Header */}
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
         <View style={styles.headerLeft}>
           <Image
             source={require("@/assets/images/gordon-college-logo.png")}
             style={styles.logo}
             resizeMode="contain"
           />
-          <Text style={styles.headerTitle}>GCSC</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            GCSC
+          </Text>
         </View>
         <View style={styles.headerRight}>
           <TouchableOpacity
@@ -266,10 +365,18 @@ export default function HomeScreen() {
             )}
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={18} color="#24362f" />
+            <Ionicons
+              name="notifications-outline"
+              size={18}
+              color={colors.icon}
+            />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="person-circle-outline" size={18} color="#24362f" />
+            <Ionicons
+              name="person-circle-outline"
+              size={18}
+              color={colors.icon}
+            />
           </TouchableOpacity>
         </View>
       </View>
@@ -277,125 +384,144 @@ export default function HomeScreen() {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={["#00a550"]}
-            tintColor="#00a550"
-          />
-        }
+        contentContainerStyle={styles.scrollContent}
       >
+        {/* Welcome */}
         <View style={styles.welcomeSection}>
-          <Text style={styles.welcomeText}>Welcome back, {userName}.</Text>
-          <Text style={styles.subtitleText}>Ready to grade some papers?</Text>
+          <Text style={[styles.welcomeText, { color: colors.title }]}>
+            Welcome back, {userName}.
+          </Text>
+          <Text style={[styles.subtitleText, { color: colors.subtitle }]}>
+            Ready to grade some papers?
+          </Text>
         </View>
 
+        {/* Start Scanning */}
         <TouchableOpacity
-          style={styles.scanButton}
+          style={[styles.scanButton, { backgroundColor: colors.primary }]}
           onPress={() => setShowScanner(true)}
         >
           <Ionicons name="document-text-outline" size={20} color="#fff" />
           <Text style={styles.scanButtonText}>Start Scanning Papers</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => setShowHistory(true)}
-        >
-          <Ionicons name="time-outline" size={20} color="#fff" />
-          <Text style={styles.scanButtonText}>History</Text>
-        </TouchableOpacity>
-
-        {/* Stats error banner */}
-        {statsError && !loadingStats && (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle-outline" size={16} color="#e74c3c" />
-            <Text style={styles.errorBannerText} numberOfLines={2}>
-              {statsError}
+        {/* Stats Row */}
+        <View style={styles.statsContainer}>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.statIconContainer,
+                { backgroundColor: colors.cardIconBg },
+              ]}
+            >
+              <Ionicons name="book-outline" size={18} color={colors.primary} />
+            </View>
+            <Text style={[styles.statValue, { color: colors.value }]}>
+              {loading ? "-" : stats.totalExams}
             </Text>
-            <TouchableOpacity onPress={subscribeStats}>
-              <Text style={styles.errorRetryText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Stats Grid — 2x2 */}
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Ionicons
-              name="checkmark-circle"
-              size={24}
-              color="#00a550"
-              style={styles.statIcon}
-            />
-            {loadingStats ? (
-              <View style={styles.skeletonValue} />
-            ) : (
-              <Text style={styles.statValue}>{stats.scannedToday}</Text>
-            )}
-            <Text style={styles.statLabel}>Scanned Today</Text>
+            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
+              Total Exams
+            </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Ionicons
-              name="people"
-              size={24}
-              color="#00a550"
-              style={styles.statIcon}
-            />
-            {loadingStats ? (
-              <View style={styles.skeletonValue} />
-            ) : (
-              <Text style={styles.statValue}>{stats.totalStudentsGraded}</Text>
-            )}
-            <Text style={styles.statLabel}>Total Graded</Text>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.statIconContainer,
+                { backgroundColor: colors.cardIconBg },
+              ]}
+            >
+              <Ionicons
+                name="people-outline"
+                size={18}
+                color={colors.primary}
+              />
+            </View>
+            <Text style={[styles.statValue, { color: colors.value }]}>
+              {loading ? "-" : stats.totalStudents}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
+              Total Students
+            </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Ionicons
-              name="stats-chart"
-              size={24}
-              color="#00a550"
-              style={styles.statIcon}
-            />
-            {loadingStats ? (
-              <View style={styles.skeletonValue} />
-            ) : (
-              <Text style={styles.statValue}>{stats.avgScoreToday}%</Text>
-            )}
-            <Text style={styles.statLabel}>Avg Score</Text>
+          <View
+            style={[
+              styles.statCard,
+              {
+                backgroundColor: colors.cardBg,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.statIconContainer,
+                { backgroundColor: colors.cardIconBg },
+              ]}
+            >
+              <Ionicons
+                name="document-outline"
+                size={18}
+                color={colors.primary}
+              />
+            </View>
+            <Text style={[styles.statValue, { color: colors.value }]}>
+              {loading ? "-" : stats.totalSheets}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
+              Answer Sheets
+            </Text>
           </View>
 
-          <View style={styles.statCard}>
-            <Ionicons
-              name="trending-up"
-              size={24}
-              color="#00a550"
-              style={styles.statIcon}
-            />
-            {loadingStats ? (
-              <View style={styles.skeletonValue} />
-            ) : (
-              <Text style={styles.statValue}>{stats.passRateToday}%</Text>
-            )}
-            <Text style={styles.statLabel}>Pass Rate</Text>
-          </View>
         </View>
 
-        {/* Highest / Lowest Score */}
-        {!loadingStats && stats.totalStudentsGraded > 0 && (
-          <View style={styles.hiloRow}>
-            <View style={styles.hiloCard}>
-              <Ionicons name="arrow-up-circle" size={20} color="#00a550" />
-              <Text style={styles.hiloValue}>{stats.highestScore}%</Text>
-              <Text style={styles.hiloLabel}>Highest Score</Text>
-            </View>
-            <View style={styles.hiloDivider} />
-            <View style={styles.hiloCard}>
-              <Ionicons name="arrow-down-circle" size={20} color="#e74c3c" />
-              <Text style={[styles.hiloValue, { color: "#e74c3c" }]}>
-                {stats.lowestScore}%
+        {/* Quick Actions */}
+        <View style={styles.quickActionsSection}>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>
+            Quick Actions
+          </Text>
+          <View style={styles.quickActions}>
+            <TouchableOpacity
+              style={[
+                styles.quickActionCard,
+                {
+                  backgroundColor: colors.quickActionBg,
+                  borderColor: colors.quickActionBorder,
+                },
+              ]}
+              onPress={() => router.push("/(tabs)/create-quiz")}
+            >
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons
+                  name="add-circle-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Create Exam
               </Text>
               <Text style={styles.hiloLabel}>Lowest Score</Text>
             </View>
@@ -451,10 +577,119 @@ export default function HomeScreen() {
                   </View>
                 ))}
               </View>
-            );
-          })()}
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Students
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Manage class rosters
+              </Text>
+            </TouchableOpacity>
 
-        {/* Recent Exams Section */}
+            <TouchableOpacity
+              style={[
+                styles.quickActionCard,
+                {
+                  backgroundColor: colors.quickActionBg,
+                  borderColor: colors.quickActionBorder,
+                },
+              ]}
+              onPress={() => router.push("/(tabs)/generator")}
+            >
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Answer Sheets
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Generate sheet templates
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.quickActionCard,
+                {
+                  backgroundColor: colors.quickActionBg,
+                  borderColor: colors.quickActionBorder,
+                },
+              ]}
+              onPress={() => router.push("/(tabs)/quizzes")}
+            >
+              <View style={styles.quickActionIconWrap}>
+                <Ionicons
+                  name="book-outline"
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.quickActionText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                All Exams
+              </Text>
+              <Text
+                style={[
+                  styles.quickActionSubtext,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Browse saved quizzes
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.quickActionCard,
+                styles.quickActionCardWide,
+                styles.quickActionCenterCard,
+                {
+                  backgroundColor: colors.quickActionBg,
+                  borderColor: colors.quickActionBorder,
+                },
+              ]}
+              onPress={() => router.push("/(tabs)/batch-history")}
+            >
+              <Text
+                style={[
+                  styles.quickActionCenterText,
+                  { color: colors.quickActionText },
+                ]}
+              >
+                Batch History
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Recent Exams */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Recent Exams</Text>
           {recentExams.length > 5 && (
@@ -467,54 +702,80 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.examsContainer}>
-          {loadingExams ? (
-            // Skeleton placeholders for exam cards
-            <View style={{ gap: 8 }}>
-              {[0, 1, 2].map((i) => (
-                <View key={i} style={styles.examCardSkeleton}>
-                  <View style={styles.skeletonTitle} />
-                  <View style={styles.skeletonSubject} />
-                  <View style={styles.skeletonMeta} />
-                </View>
-              ))}
-            </View>
-          ) : examsError ? (
-            <View style={styles.examsErrorState}>
-              <Ionicons
-                name="cloud-offline-outline"
-                size={36}
-                color="#e74c3c"
+          {loading ? (
+            <>
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
               />
-              <Text style={styles.examsErrorText}>{examsError}</Text>
-              <TouchableOpacity
-                style={styles.examsRetryBtn}
-                onPress={loadRecentExams}
-              >
-                <Ionicons name="refresh" size={14} color="#fff" />
-                <Text style={styles.examsRetryBtnText}>Try Again</Text>
-              </TouchableOpacity>
-            </View>
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
+              />
+              <View
+                style={[
+                  styles.examSkeleton,
+                  { backgroundColor: colors.cardIconBg },
+                ]}
+              />
+            </>
           ) : recentExams.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Ionicons name="document-outline" size={40} color="#ccc" />
-              <Text style={styles.emptyStateText}>No exams yet</Text>
-              <Text style={styles.emptyStateSubText}>
-                Create a quiz and start scanning
+            <View
+              style={[
+                styles.emptyExams,
+                {
+                  backgroundColor: colors.cardBg,
+                  borderColor: colors.cardBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name="document-outline"
+                size={36}
+                color={colors.subtitle}
+              />
+              <Text style={[styles.emptyExamsText, { color: colors.subtitle }]}>
+                No exams yet
               </Text>
+              <TouchableOpacity
+                onPress={() => router.push("/(tabs)/create-quiz")}
+              >
+                <Text
+                  style={[
+                    styles.emptyExamsLink,
+                    { color: colors.surfaceAccent },
+                  ]}
+                >
+                  Create your first exam
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : (
             (showAllExams ? recentExams : recentExams.slice(0, 5)).map((exam) => (
               <TouchableOpacity
                 key={exam.id}
-                style={styles.examCard}
+                style={[
+                  styles.examCard,
+                  {
+                    backgroundColor: colors.cardBg,
+                    borderColor: colors.cardBorder,
+                  },
+                ]}
                 onPress={() =>
-                  router.push(
-                    `/(tabs)/exam-stats?examId=${exam.id}&examTitle=${encodeURIComponent(exam.title)}` as any,
-                  )
+                  router.push(`/(tabs)/exam-preview?examId=${exam.id}`)
                 }
               >
                 <View style={styles.examHeader}>
-                  <Text style={styles.examTitle}>{exam.title}</Text>
+                  <Text
+                    style={[styles.examTitle, { color: colors.examTitle }]}
+                    numberOfLines={1}
+                  >
+                    {exam.title}
+                  </Text>
                   <View
                     style={[
                       styles.statusBadge,
@@ -524,19 +785,44 @@ export default function HomeScreen() {
                     <Text style={styles.statusText}>{exam.status}</Text>
                   </View>
                 </View>
-                <Text style={styles.examSubject}>{exam.subject}</Text>
+                <Text
+                  style={[styles.examSubject, { color: colors.subtitle }]}
+                  numberOfLines={1}
+                >
+                  {exam.subject}
+                </Text>
                 <View style={styles.examFooter}>
                   <View style={styles.examInfo}>
-                    <Ionicons name="calendar-outline" size={14} color="#666" />
-                    <Text style={styles.examInfoText}>{exam.date}</Text>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color={colors.examMeta}
+                    />
+                    <Text
+                      style={[styles.examInfoText, { color: colors.examMeta }]}
+                    >
+                      {exam.date}
+                    </Text>
                   </View>
                   <View style={styles.examInfo}>
-                    <Ionicons name="document-outline" size={14} color="#666" />
-                    <Text style={styles.examInfoText}>
+                    <Ionicons
+                      name="document-outline"
+                      size={14}
+                      color={colors.examMeta}
+                    />
+                    <Text
+                      style={[styles.examInfoText, { color: colors.examMeta }]}
+                    >
                       {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
                     </Text>
                   </View>
                 </View>
+                <View
+                  style={[
+                    styles.examBottomAccent,
+                    { backgroundColor: colors.surfaceAccent },
+                  ]}
+                />
               </TouchableOpacity>
             ))
           )}
@@ -555,6 +841,23 @@ export default function HomeScreen() {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* New Quiz FAB — floating bottom right */}
+      <TouchableOpacity
+        style={[
+          styles.fab,
+          {
+            backgroundColor: darkModeEnabled ? "#1f3a2f" : colors.primary,
+            shadowColor: darkModeEnabled ? "#000" : colors.primary,
+            borderWidth: darkModeEnabled ? 1 : 0,
+            borderColor: darkModeEnabled ? "#4f7a67" : "transparent",
+          },
+        ]}
+        onPress={() => router.push("/(tabs)/create-quiz")}
+      >
+        <Ionicons name="add-circle" size={22} color="#fff" />
+        <Text style={styles.fabText}>New Quiz</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -600,19 +903,22 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 20,
+  },
   welcomeSection: {
     paddingHorizontal: 12,
     paddingTop: 14,
     paddingBottom: 10,
   },
   welcomeText: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: "800",
     color: "#2a3b33",
     marginBottom: 4,
   },
   subtitleText: {
-    fontSize: 15,
+    fontSize: 14,
     color: "#6c7d74",
   },
   scanButton: {
@@ -641,21 +947,23 @@ const styles = StyleSheet.create({
   },
   scanButtonText: {
     color: "#fff",
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "700",
   },
-  statsGrid: {
+
+  // Stats
+  statsContainer: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: 20,
-    gap: 10,
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
     marginBottom: 14,
   },
   statCard: {
-    width: "47%",
+    width: "31.5%",
     backgroundColor: "#f0ead6",
     borderRadius: 12,
-    padding: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 6,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#8cb09a",
@@ -664,17 +972,85 @@ const styles = StyleSheet.create({
   statIcon: {
     marginBottom: 6,
   },
+  statIconContainer: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
   statValue: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "800",
     color: "#2f6a50",
     marginBottom: 2,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: "#435950",
     textAlign: "center",
   },
+
+  // Quick Actions
+  quickActionsSection: {
+    paddingHorizontal: 10,
+    marginBottom: 16,
+  },
+  quickActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 10,
+  },
+  quickActionCard: {
+    width: "48.5%",
+    backgroundColor: "#f0ead6",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "flex-start",
+    justifyContent: "flex-start",
+    borderWidth: 1,
+    borderColor: "#8cb09a",
+    minHeight: 96,
+  },
+  quickActionCardWide: {
+    width: "100%",
+  },
+  quickActionCenterCard: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 56,
+  },
+  quickActionText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#3d5a3d",
+    textAlign: "left",
+  },
+  quickActionSubtext: {
+    fontSize: 11,
+    marginTop: 4,
+    opacity: 0.85,
+  },
+  quickActionCenterText: {
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  quickActionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#dbe7df",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+
+  // Section header
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -683,18 +1059,45 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionTitle: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: "800",
     color: "#24362f",
   },
   viewAllText: {
-    fontSize: 15,
+    fontSize: 14,
     color: "#24362f",
     fontWeight: "700",
   },
+
+  // Exam cards
   examsContainer: {
     paddingHorizontal: 10,
     gap: 8,
+  },
+  examSkeleton: {
+    height: 80,
+    backgroundColor: "#dbe7df",
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  emptyExams: {
+    alignItems: "center",
+    paddingVertical: 32,
+    backgroundColor: "#f0ead6",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#8cb09a",
+    gap: 6,
+  },
+  emptyExamsText: {
+    fontSize: 15,
+    color: "#666",
+    fontWeight: "600",
+  },
+  emptyExamsLink: {
+    fontSize: 13,
+    color: "#2f8a74",
+    fontWeight: "700",
   },
   examCard: {
     backgroundColor: "#f0ead6",
@@ -711,23 +1114,24 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   examTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "800",
     color: "#333",
     flex: 1,
+    marginRight: 8,
   },
   statusBadge: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
   statusText: {
     color: "#fff",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
   },
   examSubject: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#4e6057",
     marginBottom: 8,
   },
@@ -763,190 +1167,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     backgroundColor: "#2f8a74",
     paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderRadius: 12,
-    justifyContent: "center",
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: "center",
     gap: 8,
-    elevation: 3,
-    flex: 1,
+    elevation: 6,
+    shadowColor: "#3d5a3d",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
-  newQuizButtonText: {
+  fabText: {
     color: "#fff",
     fontSize: 16,
-    fontWeight: "600",
-  },
-  hiloRow: {
-    flexDirection: "row",
-    marginHorizontal: 20,
-    marginBottom: 14,
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
-    overflow: "hidden",
-  },
-  hiloCard: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 14,
-    gap: 4,
-  },
-  hiloDivider: {
-    width: 1,
-    backgroundColor: "#d4c5a0",
-    marginVertical: 10,
-  },
-  hiloValue: {
-    fontSize: 22,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  hiloLabel: {
-    fontSize: 12,
-    color: "#666",
-  },
-  distSection: {
-    marginHorizontal: 20,
-    marginBottom: 14,
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
-    padding: 14,
-  },
-  distTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#333",
-    marginBottom: 10,
-  },
-  distRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    gap: 8,
-  },
-  distLabel: {
-    fontSize: 11,
-    color: "#555",
-    width: 72,
-  },
-  distBarBg: {
-    flex: 1,
-    height: 10,
-    backgroundColor: "#e0d8c0",
-    borderRadius: 5,
-    overflow: "hidden",
-  },
-  distBarFill: {
-    height: 10,
-    borderRadius: 5,
-  },
-  distCount: {
-    fontSize: 11,
-    color: "#555",
-    width: 56,
-    textAlign: "right",
-  },
-  emptyState: {
-    alignItems: "center",
-    paddingVertical: 32,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#999",
-    marginTop: 12,
-  },
-  emptyStateSubText: {
-    fontSize: 13,
-    color: "#bbb",
-    marginTop: 4,
-  },
-  // ── Error banner (stats) ────────────────────────────────────────────────
-  errorBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff3f3",
-    borderWidth: 1,
-    borderColor: "#f0b8b8",
-    borderRadius: 10,
-    marginHorizontal: 10,
-    marginBottom: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  errorBannerText: {
-    flex: 1,
-    fontSize: 12,
-    color: "#c0392b",
-  },
-  errorRetryText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#24362f",
-  },
-  // ── Skeleton values inside stat cards ────────────────────────────────────
-  skeletonValue: {
-    width: 52,
-    height: 26,
-    backgroundColor: "#d0d8d4",
-    borderRadius: 5,
-    marginBottom: 2,
-  },
-  // ── Exam card skeletons ─────────────────────────────────────────────────
-  examCardSkeleton: {
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#5d6c62",
-    gap: 8,
-  },
-  skeletonTitle: {
-    width: "60%",
-    height: 16,
-    backgroundColor: "#ddd8c8",
-    borderRadius: 5,
-  },
-  skeletonSubject: {
-    width: "40%",
-    height: 12,
-    backgroundColor: "#e5e0d0",
-    borderRadius: 5,
-  },
-  skeletonMeta: {
-    width: "30%",
-    height: 10,
-    backgroundColor: "#ece8da",
-    borderRadius: 5,
-  },
-  // ── Exams section error state ────────────────────────────────────────────
-  examsErrorState: {
-    alignItems: "center",
-    paddingVertical: 24,
-    gap: 8,
-  },
-  examsErrorText: {
-    fontSize: 13,
-    color: "#888",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  examsRetryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#24362f",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 4,
-  },
-  examsRetryBtnText: {
-    fontSize: 13,
     fontWeight: "700",
     color: "#fff",
   },

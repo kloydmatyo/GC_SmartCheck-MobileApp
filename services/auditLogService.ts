@@ -33,6 +33,27 @@ export interface AuditLog {
 }
 
 export class AuditLogService {
+  private static sanitizeForFirestore(value: any): any {
+    if (value === undefined) {
+      return null;
+    }
+
+    if (value === null || typeof value !== "object") {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeForFirestore(item));
+    }
+
+    const sanitized: Record<string, any> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      sanitized[key] = this.sanitizeForFirestore(nestedValue);
+    }
+
+    return sanitized;
+  }
+
   /**
    * Log exam edit action
    */
@@ -41,6 +62,7 @@ export class AuditLogService {
     userId: string,
     changes: Record<string, { old: any; new: any }>,
     version: number,
+    throwOnError = false,
   ): Promise<void> {
     try {
       const currentUser = auth.currentUser;
@@ -73,13 +95,12 @@ export class AuditLogService {
       const sanitizedChanges: Record<string, { old: any; new: any }> = {};
       for (const [key, value] of Object.entries(changes)) {
         sanitizedChanges[key] = {
-          old: value.old ?? null,
-          new: value.new ?? null,
+          old: value?.old ?? null,
+          new: value?.new ?? null,
         };
       }
 
-      // Create audit log entry
-      await addDoc(collection(db, "audit_logs"), {
+      const auditPayload = this.sanitizeForFirestore({
         examId,
         userId,
         userName,
@@ -91,10 +112,15 @@ export class AuditLogService {
         deviceInfo: this.getDeviceInfo(),
       });
 
+      // Create audit log entry
+      await addDoc(collection(db, "audit_logs"), auditPayload);
+
       console.log("✅ Audit log created for exam edit:", examId);
     } catch (error) {
       console.error("❌ Error creating audit log:", error);
-      // Don't throw error - audit logging should not block the main operation
+      if (throwOnError) {
+        throw error;
+      }
     }
   }
 

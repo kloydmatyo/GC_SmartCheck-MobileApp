@@ -1,17 +1,22 @@
 import StatusManager from "@/components/exam/StatusManager";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Clipboard,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Clipboard,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth } from "../../config/firebase";
@@ -29,6 +34,58 @@ export default function ExamPreviewScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [headerTopPadding, setHeaderTopPadding] = useState(56);
+  const loadRequestRef = React.useRef(0);
+  const mountedRef = React.useRef(true);
+
+  useEffect(() => {
+    const top =
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 16 : 56;
+    setHeaderTopPadding(top);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+    }, []),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        border: "#34483f",
+        cardBg: "#1f2b26",
+        cardSoft: "#2a3a33",
+        title: "#e7f1eb",
+        text: "#b9c9c0",
+        icon: "#8fd1ad",
+        accent: "#9bd8b8",
+      }
+    : {
+        bg: "#eef1ef",
+        headerBg: "#3d5a3d",
+        border: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardSoft: "#2d4a2d",
+        title: "#e8f6ee",
+        text: "#b8d4b8",
+        icon: "#8fd1ad",
+        accent: "#8fd1ad",
+      };
 
   useEffect(() => {
     loadExamData();
@@ -36,92 +93,101 @@ export default function ExamPreviewScreen() {
   }, [examId, refreshKey]); // Reload when refreshKey changes
 
   const loadExamData = async () => {
+    const requestId = ++loadRequestRef.current;
     try {
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(true);
       setError(null);
 
       const currentUser = auth.currentUser;
       if (!currentUser) {
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
         setError("You must be logged in to view exams.");
         return;
       }
 
       // Check if we're online
       const online = await NetworkService.isOnline();
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setIsOffline(!online);
 
-      // Try to load from offline storage first
-      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
-
-      if (offlineExam) {
-        // We have offline data - use it
-        const examData: ExamPreviewData = {
-          metadata: {
-            examCode: examId,
-            title: offlineExam.title,
-            subject: "",
-            section: "",
-            date: offlineExam.createdAt,
-            status: "Active",
-            version: offlineExam.version,
-            createdAt: offlineExam.createdAt,
-          },
-          totalQuestions: offlineExam.questions?.length || 0,
-          choiceFormat: "A-D",
-          answerKey: {
-            answers: offlineExam.answerKey?.answers || [],
-            locked: true,
-          },
-          templateLayout: null,
-          lastModified: offlineExam.updatedAt,
-        };
-
-        setExam(examData);
-
-        // If online, try to sync in background
-        if (online) {
-          try {
-            const freshData = await ExamService.getExamById(examId);
-            if (freshData) {
-              setExam(freshData);
-            }
-          } catch (err) {
-            console.log("Could not fetch fresh data, using offline version");
+      // Prefer live data when online so recent edits are immediately reflected.
+      if (online) {
+        try {
+          const authorized = await ExamService.isAuthorized(
+            currentUser.uid,
+            examId,
+          );
+          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+          if (!authorized) {
+            setError("You are not authorized to view this exam.");
+            return;
           }
-        }
 
-        return;
+          const examData = await ExamService.getExamById(examId);
+          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+          if (!examData) {
+            setError("Exam not found. Please check the exam ID.");
+            return;
+          }
+
+          setExam(examData);
+          return;
+        } catch (liveError) {
+          console.warn(
+            "Failed to fetch live exam data, attempting offline fallback:",
+            liveError,
+          );
+        }
       }
 
-      // No offline data - must fetch from Firebase
-      if (!online) {
+      // Offline fallback
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      if (!offlineExam) {
         setError(
           "This exam is not available offline. Please connect to the internet.",
         );
         return;
       }
 
-      // Check authorization
-      const authorized = await ExamService.isAuthorized(
-        currentUser.uid,
-        examId,
-      );
-      if (!authorized) {
-        setError("You are not authorized to view this exam.");
-        return;
-      }
-
-      const examData = await ExamService.getExamById(examId);
-      if (!examData) {
-        setError("Exam not found. Please check the exam ID.");
-        return;
-      }
+      const examData: ExamPreviewData = {
+        metadata: {
+          examId,
+          examCode: examId,
+          title: offlineExam.title,
+          subject: "",
+          section: "",
+          date: offlineExam.createdAt.toISOString(),
+          status: "Active",
+          version: offlineExam.version,
+          createdAt: offlineExam.createdAt,
+          updatedAt: offlineExam.updatedAt,
+          createdBy: offlineExam.createdBy || "",
+        },
+        totalQuestions: offlineExam.questions?.length || 0,
+        choiceFormat: "A-D",
+        answerKey: {
+          id: `ak_${examId}_offline`,
+          examId,
+          answers: offlineExam.answerKey?.answers || [],
+          questionSettings: [],
+          locked: true,
+          createdAt: offlineExam.createdAt,
+          updatedAt: offlineExam.updatedAt,
+          createdBy: offlineExam.createdBy || "",
+          version: offlineExam.version || 1,
+        },
+        lastModified: offlineExam.updatedAt,
+      };
 
       setExam(examData);
     } catch (err) {
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setError("Failed to load exam data. Please try again.");
       console.error(err);
     } finally {
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(false);
     }
   };
@@ -162,11 +228,19 @@ export default function ExamPreviewScreen() {
 
     if (!hasAnswers) {
       return (
-        <View style={styles.noAnswersContainer}>
+        <View
+          style={[
+            styles.noAnswersContainer,
+            darkModeEnabled && {
+              backgroundColor: "#3a3120",
+              borderColor: "#8c6b2f",
+            },
+          ]}
+        >
           <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
-          <Text style={styles.noAnswersText}>No answers set yet</Text>
-          <Text style={styles.noAnswersSubtext}>
-            Click "Edit Answer Key" below to set the correct answers
+          <Text style={[styles.noAnswersText, darkModeEnabled && { color: "#ffd88a" }]}>No answers set yet</Text>
+          <Text style={[styles.noAnswersSubtext, darkModeEnabled && { color: "#ffd88a" }]}>
+            Click Edit Answer Key below to set the correct answers
           </Text>
         </View>
       );
@@ -180,12 +254,29 @@ export default function ExamPreviewScreen() {
               const answer = exam.answerKey.answers[questionNum - 1] || "";
               const hasAnswer = answer && answer.trim() !== "";
               return (
-                <View key={questionNum} style={styles.answerKeyItem}>
-                  <Text style={styles.questionNumber}>{questionNum}.</Text>
+                <View
+                  key={questionNum}
+                  style={[
+                    styles.answerKeyItem,
+                    {
+                      backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.questionNumber,
+                      darkModeEnabled && { color: "#b9c9c0" },
+                    ]}
+                  >
+                    {questionNum}.
+                  </Text>
                   <View
                     style={[
                       styles.answerBubble,
+                      darkModeEnabled && { backgroundColor: "#2f6d58" },
                       !hasAnswer && styles.answerBubbleEmpty,
+                      darkModeEnabled && !hasAnswer && { backgroundColor: "#46514c" },
                     ]}
                   >
                     <Text style={styles.answerText}>
@@ -203,16 +294,16 @@ export default function ExamPreviewScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
-        <Text style={styles.loadingText}>Loading exam data...</Text>
+        <Text style={[styles.loadingText, { color: colors.text }]}>Loading exam data...</Text>
       </View>
     );
   }
 
   if (error || !exam) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <Ionicons name="alert-circle-outline" size={64} color="#e74c3c" />
         <Text style={styles.errorText}>{error || "Exam not found"}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadExamData}>
@@ -226,13 +317,22 @@ export default function ExamPreviewScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: headerTopPadding,
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity style={styles.backIcon} onPress={goToQuizzes}>
-          <Ionicons name="arrow-back" size={24} color="#eef7f0" />
+          <Ionicons name="arrow-back" size={24} color={colors.title} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Exam Preview</Text>
+        <Text style={[styles.headerTitle, { color: colors.title }]}>Exam Preview</Text>
         {isOffline && (
           <View style={styles.offlineBadge}>
             <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
@@ -259,43 +359,43 @@ export default function ExamPreviewScreen() {
         </View>
 
         {/* Exam Metadata Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Exam Information</Text>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>Exam Information</Text>
 
           <View style={styles.infoRow}>
-            <Ionicons name="document-text-outline" size={20} color="#3d5a3d" />
+            <Ionicons name="document-text-outline" size={20} color={colors.icon} />
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Title</Text>
-              <Text style={styles.infoValue}>{exam.metadata.title}</Text>
+              <Text style={[styles.infoLabel, { color: colors.text }]}>Title</Text>
+              <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.title}</Text>
             </View>
           </View>
 
           {exam.metadata.subject && (
             <View style={styles.infoRow}>
-              <Ionicons name="book-outline" size={20} color="#3d5a3d" />
+              <Ionicons name="book-outline" size={20} color={colors.icon} />
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Subject</Text>
-                <Text style={styles.infoValue}>{exam.metadata.subject}</Text>
+                <Text style={[styles.infoLabel, { color: colors.text }]}>Subject</Text>
+                <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.subject}</Text>
               </View>
             </View>
           )}
 
           {exam.metadata.section && (
             <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={20} color="#3d5a3d" />
+              <Ionicons name="people-outline" size={20} color={colors.icon} />
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Section</Text>
-                <Text style={styles.infoValue}>{exam.metadata.section}</Text>
+                <Text style={[styles.infoLabel, { color: colors.text }]}>Section</Text>
+                <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.section}</Text>
               </View>
             </View>
           )}
 
           {exam.metadata.date && (
             <View style={styles.infoRow}>
-              <Ionicons name="calendar-outline" size={20} color="#3d5a3d" />
+              <Ionicons name="calendar-outline" size={20} color={colors.icon} />
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Date</Text>
-                <Text style={styles.infoValue}>
+                <Text style={[styles.infoLabel, { color: colors.text }]}>Date</Text>
+                <Text style={[styles.infoValue, { color: colors.title }]}>
                   {ExamService.formatDate(new Date(exam.metadata.date))}
                 </Text>
               </View>
@@ -303,17 +403,17 @@ export default function ExamPreviewScreen() {
           )}
 
           <View style={styles.infoRow}>
-            <Ionicons name="code-outline" size={20} color="#3d5a3d" />
+            <Ionicons name="code-outline" size={20} color={colors.icon} />
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>Exam Code</Text>
+              <Text style={[styles.infoLabel, { color: colors.text }]}>Exam Code</Text>
               <View style={styles.codeContainer}>
-                <Text style={styles.examCode}>{exam.metadata.examCode}</Text>
+                <Text style={[styles.examCode, { color: colors.accent }]}>{exam.metadata.examCode}</Text>
                 <TouchableOpacity
                   onPress={() =>
                     copyToClipboard(exam.metadata.examCode, "Exam code")
                   }
                 >
-                  <Ionicons name="copy-outline" size={18} color="#2d7a5f" />
+                  <Ionicons name="copy-outline" size={18} color={colors.accent} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -321,39 +421,59 @@ export default function ExamPreviewScreen() {
         </View>
 
         {/* Exam Configuration Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Configuration</Text>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>Configuration</Text>
 
           <View style={styles.configGrid}>
-            <View style={styles.configItem}>
-              <Text style={styles.configLabel}>Total Questions</Text>
-              <Text style={styles.configValue}>{exam.totalQuestions}</Text>
+            <View
+              style={[
+                styles.configItem,
+                { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
+              ]}
+            >
+              <Text style={[styles.configLabel, { color: colors.text }]}>Total Questions</Text>
+              <Text style={[styles.configValue, { color: colors.title }]}>{exam.totalQuestions}</Text>
             </View>
-            <View style={styles.configItem}>
-              <Text style={styles.configLabel}>Choice Format</Text>
-              <Text style={styles.configValue}>{exam.choiceFormat}</Text>
+            <View
+              style={[
+                styles.configItem,
+                { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
+              ]}
+            >
+              <Text style={[styles.configLabel, { color: colors.text }]}>Choice Format</Text>
+              <Text style={[styles.configValue, { color: colors.title }]}>{exam.choiceFormat}</Text>
             </View>
           </View>
 
           {exam.templateLayout && (
             <>
               <View style={styles.configGrid}>
-                <View style={styles.configItem}>
-                  <Text style={styles.configLabel}>Columns</Text>
-                  <Text style={styles.configValue}>
+                <View
+                  style={[
+                    styles.configItem,
+                    { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
+                  ]}
+                >
+                  <Text style={[styles.configLabel, { color: colors.text }]}>Columns</Text>
+                  <Text style={[styles.configValue, { color: colors.title }]}>
                     {exam.templateLayout.columns}
                   </Text>
                 </View>
-                <View style={styles.configItem}>
-                  <Text style={styles.configLabel}>Questions Rows</Text>
-                  <Text style={styles.configValue}>
+                <View
+                  style={[
+                    styles.configItem,
+                    { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
+                  ]}
+                >
+                  <Text style={[styles.configLabel, { color: colors.text }]}>Questions Rows</Text>
+                  <Text style={[styles.configValue, { color: colors.title }]}>
                     {exam.templateLayout.questionsPerColumn}
                   </Text>
                 </View>
               </View>
-              <View style={styles.templateInfo}>
-                <Ionicons name="grid-outline" size={16} color="#4f6b5a" />
-                <Text style={styles.templateText}>
+              <View style={[styles.templateInfo, { borderTopColor: colors.border }]}>
+                <Ionicons name="grid-outline" size={16} color={colors.text} />
+                <Text style={[styles.templateText, { color: colors.text }]}>
                   Template: {exam.templateLayout.name}
                 </Text>
               </View>
@@ -362,9 +482,9 @@ export default function ExamPreviewScreen() {
         </View>
 
         {/* Answer Key Preview Section */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Answer Key Preview</Text>
+            <Text style={[styles.sectionTitle, { color: colors.title }]}>Answer Key Preview</Text>
             {exam.answerKey.locked && (
               <View style={styles.lockedBadge}>
                 <Ionicons name="lock-closed" size={12} color="#fff" />
@@ -372,7 +492,7 @@ export default function ExamPreviewScreen() {
               </View>
             )}
           </View>
-          <Text style={styles.sectionSubtitle}>Read-only view</Text>
+          <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Read-only view</Text>
           {renderAnswerKeyGrid()}
         </View>
 
@@ -380,27 +500,28 @@ export default function ExamPreviewScreen() {
         <StatusManager
           examId={examId}
           currentStatus={exam.metadata.status}
+          darkModeEnabled={darkModeEnabled}
           onStatusChanged={loadExamData}
         />
 
         {/* Version Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Version Information</Text>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.title }]}>Version Information</Text>
 
           <View style={styles.versionInfo}>
-            <View style={styles.versionRow}>
-              <Text style={styles.versionLabel}>Version:</Text>
-              <Text style={styles.versionValue}>v{exam.metadata.version}</Text>
+            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.versionLabel, { color: colors.text }]}>Version:</Text>
+              <Text style={[styles.versionValue, { color: colors.title }]}>v{exam.metadata.version}</Text>
             </View>
-            <View style={styles.versionRow}>
-              <Text style={styles.versionLabel}>Last Modified:</Text>
-              <Text style={styles.versionValue}>
+            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.versionLabel, { color: colors.text }]}>Last Modified:</Text>
+              <Text style={[styles.versionValue, { color: colors.title }]}>
                 {ExamService.formatTimestamp(exam.lastModified)}
               </Text>
             </View>
-            <View style={styles.versionRow}>
-              <Text style={styles.versionLabel}>Created:</Text>
-              <Text style={styles.versionValue}>
+            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.versionLabel, { color: colors.text }]}>Created:</Text>
+              <Text style={[styles.versionValue, { color: colors.title }]}>
                 {ExamService.formatTimestamp(exam.metadata.createdAt)}
               </Text>
             </View>
@@ -409,27 +530,43 @@ export default function ExamPreviewScreen() {
       </ScrollView>
 
       {/* Action Buttons */}
-      <View style={styles.actionButtons}>
+      <View
+        style={[
+          styles.actionButtons,
+          { backgroundColor: darkModeEnabled ? "#1a2520" : "#e6efe8", borderTopColor: colors.border },
+        ]}
+      >
         {exam.metadata.status === "Draft" && (
           <TouchableOpacity
-            style={styles.editExamButton}
+            style={[
+              styles.editExamButton,
+              darkModeEnabled && { backgroundColor: "#5b4730", borderWidth: 1, borderColor: "#8a6d45" },
+            ]}
             onPress={() => router.push(`/(tabs)/edit-exam?examId=${examId}`)}
           >
             <Ionicons name="pencil-outline" size={20} color="#fff" />
             <Text style={styles.editExamButtonText}>Edit Exam</Text>
           </TouchableOpacity>
         )}
+        {exam.metadata.status === "Draft" && (
+          <TouchableOpacity
+            style={[
+              styles.editButton,
+              darkModeEnabled && { backgroundColor: "#204236", borderWidth: 1, borderColor: "#3a6c5a" },
+            ]}
+            onPress={() =>
+              router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
+            }
+          >
+            <Ionicons name="create-outline" size={20} color="#fff" />
+            <Text style={styles.editButtonText}>Edit Answer Key</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
-          style={styles.editButton}
-          onPress={() =>
-            router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
-          }
-        >
-          <Ionicons name="create-outline" size={20} color="#fff" />
-          <Text style={styles.editButtonText}>Edit Answer Key</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.printButton}
+          style={[
+            styles.printButton,
+            darkModeEnabled && { backgroundColor: "#263f35", borderWidth: 1, borderColor: "#3e6657" },
+          ]}
           onPress={() =>
             router.push(`/(tabs)/print-answer-sheet?examId=${examId}`)
           }
@@ -440,7 +577,7 @@ export default function ExamPreviewScreen() {
       </View>
 
       <Toast />
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -460,9 +597,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     paddingTop: 56,
-    paddingBottom: 16,
+    paddingBottom: 10,
     backgroundColor: "#3d5a3d",
     borderBottomWidth: 1,
     borderBottomColor: "#2f4a38",
@@ -487,15 +624,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 10,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   statusBadge: {
     alignSelf: "flex-start",
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    marginBottom: 20,
+    marginBottom: 12,
   },
   statusText: {
     color: "#fff",
@@ -505,8 +643,8 @@ const styles = StyleSheet.create({
   section: {
     backgroundColor: "#f3f7f4",
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    padding: 12,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: "#cad9cf",
   },
@@ -518,9 +656,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "bold",
+    fontWeight: "800",
     color: "#2b4337",
-    marginBottom: 12,
+    marginBottom: 10,
   },
   sectionSubtitle: {
     fontSize: 12,
@@ -545,7 +683,7 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 12,
   },
   infoContent: {
@@ -574,13 +712,13 @@ const styles = StyleSheet.create({
   },
   configGrid: {
     flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
+    gap: 8,
+    marginBottom: 10,
   },
   configItem: {
     flex: 1,
     backgroundColor: "#e6efe8",
-    padding: 12,
+    padding: 10,
     borderRadius: 8,
     alignItems: "center",
   },
@@ -618,7 +756,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#e6efe8",
-    padding: 10,
+    padding: 9,
     borderRadius: 8,
     gap: 8,
   },
@@ -671,7 +809,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#d7e4db",
   },
@@ -718,8 +856,8 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     flexDirection: "row",
-    padding: 16,
-    gap: 12,
+    padding: 12,
+    gap: 8,
     backgroundColor: "#e5efe8",
     borderTopWidth: 1,
     borderTopColor: "#cad9cf",
@@ -729,8 +867,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: "45%",
     backgroundColor: "#ff9800",
-    borderRadius: 8,
-    padding: 14,
+    borderRadius: 10,
+    padding: 13,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -745,8 +883,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: "45%",
     backgroundColor: "#2d7a5f",
-    borderRadius: 8,
-    padding: 14,
+    borderRadius: 10,
+    padding: 13,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -761,8 +899,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: "45%",
     backgroundColor: "#2f6d58",
-    borderRadius: 8,
-    padding: 14,
+    borderRadius: 10,
+    padding: 13,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
