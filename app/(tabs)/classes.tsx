@@ -79,6 +79,7 @@ export default function ClassesScreen() {
   const [creating, setCreating] = useState(false);
   const [classMenuVisible, setClassMenuVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [classMenuPosition, setClassMenuPosition] = useState({ top: 0, left: 0 });
 
@@ -364,6 +365,33 @@ export default function ClassesScreen() {
     setArchiveConfirmVisible(true);
   };
 
+  const deleteClass = async (classItem: Class) => {
+    try {
+      await ClassService.deleteClass(classItem.id);
+      setClassMenuVisible(false);
+      setSelectedClass(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: `${classItem.class_name} deleted successfully`,
+      });
+      await loadClasses();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
+    }
+  };
+
+  const handleDeleteClass = (classItem: Class) => {
+    setSelectedClass(classItem);
+    setClassMenuVisible(false);
+    setDeleteConfirmVisible(true);
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
@@ -606,9 +634,20 @@ export default function ClassesScreen() {
                 }
               }}
             >
-              <Ionicons name="archive-outline" size={18} color="#F05A28" />
-              <Text style={[styles.menuActionText, { color: "#F05A28" }]}>
+              <Text style={[styles.menuActionText, { color: "#F59E0B" }]}>
                 Archive Class
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuAction}
+              onPress={() => {
+                if (selectedClass) {
+                  handleDeleteClass(selectedClass);
+                }
+              }}
+            >
+              <Text style={[styles.menuActionText, { color: "#EF4444" }]}>
+                Delete Class
               </Text>
             </TouchableOpacity>
           </View>
@@ -627,6 +666,22 @@ export default function ClassesScreen() {
           if (selectedClass) {
             setArchiveConfirmVisible(false);
             archiveClass(selectedClass);
+          }
+        }}
+      />
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${selectedClass?.class_name ?? "this class"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteConfirmVisible(false)}
+        onConfirm={() => {
+          if (selectedClass) {
+            setDeleteConfirmVisible(false);
+            deleteClass(selectedClass);
           }
         }}
       />

@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Modal,
   ScrollView,
   StyleSheet,
@@ -132,6 +133,7 @@ export default function ClassDetailsScreen() {
   const [deleteExamConfirmVisible, setDeleteExamConfirmVisible] = useState(false);
   const [examRows, setExamRows] = useState<ExamRow[]>([]);
   const [examRowsLoading, setExamRowsLoading] = useState(true);
+  const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
   const examLoadRequestRef = React.useRef(0);
 
   const loadClassData = useCallback(async () => {
@@ -311,8 +313,18 @@ export default function ClassDetailsScreen() {
     );
   }, [examRows, searchQuery]);
 
-  const openExamMenu = useCallback((exam: ExamRow) => {
+  const openExamMenu = useCallback((exam: ExamRow, pageX?: number, pageY?: number) => {
+    const menuWidth = 164;
+    const screenWidth = Dimensions.get("window").width;
+    const fallbackLeft = Math.max(16, screenWidth - menuWidth - 20);
+    const left =
+      typeof pageX === "number"
+        ? Math.min(Math.max(16, pageX - menuWidth + 24), screenWidth - menuWidth - 16)
+        : fallbackLeft;
+    const top = typeof pageY === "number" ? Math.max(96, pageY - 8) : 150;
+
     setSelectedExam(exam);
+    setExamMenuPosition({ top, left });
     setExamMenuVisible(true);
   }, []);
 
@@ -612,7 +624,13 @@ export default function ClassDetailsScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.examMenuButton}
-                  onPress={() => openExamMenu(exam)}
+                  onPress={(event) =>
+                    openExamMenu(
+                      exam,
+                      event.nativeEvent.pageX,
+                      event.nativeEvent.pageY,
+                    )
+                  }
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   accessibilityRole="button"
                   accessibilityLabel={`More actions for ${exam.title}`}
@@ -844,7 +862,26 @@ export default function ClassDetailsScreen() {
           activeOpacity={1}
           onPress={closeExamMenu}
         >
-          <View style={styles.examMenuContent}>
+          <View
+            style={[
+              styles.examMenuContent,
+              {
+                top: examMenuPosition.top,
+                left: examMenuPosition.left,
+              },
+            ]}
+          >
+            <View style={styles.examMenuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {selectedExam?.title || "Exam"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={closeExamMenu}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
               <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
             </TouchableOpacity>
@@ -1303,7 +1340,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingBottom: 4,
   },
   menuTitle: {
@@ -1324,6 +1361,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   examMenuContent: {
+    position: "absolute",
     width: 164,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
@@ -1333,7 +1371,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 16,
     elevation: 8,
-    marginTop: 150,
+  },
+  examMenuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingTop: 2,
+    paddingBottom: 6,
   },
   menuItem: {
     paddingHorizontal: 14,

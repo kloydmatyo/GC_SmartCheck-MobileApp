@@ -51,10 +51,9 @@ export default function ExamPreviewScreen() {
   const [viewCodeVisible, setViewCodeVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [loadedExamId, setLoadedExamId] = useState("");
   const loadRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
-  const isCurrentExamReady =
-    Boolean(exam) && String(exam?.metadata.examId || "") === String(examId);
 
   const resolvedAnswers = React.useMemo(() => {
     if (!exam) return [];
@@ -125,6 +124,7 @@ export default function ExamPreviewScreen() {
     setError(null);
     setLoading(true);
     setResultsLoading(true);
+    setLoadedExamId("");
     setSettingsMenuVisible(false);
     setViewCodeVisible(false);
     setArchiveConfirmVisible(false);
@@ -181,6 +181,7 @@ export default function ExamPreviewScreen() {
 
         setIsOffline(false);
         setExam(examData);
+        setLoadedExamId(String(examId));
         setExamResults(resultRows);
         return;
       } catch (liveError) {
@@ -240,6 +241,7 @@ export default function ExamPreviewScreen() {
       };
 
       setExam(examData);
+      setLoadedExamId(String(examId));
 
       try {
         const resultRows = await ResultsService.getExamResults(examId);
@@ -455,7 +457,7 @@ export default function ExamPreviewScreen() {
     );
   };
 
-  if (loading || (!error && !isCurrentExamReady)) {
+  if (loading || (!error && loadedExamId !== String(examId))) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
@@ -623,6 +625,17 @@ export default function ExamPreviewScreen() {
             onPress={() => {}}
             style={styles.examMenuContent}
           >
+            <View style={styles.examMenuHeader}>
+              <Text style={styles.examMenuTitle} numberOfLines={1}>
+                {exam.metadata.title}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={closeSettingsMenu}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
@@ -792,6 +805,20 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
+  examMenuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  examMenuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1F2937",
+    marginRight: 8,
+  },
   menuItem: {
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -836,6 +863,14 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F7F8FA",
