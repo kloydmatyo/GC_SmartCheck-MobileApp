@@ -8,6 +8,7 @@ import {
     Dimensions,
     FlatList,
     GestureResponderEvent,
+    KeyboardAvoidingView,
     Modal,
     Platform,
     ScrollView,
@@ -503,82 +504,82 @@ export default function ClassesScreen() {
       <Modal
         visible={modalVisible}
         animationType="slide"
-        transparent
+        transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.sheetOverlay}>
-          <TouchableOpacity
-            style={styles.sheetBackdrop}
-            activeOpacity={1}
-            onPress={() => setModalVisible(false)}
-          />
-          <View style={styles.createSheet}>
-            <View style={styles.createSheetHeader}>
-              <Text style={styles.createSheetTitle}>Create Class</Text>
-              <TouchableOpacity
-                style={styles.createSheetClose}
-                onPress={() => setModalVisible(false)}
-              >
-                <Ionicons name="close" size={24} color="#A8AFBC" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.createSheetBody}
-              contentContainerStyle={styles.createSheetBodyContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+        <KeyboardAvoidingView
+          style={styles.createScreen}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.createScreenHeader}>
+            <View style={styles.createScreenHeaderSpacer} />
+            <Text style={styles.createSheetTitle}>Create Class</Text>
+            <TouchableOpacity
+              style={styles.createSheetClose}
+              onPress={() => setModalVisible(false)}
+              disabled={creating}
             >
-              <Text style={styles.sheetLabel}>Class Name</Text>
-              <TextInput
-                style={styles.sheetInput}
-                placeholder="e.g. Biology 101"
-                placeholderTextColor="#B5BCC8"
-                value={formData.class_name}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, class_name: text })
-                }
-              />
+              <Ionicons name="close" size={24} color="#A8AFBC" />
+            </TouchableOpacity>
+          </View>
 
-              <Text style={styles.sheetLabel}>Program</Text>
-              <TextInput
-                style={styles.sheetInput}
-                placeholder="e.g. Science Dept"
-                placeholderTextColor="#B5BCC8"
-                value={formData.course_subject}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, course_subject: text })
-                }
-              />
+          <ScrollView
+            style={styles.createSheetBody}
+            contentContainerStyle={styles.createSheetBodyContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.sheetLabel}>Class Name</Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="e.g. Biology 101"
+              placeholderTextColor="#B5BCC8"
+              value={formData.class_name}
+              onChangeText={(text) =>
+                setFormData({ ...formData, class_name: text })
+              }
+            />
 
-              <View style={styles.sheetRow}>
-                <View style={styles.sheetHalf}>
-                  <Text style={styles.sheetLabel}>Course Block</Text>
-                  <TextInput
-                    style={styles.sheetInput}
-                    placeholder="e.g. Period 1"
-                    placeholderTextColor="#B5BCC8"
-                    value={formData.section_block}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, section_block: text })
-                    }
-                  />
-                </View>
-                <View style={styles.sheetHalf}>
-                  <Text style={styles.sheetLabel}>Room</Text>
-                  <TextInput
-                    style={styles.sheetInput}
-                    placeholder="e.g. Room 402"
-                    placeholderTextColor="#B5BCC8"
-                    value={formData.room}
-                    onChangeText={(text) =>
-                      setFormData({ ...formData, room: text })
-                    }
-                  />
-                </View>
+            <Text style={styles.sheetLabel}>Program</Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="e.g. Science Dept"
+              placeholderTextColor="#B5BCC8"
+              value={formData.course_subject}
+              onChangeText={(text) =>
+                setFormData({ ...formData, course_subject: text })
+              }
+            />
+
+            <View style={styles.sheetRow}>
+              <View style={styles.sheetHalf}>
+                <Text style={styles.sheetLabel}>Course Block</Text>
+                <TextInput
+                  style={styles.sheetInput}
+                  placeholder="e.g. Period 1"
+                  placeholderTextColor="#B5BCC8"
+                  value={formData.section_block}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, section_block: text })
+                  }
+                />
               </View>
-            </ScrollView>
+              <View style={styles.sheetHalf}>
+                <Text style={styles.sheetLabel}>Room</Text>
+                <TextInput
+                  style={styles.sheetInput}
+                  placeholder="e.g. Room 402"
+                  placeholderTextColor="#B5BCC8"
+                  value={formData.room}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, room: text })
+                  }
+                />
+              </View>
+            </View>
+          </ScrollView>
 
+          <View style={styles.createScreenFooter}>
             <TouchableOpacity
               style={[styles.sheetPrimaryButton, creating && styles.createButtonDisabled]}
               onPress={handleCreateClass}
@@ -591,7 +592,7 @@ export default function ClassesScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
@@ -877,32 +878,29 @@ const styles = StyleSheet.create({
     color: "#8da096",
     marginTop: 4,
   },
-  sheetOverlay: {
+  createScreen: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(15, 23, 42, 0.22)",
+    backgroundColor: "#F7F7F8",
   },
-  sheetBackdrop: {
-    flex: 1,
-  },
-  createSheet: {
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 28,
-  },
-  createSheetHeader: {
+  createScreenHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    backgroundColor: "#FFFFFF",
+    paddingTop: 56,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+  },
+  createScreenHeaderSpacer: {
+    width: 44,
+    height: 44,
   },
   createSheetTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#1D2433",
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
   },
   createSheetClose: {
     width: 44,
@@ -913,15 +911,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   createSheetBody: {
-    maxHeight: 420,
+    flex: 1,
   },
   createSheetBodyContent: {
-    paddingBottom: 16,
+    padding: 20,
+    paddingBottom: 120,
   },
   sheetLabel: {
     fontSize: 13,
-    fontWeight: "700",
-    color: "#525D70",
+    fontWeight: "800",
+    color: "#374151",
     marginBottom: 10,
     marginTop: 14,
   },
@@ -930,10 +929,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: "#E8EBF0",
-    backgroundColor: "#FAFBFC",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 18,
     fontSize: 16,
-    color: "#1F2937",
+    fontWeight: "600",
+    color: "#111827",
   },
   sheetRow: {
     flexDirection: "row",
@@ -945,15 +945,20 @@ const styles = StyleSheet.create({
   sheetPrimaryButton: {
     height: 58,
     borderRadius: 16,
-    backgroundColor: "#7EE0B6",
+    backgroundColor: "#1FC27D",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 12,
   },
   sheetPrimaryButtonText: {
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "900",
     color: "#FFFFFF",
+  },
+  createScreenFooter: {
+    padding: 20,
+    backgroundColor: "#F7F7F8",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F5",
   },
   modalContent: {
     backgroundColor: COLORS.white,
