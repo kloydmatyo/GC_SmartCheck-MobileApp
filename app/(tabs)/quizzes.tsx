@@ -1,4 +1,6 @@
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -15,6 +17,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    Modal,
     StyleSheet,
     Text,
     TextInput,
@@ -34,6 +37,7 @@ interface Quiz {
 
 export default function QuizzesScreen() {
   const router = useRouter();
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [filter, setFilter] = useState<
     "All" | "Draft" | "Scheduled" | "Active" | "Completed"
   >("All");
@@ -42,6 +46,8 @@ export default function QuizzesScreen() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [quizToDelete, setQuizToDelete] = useState<Quiz | null>(null);
 
   // Fetch quizzes from Firebase
   const loadQuizzes = async () => {
@@ -127,8 +133,40 @@ export default function QuizzesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadQuizzes();
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
     }, []),
   );
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+      }
+    : {
+        screenBg: "#eef1ef",
+        headerBg: "#fff",
+        headerBorder: "#d8dfda",
+        title: "#24362f",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardBorder: "#2f4a38",
+      };
 
   const filteredQuizzes = quizzes.filter((q) => {
     const matchesFilter = filter === "All" ? true : q.status === filter;
@@ -214,9 +252,99 @@ export default function QuizzesScreen() {
     }
   };
 
+  // Delete quiz/exam
+  const confirmDelete = (quiz: Quiz) => {
+    setQuizToDelete(quiz);
+    setShowDeleteDialog(true);
+  };
+
+  const handleDeleteQuiz = async () => {
+    if (!quizToDelete) return;
+
+    try {
+      const { deleteDoc, doc, collection, query, where, getDocs } =
+        await import("firebase/firestore");
+
+      // Delete the exam document first
+      await deleteDoc(doc(db, "exams", quizToDelete.id));
+
+      // Delete associated answer keys (with individual error handling)
+      try {
+        const answerKeysQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", quizToDelete.id)
+        );
+        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+
+        // Delete each answer key individually to handle permission errors
+        for (const answerKeyDoc of answerKeysSnapshot.docs) {
+          try {
+            await deleteDoc(answerKeyDoc.ref);
+          } catch (keyError) {
+            console.log(
+              `Could not delete answer key ${answerKeyDoc.id}:`,
+              keyError
+            );
+          }
+        }
+      } catch (answerKeysError) {
+        console.log("Error querying answer keys:", answerKeysError);
+      }
+
+      // Delete associated templates (with individual error handling)
+      try {
+        const templatesQuery = query(
+          collection(db, "templates"),
+          where("examId", "==", quizToDelete.id)
+        );
+        const templatesSnapshot = await getDocs(templatesQuery);
+
+        // Delete each template individually to handle permission errors
+        for (const templateDoc of templatesSnapshot.docs) {
+          try {
+            await deleteDoc(templateDoc.ref);
+          } catch (templateError) {
+            console.log(
+              `Could not delete template ${templateDoc.id}:`,
+              templateError
+            );
+          }
+        }
+      } catch (templatesError) {
+        console.log("Error querying templates:", templatesError);
+      }
+
+      // Remove from offline storage if downloaded
+      if (quizToDelete.isDownloaded) {
+        try {
+          await OfflineStorageService.deleteDownloadedExam(quizToDelete.id);
+        } catch (offlineError) {
+          console.log("Error removing from offline storage:", offlineError);
+        }
+      }
+
+      // Update UI
+      setQuizzes((prev) => prev.filter((q) => q.id !== quizToDelete.id));
+
+      Alert.alert("Success", `"${quizToDelete.title}" has been deleted`);
+    } catch (error) {
+      console.error("Error deleting quiz:", error);
+      Alert.alert(
+        "Error",
+        "Failed to delete quiz. Please check your permissions."
+      );
+    } finally {
+      setShowDeleteDialog(false);
+      setQuizToDelete(null);
+    }
+  };
+
   const renderQuizCard = ({ item }: { item: Quiz }) => (
     <TouchableOpacity
-      style={styles.quizCard}
+      style={[
+        styles.quizCard,
+        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+      ]}
       onPress={() => router.push(`/(tabs)/exam-preview?examId=${item.id}`)}
     >
       <View style={styles.quizHeader}>
@@ -285,6 +413,13 @@ export default function QuizzesScreen() {
             <Ionicons name="share-social-outline" size={12} color="#fff" />
             <Text style={styles.actionText}>Share</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => confirmDelete(item)}
+          >
+            <Ionicons name="trash-outline" size={12} color="#fff" />
+            <Text style={styles.actionText}>Delete</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </TouchableOpacity>
@@ -307,9 +442,17 @@ export default function QuizzesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Quizzes</Text>
+      <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.headerBg,
+              borderBottomColor: colors.headerBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#00a550" />
@@ -320,13 +463,21 @@ export default function QuizzesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Quizzes</Text>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
+        <Text style={[styles.headerTitle, { color: colors.title }]}>Quizzes</Text>
       </View>
 
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
         <Ionicons name="search" size={16} color="#d6e9de" />
         <TextInput
           style={styles.searchInput}
@@ -339,7 +490,7 @@ export default function QuizzesScreen() {
 
       <View style={styles.filterContainer}>
         <TouchableOpacity
-          style={styles.filterTrigger}
+          style={[styles.filterTrigger, { backgroundColor: colors.primary }]}
           onPress={() => setShowFilterMenu((prev) => !prev)}
         >
           <Text style={styles.filterTriggerText}>Filter: {filter}</Text>
@@ -350,7 +501,7 @@ export default function QuizzesScreen() {
           />
         </TouchableOpacity>
         {showFilterMenu && (
-          <View style={styles.filterMenu}>
+          <View style={[styles.filterMenu, { backgroundColor: colors.primaryDark }]}>
             {(
               ["All", "Draft", "Scheduled", "Active", "Completed"] as const
             ).map((status) => (
@@ -398,12 +549,58 @@ export default function QuizzesScreen() {
       />
 
       <TouchableOpacity
-        style={styles.newQuizButton}
+        style={[
+          styles.newQuizButton,
+          { backgroundColor: colors.primary, shadowColor: colors.primary },
+        ]}
         onPress={() => router.push("/(tabs)/create-quiz")}
       >
-        <Ionicons name="add-circle-outline" size={18} color="#fff" />
+        <Ionicons name="add-circle" size={22} color="#fff" />
         <Text style={styles.newQuizText}>New Quiz</Text>
       </TouchableOpacity>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteDialog}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteDialog(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.cardBg }]}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={48} color="#ef4444" />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.title }]}>Delete Quiz</Text>
+            <Text style={[styles.modalMessage, { color: colors.subtitle }]}>
+              Are you sure you want to delete "{quizToDelete?.title}"?
+              {"\n\n"}
+              This will permanently delete:
+              {"\n"}• The exam
+              {"\n"}• All answer keys
+              {"\n"}• Associated templates
+              {"\n"}• Offline copies
+              {"\n\n"}
+              This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel, { borderColor: colors.cardBorder }]}
+                onPress={() => setShowDeleteDialog(false)}
+              >
+                <Text style={[styles.modalButtonText, { color: colors.subtitle }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonDelete]}
+                onPress={handleDeleteQuiz}
+              >
+                <Ionicons name="trash-outline" size={18} color="#fff" />
+                <Text style={[styles.modalButtonText, styles.modalButtonDeleteText]}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -411,7 +608,7 @@ export default function QuizzesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f0f2f0",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
@@ -432,7 +629,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     marginHorizontal: 8,
     marginTop: 8,
     marginBottom: 8,
@@ -456,7 +653,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 38,
@@ -468,7 +665,7 @@ const styles = StyleSheet.create({
   },
   filterMenu: {
     marginTop: 6,
-    backgroundColor: "#2f5a45",
+    backgroundColor: "#2f4a38",
     borderRadius: 10,
     padding: 6,
     borderWidth: 1,
@@ -496,12 +693,12 @@ const styles = StyleSheet.create({
     paddingBottom: 90,
   },
   quizCard: {
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     borderRadius: 10,
     padding: 12,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#355b49",
+    borderColor: "#2f4a38",
   },
   quizHeader: {
     flexDirection: "row",
@@ -625,20 +822,84 @@ const styles = StyleSheet.create({
   },
   newQuizButton: {
     position: "absolute",
-    right: 10,
-    bottom: 14,
-    backgroundColor: "#2f8a74",
+    right: 14,
+    bottom: 66,
+    backgroundColor: "#3d5a3d",
     borderRadius: 14,
     paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingVertical: 13,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    elevation: 3,
+    gap: 8,
+    elevation: 6,
+    shadowColor: "#3d5a3d",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
   },
   newQuizText: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "700",
   },
+  deleteButton: {
+    backgroundColor: "#dc2626",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    alignItems: "center",
+  },
+  modalHeader: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 6,
+  },
+  modalButtonCancel: {
+    borderWidth: 1,
+  },
+  modalButtonDelete: {
+    backgroundColor: "#dc2626",
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalButtonDeleteText: {
+    color: "#fff",
+  },
 });
+

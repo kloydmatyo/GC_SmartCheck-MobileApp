@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -16,12 +17,14 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
 
 export default function ClassesScreen() {
   const router = useRouter();
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +35,7 @@ export default function ClassesScreen() {
   const [collapsedRecent, setCollapsedRecent] = useState<
     Record<string, boolean>
   >({});
+  const [blockPickerVisible, setBlockPickerVisible] = useState(false);
 
   useEffect(() => {
     if (
@@ -51,11 +55,7 @@ export default function ClassesScreen() {
     class_name: "",
     course_subject: "",
     room: "",
-    schedule_day: [] as string[], // Changed to array
-    schedule_time: "",
-    school_year: "2025*2026",
     section_block: "",
-    semester: "1st semester",
   });
 
   // Load classes from Firebase
@@ -80,8 +80,76 @@ export default function ClassesScreen() {
   useFocusEffect(
     useCallback(() => {
       loadClasses();
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
     }, []),
   );
+
+  const colors = darkModeEnabled
+    ? {
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        headerBorder: "#2b3b34",
+        title: "#e7f1eb",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        cardBg: "#1f2b26",
+        cardBorder: "#34483f",
+        recentHeaderBg: "#2a3d37",
+        recentHeaderText: "#dcebe3",
+        recentChevron: "#8fd1ad",
+        recentQuizCardBg: "#18211d",
+        recentQuizCardBorder: "#31443b",
+        recentQuizDate: "#8fa39a",
+        recentQuizTitle: "#e7f1eb",
+      }
+    : {
+        screenBg: "#eef1ef",
+        headerBg: "#fff",
+        headerBorder: "#d8dfda",
+        title: "#24362f",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardBorder: "#2f4a38",
+        recentHeaderBg: "#324742",
+        recentHeaderText: "#d4e8dd",
+        recentChevron: "#8ad0ae",
+        recentQuizCardBg: "#d6c4ac",
+        recentQuizCardBorder: "#cab295",
+        recentQuizDate: "#6f624f",
+        recentQuizTitle: "#4f4538",
+      };
+
+  const modalColors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        panelSoft: "#2a3a33",
+        border: "#34483f",
+        text: "#e7f1eb",
+        subtext: "#b9c9c0",
+        accent: "#1f3a2f",
+        accentStrong: "#8fd1ad",
+      }
+    : {
+        bg: COLORS.white,
+        headerBg: "#3d5a3d",
+        panelSoft: "#3d5a3d",
+        border: "#2f6b49",
+        text: "#E8F5E9",
+        subtext: "#B8D4B8",
+        accent: "#2d7a5f",
+        accentStrong: "#4CAF50",
+      };
 
   // Create new class
   const handleCreateClass = async () => {
@@ -90,7 +158,7 @@ export default function ClassesScreen() {
       Toast.show({
         type: "error",
         text1: "Validation Error",
-        text2: "Class name is required",
+        text2: "Program is required",
       });
       return;
     }
@@ -119,11 +187,7 @@ export default function ClassesScreen() {
         class_name: "",
         course_subject: "",
         room: "",
-        schedule_day: [], // Reset to empty array
-        schedule_time: "",
-        school_year: "2025*2026",
         section_block: "",
-        semester: "1st semester",
       });
 
       setModalVisible(false);
@@ -140,26 +204,6 @@ export default function ClassesScreen() {
     }
   };
 
-  // Toggle day selection
-  const toggleDay = (day: string) => {
-    setFormData((prev) => {
-      const currentDays = prev.schedule_day;
-      if (currentDays.includes(day)) {
-        // Remove day if already selected
-        return {
-          ...prev,
-          schedule_day: currentDays.filter((d) => d !== day),
-        };
-      } else {
-        // Add day if not selected
-        return {
-          ...prev,
-          schedule_day: [...currentDays, day],
-        };
-      }
-    });
-  };
-
   const filteredClasses = classes.filter(
     (cls) =>
       cls.class_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -169,15 +213,19 @@ export default function ClassesScreen() {
 
   const renderClassCard = ({ item }: { item: Class }) => (
     <TouchableOpacity
-      style={styles.classCard}
+      style={[
+        styles.classCard,
+        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
+      ]}
       onPress={() => openClassList(item.id)}
       activeOpacity={0.9}
     >
       <View style={styles.classHeader}>
         <View style={styles.classHeaderLeft}>
-          <Text style={styles.classCode}>{item.section_block.toUpperCase()}</Text>
           <Text style={styles.className}>{item.class_name}</Text>
-          <Text style={styles.classSubject}>{item.course_subject}</Text>
+          <Text style={styles.classSubject}>
+            {item.course_subject} • {item.section_block}
+          </Text>
         </View>
         <TouchableOpacity
           style={styles.cardMenuButton}
@@ -198,41 +246,36 @@ export default function ClassesScreen() {
           </Text>
         </View>
         <View style={styles.classInfo}>
-          <Ionicons name="time-outline" size={14} color="#d9efe2" />
-          <Text style={styles.classInfoText}>
-            {Array.isArray(item.schedule_day)
-              ? item.schedule_day.join(", ")
-              : item.schedule_day}{" "}
-            {item.schedule_time}
-          </Text>
-        </View>
-        <View style={styles.classInfo}>
           <Ionicons name="location-outline" size={14} color="#d9efe2" />
           <Text style={styles.classInfoText}>Room {item.room}</Text>
         </View>
       </View>
 
-      <View style={styles.metaRow}>
-        <View style={styles.metaBadge}>
-          <Text style={styles.metaLabel}>SY</Text>
-          <Text style={styles.metaValue}>{item.school_year}</Text>
-        </View>
-        <View style={styles.metaBadge}>
-          <Text style={styles.metaLabel}>Sem</Text>
-          <Text style={styles.metaValue}>{item.semester}</Text>
-        </View>
-      </View>
-
-      <TouchableOpacity
-        style={styles.viewButton}
-        onPress={() => openClassList(item.id)}
-      >
+        <TouchableOpacity
+          style={[
+            styles.viewButton,
+            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
+          ]}
+          onPress={() => openClassList(item.id)}
+        >
         <Ionicons name="people-outline" size={14} color={COLORS.white} />
         <Text style={styles.viewButtonText}>View Class List</Text>
       </TouchableOpacity>
 
-      <View style={styles.recentRow}>
-        <Text style={styles.recentTitle}>Recent Quizzes</Text>
+      <View
+        style={[
+          styles.recentRow,
+          { backgroundColor: colors.recentHeaderBg },
+        ]}
+      >
+        <Text
+          style={[
+            styles.recentTitle,
+            { color: colors.recentHeaderText },
+          ]}
+        >
+          Recent Quizzes
+        </Text>
         <TouchableOpacity
           style={styles.recentToggle}
           onPress={() => {
@@ -246,7 +289,7 @@ export default function ClassesScreen() {
           <Ionicons
             name={collapsedRecent[item.id] ? "chevron-up" : "chevron-down"}
             size={16}
-            color="#8ad0ae"
+            color={colors.recentChevron}
           />
         </TouchableOpacity>
       </View>
@@ -257,17 +300,53 @@ export default function ClassesScreen() {
             showsHorizontalScrollIndicator={true}
             contentContainerStyle={styles.quizCardsRow}
           >
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 1</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 1
+              </Text>
             </View>
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 2</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 2
+              </Text>
             </View>
-            <View style={styles.quizMiniCard}>
-              <Text style={styles.quizMiniDate}>Feb 14, 2026</Text>
-              <Text style={styles.quizMiniTitle}>Template 3</Text>
+            <View
+              style={[
+                styles.quizMiniCard,
+                {
+                  backgroundColor: colors.recentQuizCardBg,
+                  borderColor: colors.recentQuizCardBorder,
+                },
+              ]}
+            >
+              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
+                Feb 14, 2026
+              </Text>
+              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
+                Template 3
+              </Text>
             </View>
           </ScrollView>
         </>
@@ -277,13 +356,23 @@ export default function ClassesScreen() {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
+      <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
+        <View
+          style={[
+            styles.header,
+            {
+              backgroundColor: colors.headerBg,
+              borderBottomColor: colors.headerBorder,
+            },
+          ]}
+        >
           <View>
-            <Text style={styles.headerTitle}>Classes</Text>
+            <Text style={[styles.headerTitle, { color: colors.title }]}>
+              Classes
+            </Text>
           </View>
           <TouchableOpacity
-            style={styles.addButton}
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
             onPress={() => setModalVisible(true)}
           >
             <Ionicons name="add" size={22} color={COLORS.white} />
@@ -298,21 +387,29 @@ export default function ClassesScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
         <View>
-          <Text style={styles.headerTitle}>Classes</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>Classes</Text>
         </View>
         <TouchableOpacity
-          style={styles.addButton}
+          style={[styles.addButton, { backgroundColor: colors.primary }]}
           onPress={() => setModalVisible(true)}
         >
           <Ionicons name="add" size={22} color={COLORS.white} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
         <Ionicons
           name="search"
           size={16}
@@ -357,156 +454,138 @@ export default function ClassesScreen() {
         transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
+        <View style={[styles.modalContent, { backgroundColor: modalColors.bg }]}>
+          <View style={[styles.modalHeader, { backgroundColor: modalColors.headerBg }]}>
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setModalVisible(false)}
             >
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.modalTitle}>Create New Class</Text>
+            <Text style={[styles.modalTitle, { color: modalColors.text }]}>Create New Class</Text>
             <View style={styles.modalHeaderPlaceholder} />
           </View>
 
           <ScrollView
-            style={styles.modalBody}
+            style={[
+              styles.modalBody,
+              { backgroundColor: darkModeEnabled ? modalColors.bg : "#f5f5f5" },
+            ]}
+            contentContainerStyle={styles.modalBodyContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-              <Text style={styles.label}>Class Name *</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Program *</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., CS 101"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.class_name}
                 onChangeText={(text) =>
                   setFormData({ ...formData, class_name: text })
                 }
               />
 
-              <Text style={styles.label}>Course Subject *</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Course Subject *</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., Computer Science"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.course_subject}
                 onChangeText={(text) =>
                   setFormData({ ...formData, course_subject: text })
                 }
               />
 
-              <Text style={styles.label}>Section/Block</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., A"
-                placeholderTextColor="#9ab79f"
-                value={formData.section_block}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, section_block: text })
-                }
-              />
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Block</Text>
+              <TouchableOpacity
+                style={[
+                  styles.dropdownButton,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                  },
+                ]}
+                onPress={() => setBlockPickerVisible(true)}
+              >
+                <Text
+                  style={[
+                    styles.dropdownButtonText,
+                    darkModeEnabled && { color: modalColors.text },
+                    !formData.section_block && styles.dropdownPlaceholder,
+                    !formData.section_block && darkModeEnabled && { color: "#8fa39a" },
+                  ]}
+                >
+                  {formData.section_block ? `Block ${formData.section_block}` : "Select a block..."}
+                </Text>
+                <Ionicons 
+                  name="chevron-down" 
+                  size={20} 
+                  color={darkModeEnabled ? modalColors.subtext : "#B8D4B8"} 
+                />
+              </TouchableOpacity>
 
-              <Text style={styles.label}>Room</Text>
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Room</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
                 placeholder="e.g., 404"
-                placeholderTextColor="#9ab79f"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.room}
                 onChangeText={(text) =>
                   setFormData({ ...formData, room: text })
                 }
               />
-
-              <Text style={styles.label}>Schedule Day (Select multiple)</Text>
-              <View style={styles.dayButtons}>
-                {[
-                  "Monday",
-                  "Tuesday",
-                  "Wednesday",
-                  "Thursday",
-                  "Friday",
-                  "Saturday",
-                ].map((day) => (
-                  <TouchableOpacity
-                    key={day}
-                    style={[
-                      styles.dayButton,
-                      formData.schedule_day.includes(day) &&
-                        styles.dayButtonActive,
-                    ]}
-                    onPress={() => toggleDay(day)}
-                  >
-                    <Text
-                      style={[
-                        styles.dayButtonText,
-                        formData.schedule_day.includes(day) &&
-                          styles.dayButtonTextActive,
-                      ]}
-                    >
-                      {day.substring(0, 3)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <Text style={styles.label}>Schedule Time</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., 10:00am"
-                placeholderTextColor="#9ab79f"
-                value={formData.schedule_time}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, schedule_time: text })
-                }
-              />
-
-              <Text style={styles.label}>School Year</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., 2025*2026"
-                placeholderTextColor="#9ab79f"
-                value={formData.school_year}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, school_year: text })
-                }
-              />
-
-              <Text style={styles.label}>Semester</Text>
-              <View style={styles.semesterButtons}>
-                {["1st semester", "2nd semester", "Summer"].map((sem) => (
-                  <TouchableOpacity
-                    key={sem}
-                    style={[
-                      styles.semesterButton,
-                      formData.semester === sem && styles.semesterButtonActive,
-                    ]}
-                    onPress={() => setFormData({ ...formData, semester: sem })}
-                  >
-                    <Text
-                      style={[
-                        styles.semesterButtonText,
-                        formData.semester === sem &&
-                          styles.semesterButtonTextActive,
-                      ]}
-                    >
-                      {sem}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
           </ScrollView>
 
-          <View style={styles.modalFooter}>
+          <View
+            style={[
+              styles.modalFooter,
+              {
+                backgroundColor: darkModeEnabled ? modalColors.bg : COLORS.white,
+                borderTopColor: darkModeEnabled ? modalColors.border : "#e4e8e6",
+              },
+            ]}
+          >
             <TouchableOpacity
-              style={styles.cancelButton}
+              style={[
+                styles.cancelButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: modalColors.border,
+                },
+              ]}
               onPress={() => setModalVisible(false)}
               disabled={creating}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={[styles.cancelButtonText, darkModeEnabled && { color: "#b9c9c0" }]}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.createButton,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.accent,
+                },
                 creating && styles.createButtonDisabled,
               ]}
               onPress={handleCreateClass}
@@ -571,6 +650,70 @@ export default function ClassesScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Block Picker Modal */}
+      <Modal
+        visible={blockPickerVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setBlockPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.pickerOverlay}
+          activeOpacity={1}
+          onPress={() => setBlockPickerVisible(false)}
+        >
+          <View style={[styles.pickerContainer, darkModeEnabled && { backgroundColor: modalColors.bg }]}>
+            <View style={[styles.pickerHeader, darkModeEnabled && { borderBottomColor: modalColors.border }]}>
+              <Text style={[styles.pickerTitle, darkModeEnabled && { color: modalColors.text }]}>
+                Select a block...
+              </Text>
+              <TouchableOpacity onPress={() => setBlockPickerVisible(false)}>
+                <Ionicons name="close" size={24} color={darkModeEnabled ? modalColors.text : "#333"} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.pickerList}>
+              {Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)).map((letter) => (
+                <TouchableOpacity
+                  key={letter}
+                  style={[
+                    styles.pickerItem,
+                    darkModeEnabled && { borderBottomColor: modalColors.border },
+                    formData.section_block === letter && styles.pickerItemSelected,
+                    darkModeEnabled && formData.section_block === letter && {
+                      backgroundColor: modalColors.accent,
+                    },
+                  ]}
+                  onPress={() => {
+                    setFormData({ ...formData, section_block: letter });
+                    setBlockPickerVisible(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.pickerItemText,
+                      darkModeEnabled && { color: modalColors.text },
+                      formData.section_block === letter && styles.pickerItemTextSelected,
+                      darkModeEnabled && formData.section_block === letter && {
+                        color: modalColors.accentStrong,
+                      },
+                    ]}
+                  >
+                    {letter}
+                  </Text>
+                  {formData.section_block === letter && (
+                    <Ionicons 
+                      name="checkmark" 
+                      size={20} 
+                      color={darkModeEnabled ? modalColors.accentStrong : "#4CAF50"} 
+                    />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Toast />
     </View>
   );
@@ -579,7 +722,7 @@ export default function ClassesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#edf1ee",
+    backgroundColor: "#eef1ef",
   },
   header: {
     flexDirection: "row",
@@ -616,7 +759,7 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3f6b54",
+    backgroundColor: "#3d5a3d",
     marginHorizontal: 10,
     marginTop: 8,
     marginBottom: 10,
@@ -653,12 +796,12 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   classCard: {
-    backgroundColor: "#4f715f",
+    backgroundColor: "#3d5a3d",
     borderRadius: RADIUS.medium,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#3f5f4f",
+    borderColor: "#2f4a38",
   },
   classHeader: {
     flexDirection: "row",
@@ -677,21 +820,16 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.12)",
   },
-  classCode: {
-    fontSize: 24,
-    fontWeight: "800",
+  className: {
+    fontSize: 18,
+    fontWeight: "700",
     color: COLORS.white,
     marginBottom: 4,
   },
-  className: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#e6f2ec",
-    marginBottom: 2,
-  },
   classSubject: {
-    fontSize: 13,
-    color: "#cce1d5",
+    fontSize: 14,
+    color: "#b8d4c4",
+    fontWeight: "500",
   },
   classFooter: {
     gap: 6,
@@ -706,41 +844,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#e3f2ea",
   },
-  metaRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 10,
-  },
-  metaBadge: {
-    flex: 1,
-    backgroundColor: "rgba(233, 245, 238, 0.16)",
-    borderWidth: 1,
-    borderColor: "rgba(221, 239, 230, 0.3)",
-    borderRadius: RADIUS.small,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  metaLabel: {
-    fontSize: 10,
-    color: "#cce2d7",
-    marginBottom: 1,
-    fontWeight: "700",
-  },
-  metaValue: {
-    fontSize: 12,
-    color: "#ecf7f1",
-    fontWeight: "700",
-  },
   viewButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#2e7d68",
+    backgroundColor: "#3d5a3d",
     paddingVertical: 10,
     borderRadius: RADIUS.small,
     borderWidth: 1,
-    borderColor: "#2a725f",
+    borderColor: "#2f4a38",
     marginBottom: 12,
   },
   viewButtonText: {
@@ -850,8 +963,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 20,
     backgroundColor: "#f5f5f5",
+  },
+  modalBodyContent: {
+    paddingBottom: 96,
   },
   label: {
     fontSize: 12,
@@ -871,53 +986,70 @@ const styles = StyleSheet.create({
     color: "#e8f5e9",
     backgroundColor: "#3d5a3d",
   },
-  dayButtons: {
+  dropdownButton: {
+    borderWidth: 1,
+    borderColor: "#2f6b49",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    backgroundColor: "#3d5a3d",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  dayButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f6b49",
-    backgroundColor: "#3d5a3d",
+  dropdownButtonText: {
+    fontSize: 16,
+    color: "#e8f5e9",
   },
-  dayButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  dropdownPlaceholder: {
+    color: "#9ab79f",
   },
-  dayButtonText: {
-    fontSize: 14,
-    color: "#d0e5d6",
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
   },
-  dayButtonTextActive: {
-    color: COLORS.white,
+  pickerContainer: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "70%",
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e0e0e0",
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#2f433a",
+  },
+  pickerList: {
+    maxHeight: 400,
+  },
+  pickerItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  pickerItemSelected: {
+    backgroundColor: "#e8f5e9",
+  },
+  pickerItemText: {
+    fontSize: 16,
+    color: "#2f433a",
     fontWeight: "600",
   },
-  semesterButtons: {
-    gap: 8,
-  },
-  semesterButton: {
-    padding: 12,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f6b49",
-    backgroundColor: "#3d5a3d",
-  },
-  semesterButtonActive: {
-    backgroundColor: "#2d4a2d",
-    borderColor: "#4CAF50",
-  },
-  semesterButtonText: {
-    fontSize: 14,
-    color: "#d0e5d6",
-    textAlign: "center",
-  },
-  semesterButtonTextActive: {
-    color: "#fff",
-    fontWeight: "600",
+  pickerItemTextSelected: {
+    color: "#2d7a5f",
+    fontWeight: "700",
   },
   modalFooter: {
     flexDirection: "row",

@@ -615,6 +615,11 @@ export class StudentImportService {
     onProgress?: (progress: number) => void,
   ): Promise<number> {
     try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("User must be authenticated");
+      }
+
       let insertedCount = 0;
       const batchSize = IMPORT_CONFIG.BATCH_SIZE;
       const totalBatches = Math.ceil(rows.length / batchSize);
@@ -637,6 +642,7 @@ export class StudentImportService {
             email: row.email,
             section: row.section,
             is_active: true,
+            createdBy: currentUser.uid,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };

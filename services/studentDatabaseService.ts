@@ -68,6 +68,35 @@ export class StudentDatabaseService {
     }
   }
 
+  private static async resolveStudentDocId(
+    docIdOrStudentId: string,
+  ): Promise<string> {
+    await this.initializeDatabase();
+
+    const directMatch = this.cachedStudents?.find(
+      (student) =>
+        student.id === docIdOrStudentId || student.student_id === docIdOrStudentId,
+    );
+    if (directMatch?.id) {
+      return directMatch.id;
+    }
+
+    const studentsRef = collection(db, "students");
+    const snapshot = await getDocs(
+      query(
+        studentsRef,
+        where("student_id", "==", docIdOrStudentId),
+      ),
+    );
+
+    const match = snapshot.docs[0];
+    if (!match) {
+      throw new Error("Student record not found");
+    }
+
+    return match.id;
+  }
+
   /**
    * Create students table if it doesn't exist
    */

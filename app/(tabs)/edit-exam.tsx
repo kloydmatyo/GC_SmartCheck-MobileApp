@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { doc, onSnapshot } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -8,7 +9,9 @@ import {
     Alert,
     Modal,
     Platform,
+    SafeAreaView,
     ScrollView,
+    StatusBar,
     StyleSheet,
     Text,
     TextInput,
@@ -17,6 +20,7 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth, db } from "../../config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "../../constants/preferences";
 import { AuditLogService } from "../../services/auditLogService";
 import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
@@ -60,6 +64,45 @@ export default function EditExamScreen() {
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [headerTopPadding, setHeaderTopPadding] = useState(56);
+
+  useEffect(() => {
+    const top =
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 16 : 56;
+    setHeaderTopPadding(top);
+  }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      (async () => {
+        try {
+          const savedDarkMode = await AsyncStorage.getItem(
+            DARK_MODE_STORAGE_KEY,
+          );
+          setDarkModeEnabled(savedDarkMode === "true");
+        } catch (error) {
+          console.warn("Failed to load dark mode preference:", error);
+        }
+      })();
+    }, []),
+  );
+
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+      }
+    : {
+        bg: "#edf3ee",
+        headerBg: "#3d5a3d",
+        cardBg: "#f3f7f4",
+        border: "#cad9cf",
+        title: "#eef7f0",
+      };
 
   useEffect(() => {
     loadExamData();
@@ -308,9 +351,65 @@ export default function EditExamScreen() {
     setShowConfirmModal(true);
   };
 
+  const getErrorText = (error: any): string =>
+    [
+      error?.message ?? "",
+      error?.code ?? "",
+      error?.name ?? "",
+      String(error ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+  const isTransientNetworkError = (error: any): boolean => {
+    const text = getErrorText(error);
+    return (
+      text.includes("network") ||
+      text.includes("offline") ||
+      text.includes("unavailable") ||
+      text.includes("deadline-exceeded") ||
+      text.includes("loadbundlefromserverrequesterror") ||
+      text.includes("could not load bundle")
+    );
+  };
+
+  const updateExamWithRetry = async (
+    updateData: {
+      title?: string;
+      subject?: string | null;
+      section?: string | null;
+      date?: string | null;
+    },
+    expectedVersion: number,
+  ): Promise<number> => {
+    const maxAttempts = 2;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await ExamService.updateExamWithVersionCheck(
+          examId,
+          updateData,
+          expectedVersion,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!isTransientNetworkError(error) || attempt === maxAttempts) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+
+    throw lastError;
+  };
+
   const confirmSave = async () => {
     setShowConfirmModal(false);
     setSaving(true);
+
+    let updateApplied = false;
+    let persistedVersion: number | null = null;
 
     try {
       const currentUser = auth.currentUser;
@@ -358,11 +457,12 @@ export default function EditExamScreen() {
       }
 
       // Update exam with version check
-      const updatedVersion = await ExamService.updateExamWithVersionCheck(
-        examId,
+      const updatedVersion = await updateExamWithRetry(
         updateData,
         version, // Current version we're editing
       );
+      updateApplied = true;
+      persistedVersion = updatedVersion;
 
       // Log audit trail
       await AuditLogService.logExamEdit(
@@ -370,7 +470,39 @@ export default function EditExamScreen() {
         currentUser.uid,
         changes,
         updatedVersion,
+        true,
       );
+
+      // Update template if it exists
+      try {
+        const { collection, query, where, getDocs, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+        const templatesQuery = query(
+          collection(db, "templates"),
+          where("examId", "==", examId)
+        );
+        const templatesSnapshot = await getDocs(templatesQuery);
+        
+        if (!templatesSnapshot.empty) {
+          const templateDoc = templatesSnapshot.docs[0];
+          const templateUpdateData: any = {
+            examName: updateData.title,
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser.uid,
+          };
+          
+          // Update template name if exam title changed
+          if (changes.title) {
+            templateUpdateData.name = `${updateData.title}_Template`;
+            templateUpdateData.description = `Answer sheet template for ${updateData.title}`;
+          }
+          
+          await updateDoc(doc(db, "templates", templateDoc.id), templateUpdateData);
+          console.log("Template updated successfully");
+        }
+      } catch (templateError) {
+        console.error("Error updating template:", templateError);
+        // Don't fail the exam update if template update fails
+      }
 
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -405,11 +537,48 @@ export default function EditExamScreen() {
     } catch (error: any) {
       console.error("Error saving exam:", error);
 
+      // If the exam was already updated but a downstream step failed,
+      // automatically rollback to last persisted metadata.
+      if (updateApplied && persistedVersion && originalMetadata) {
+        try {
+          const rollbackData = {
+            title: originalMetadata.title,
+            subject: originalMetadata.subject ?? null,
+            section: originalMetadata.section ?? null,
+            date: originalMetadata.date ?? null,
+          };
+
+          const rolledBackVersion = await ExamService.updateExamWithVersionCheck(
+            examId,
+            rollbackData,
+            persistedVersion,
+          );
+
+          setVersion(rolledBackVersion);
+          setRemoteVersion(rolledBackVersion);
+          setTitle(originalMetadata.title);
+          setSubject(originalMetadata.subject || "");
+          setSection(originalMetadata.section || "");
+          setScheduleDate(
+            originalMetadata.date ? new Date(originalMetadata.date) : null,
+          );
+          setHasChanges(false);
+          setConflictDetected(false);
+        } catch (rollbackError) {
+          console.error("Rollback failed after save error:", rollbackError);
+          await loadExamData();
+        }
+      }
+
       // Enhanced error handling
       let errorTitle = "Save Failed";
-      let errorMessage = "Failed to save changes. Please try again.";
+      let errorMessage =
+        updateApplied && persistedVersion
+          ? "Failed to complete save. Your changes were rolled back to the last saved state."
+          : "Failed to save changes. Please try again.";
+      const errorText = getErrorText(error);
 
-      if (error.message?.includes("version conflict")) {
+      if (errorText.includes("version conflict")) {
         errorTitle = "Version Conflict";
         errorMessage =
           "This exam was modified by another user while you were editing. Please refresh and try again.";
@@ -423,7 +592,7 @@ export default function EditExamScreen() {
           },
           { text: "Cancel", style: "cancel" },
         ]);
-      } else if (error.message?.includes("conflict")) {
+      } else if (errorText.includes("conflict")) {
         errorTitle = "Sync Conflict";
         errorMessage =
           "This exam was modified by another user. Please refresh and try again.";
@@ -431,29 +600,17 @@ export default function EditExamScreen() {
           { text: "Refresh", onPress: loadExamData },
           { text: "Cancel", style: "cancel" },
         ]);
-      } else if (
-        error.message?.includes("network") ||
-        error.message?.includes("offline")
-      ) {
+      } else if (isTransientNetworkError(error)) {
         errorTitle = "Network Error";
         errorMessage =
-          "Unable to connect to the server. Please check your internet connection and try again.";
+          "Unable to save changes due to a weak or unstable connection. Please check your internet and try again.";
         Toast.show({
           type: "error",
           text1: errorTitle,
           text2: errorMessage,
           visibilityTime: 5000,
         });
-      } else if (error.message?.includes("LoadBundleFromServerRequestError")) {
-        errorTitle = "Connection Timeout";
-        errorMessage =
-          "The request took too long. Please check your connection and try again.";
-        Toast.show({
-          type: "error",
-          text1: errorTitle,
-          text2: errorMessage,
-          visibilityTime: 5000,
-        });
+        Alert.alert(errorTitle, errorMessage);
       } else {
         Toast.show({
           type: "error",
@@ -476,7 +633,7 @@ export default function EditExamScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
         <Text style={styles.loadingText}>Loading exam data...</Text>
       </View>
@@ -484,13 +641,22 @@ export default function EditExamScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: headerTopPadding,
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
         <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#eef7f0" />
+          <Ionicons name="arrow-back" size={24} color={colors.title} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Exam</Text>
+        <Text style={[styles.headerTitle, { color: colors.title }]}>Edit Exam</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -534,7 +700,7 @@ export default function EditExamScreen() {
         </View>
 
         {/* Editable Fields Section */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <Text style={styles.sectionTitle}>Editable Fields</Text>
 
           {/* Title */}
@@ -621,7 +787,7 @@ export default function EditExamScreen() {
         </View>
 
         {/* Locked Fields Section */}
-        <View style={styles.section}>
+        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Locked Fields</Text>
             <View style={styles.lockedBadge}>
@@ -653,7 +819,12 @@ export default function EditExamScreen() {
       </ScrollView>
 
       {/* Action Buttons */}
-      <View style={styles.actionButtons}>
+      <View
+        style={[
+          styles.actionButtons,
+          { backgroundColor: darkModeEnabled ? "#1a2520" : "#e5efe8", borderTopColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
           style={styles.cancelButton}
           onPress={() => router.back()}
@@ -718,7 +889,7 @@ export default function EditExamScreen() {
       </Modal>
 
       <Toast />
-    </View>
+    </SafeAreaView>
   );
 }
 

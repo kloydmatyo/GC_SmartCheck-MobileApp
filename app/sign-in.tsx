@@ -1,4 +1,5 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
@@ -20,6 +21,7 @@ import {
 
 import { auth, db } from "@/config/firebase";
 import { authService } from "@/services/authService";
+import { GradeStorageService } from "@/services/gradeStorageService";
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -56,6 +58,13 @@ export default function SignInScreen() {
         } else {
           router.replace("/(tabs)");
         }
+
+        // Trigger offline sync after successful login
+        const netState = await NetInfo.fetch();
+        if (netState.isConnected && netState.isInternetReachable) {
+          GradeStorageService.syncOfflineQueue();
+        }
+
       } else {
         // Fallback to dummy accounts for testing
         const result = authService.signIn(email, password);

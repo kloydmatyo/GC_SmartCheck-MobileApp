@@ -263,6 +263,36 @@ function extractAnswersFromRegion(
     );
   }
 
+  // CRITICAL FIX: For sparse rows (only filled bubbles detected), centroids may be wrong
+  // Verify centroids are evenly spaced, otherwise use fallback
+  if (colCentroids.length === 5) {
+    const gaps = [
+      colCentroids[1] - colCentroids[0],
+      colCentroids[2] - colCentroids[1],
+      colCentroids[3] - colCentroids[2],
+      colCentroids[4] - colCentroids[3],
+    ];
+    const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const maxDeviation = Math.max(...gaps.map((g) => Math.abs(g - avgGap)));
+
+    // If gaps vary by more than 40%, centroids are unreliable
+    if (maxDeviation > avgGap * 0.4) {
+      console.warn(
+        `[OMR] Q${startQ}+ centroid gaps inconsistent (max deviation: ${maxDeviation.toFixed(1)}px vs avg: ${avgGap.toFixed(1)}px), using fallback`,
+      );
+      const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
+      const xSpanMin = allXs[0];
+      const xSpanMax = allXs[allXs.length - 1];
+      const step = (xSpanMax - xSpanMin) / 4;
+      const fallbackCentroids = [0, 1, 2, 3, 4].map((i) => xSpanMin + step * i);
+      console.log(
+        `[OMR] Q${startQ}+ fallback centroids:`,
+        fallbackCentroids.map((c) => Math.round(c)),
+      );
+      return extractWithCentroids(allRows, fallbackCentroids, startQ, numQ);
+    }
+  }
+
   return extractWithCentroids(allRows, colCentroids, startQ, numQ);
 }
 
@@ -281,12 +311,39 @@ function extractWithCentroids(
     return ay - by;
   });
 
+  // CRITICAL FIX: Filter out rows with bubbles far from centroids (artifacts/timing marks)
+  // A valid answer row should have bubbles near the expected column positions
+  const maxDistanceFromCentroid =
+    colCentroids.length > 1
+      ? Math.abs(colCentroids[1] - colCentroids[0]) * 0.6 // 60% of column spacing
+      : 100; // fallback if centroids are unreliable
+
+  const validRows = sortedRows.filter((row) => {
+    // Check if at least one bubble in this row is near a centroid
+    return row.some((bubble) => {
+      const nearestCentroidDist = Math.min(
+        ...colCentroids.map((c) => Math.abs(bubble.x - c)),
+      );
+      return nearestCentroidDist <= maxDistanceFromCentroid;
+    });
+  });
+
+  console.log(
+    `[OMR] Q${startQ}+: Filtered ${sortedRows.length} rows → ${validRows.length} valid rows (removed ${sortedRows.length - validRows.length} outliers)`,
+  );
+
   // Take exactly numQ rows (the actual question rows)
-  const qRows = sortedRows.slice(0, numQ);
+  const qRows = validRows.slice(0, numQ);
   const answers: StudentAnswer[] = [];
 
   qRows.forEach((row, rowIdx) => {
     const qNum = startQ + rowIdx;
+
+    // Log all bubbles in this row for debugging
+    const rowBubbles = row
+      .map((b) => `x=${Math.round(b.x)} fill=${b.fill.toFixed(2)}`)
+      .join(", ");
+    console.log(`[OMR] Q${qNum} row bubbles: ${rowBubbles}`);
 
     // Find the highest-fill bubble in this row
     let best: Bubble | null = null;
@@ -294,7 +351,9 @@ function extractWithCentroids(
       if (!best || b.fill > best.fill) best = b;
     }
 
-    if (!best || best.fill < 0.38) {
+    // Lower threshold for 100q templates (0.35 vs 0.38)
+    const fillThreshold = 0.35;
+    if (!best || best.fill < fillThreshold) {
       answers.push({ questionNumber: qNum, selectedAnswer: "" });
       return;
     }
@@ -371,10 +430,10 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // Block 2 (Q11-20): RIGHT column, wider coverage
     //
     // Both columns are at the same Y position (side-by-side layout)
-    // Bubble density shows answers concentrated at y50-70%
+    // Bubble density shows answers concentrated at y40-70%
     return [
-      { xMin: 0.26, xMax: 0.5, yMin: 0.28, yMax: 0.95, startQ: 1, numQ: 10 },
-      { xMin: 0.54, xMax: 0.84, yMin: 0.28, yMax: 0.95, startQ: 11, numQ: 10 },
+      { xMin: 0.26, xMax: 0.5, yMin: 0.38, yMax: 0.95, startQ: 1, numQ: 10 },
+      { xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95, startQ: 11, numQ: 10 },
     ];
   } else if (questionCount <= 30) {
     // ── 30-question layout (3 groups side by side, no Y split) ─────────────
@@ -388,130 +447,72 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // ── 50-question layout ──────────────────────────────────────────────────
     // Physical frame: 91 × 211 mm
     //
-    // CORRECTED based on bubble density analysis:
-    // The sheet has LEFT and RIGHT columns
+    // CORRECTED based on detailed bubble density analysis from actual scans:
+    // The sheet has LEFT and RIGHT columns, each with 3 vertical blocks
     //
-    // Bubble density shows:
-    // - LEFT column at x30-40% (bubbles at x30, x40)
-    // - RIGHT column at x50-60% (bubbles at x50, x60)
+    // Actual bubble positions from density grid show:
+    // LEFT column (x30-50%):
+    //   y20-30%: 10 bubbles (Q1-Q2, 2 rows)
+    //   y30-40%: 80 bubbles (Q3-Q10, 8 rows)
+    //   y40-50%: 71 bubbles (Q11-Q17, 7 rows)
+    //   y50-60%: 67 bubbles (Q18-Q24, 7 rows)
+    //   y60-70%: 56 bubbles (Q25-Q30, 6 rows)
     //
-    // Layout pattern based on actual bubble positions:
-    // - Q1-10:  LEFT,  Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q1)
-    // - Q11-20: LEFT,  Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
-    // - Q21-30: LEFT,  Y: 60%-80%  (y60-70% in density grid, starts after Q11-20 ends)
-    // - Q31-40: RIGHT, Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q31)
-    // - Q41-50: RIGHT, Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
+    // Therefore regions must be:
+    // - Q1-10:  LEFT,  Y: 20%-40.5% (extends to 40.5% to capture Q10, avoid overlap)
+    // - Q11-20: LEFT,  Y: 40.5%-56% (starts at 40.5% to catch Q11, avoid artifact)
+    // - Q21-30: LEFT,  Y: 55.5%-71% (starts at 55.5% to catch Q21)
+    // - Q31-40: RIGHT, Y: 20%-40.5% (extends to 40.5% to capture Q40)
+    // - Q41-50: RIGHT, Y: 41%-56% (starts at 41%, working perfectly)
     //
-    // Student ID is at top (Y: 0%-20%), skip it
+    // Student ID is at top (Y: 0%-18%), skip it
     return [
-      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.2, yMax: 0.41, startQ: 1, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.405, yMax: 0.56, startQ: 11, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.55, yMax: 0.71, startQ: 21, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.2, yMax: 0.405, startQ: 31, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.41, yMax: 0.56, startQ: 41, numQ: 10 },
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Physical frame: 197 × 215.5 mm
+    // Gordon College 100q template - 10 blocks in a grid layout
     //
-    // EXACT PHYSICAL MEASUREMENTS from template:
-    // 10 blocks in 2 rows × 5 columns grid
+    // From bubble density analysis, the template has:
+    // - 10 blocks total (Q1-10, Q11-20, ..., Q91-100)
+    // - Arranged in 2 rows × 5 columns
+    // - Each block has 10 questions × 5 choices = 50 bubbles
+    // - Block markers (black squares) beside each block
     //
-    // Top row (Q1-50):    Y: 58-103mm  = 26.9%-47.8% of 215.5mm
-    // Bottom row (Q51-100): Y: 112-157mm = 52.0%-72.9% of 215.5mm
+    // Bubble density shows blocks at:
+    // Row 1 (top): y10-40%
+    //   - Column 1: x20-40% (Q41-50 or Q1-10)
+    //   - Column 2: x40-60% (Q51-60 or Q11-20)
+    //   - Column 3: x60-80% (Q61-70 or Q21-30)
+    //   - Column 4: x80-100% (Q71-80 or Q31-40)
     //
-    // Column X positions (each block ~27mm wide):
-    //   Col 1: X: 13-40mm     = 6.6%-20.3% of 197mm
-    //   Col 2: X: 42.5-69.5mm = 21.6%-35.3% of 197mm
-    //   Col 3: X: 72-99mm     = 36.5%-50.3% of 197mm
-    //   Col 4: X: 101.5-128.5mm = 51.5%-65.2% of 197mm
-    //   Col 5: X: 131-158mm   = 66.5%-80.2% of 197mm
+    // Row 2 (bottom): y40-90%
+    //   - Column 1: x20-40% (Q1-10 or Q41-50)
+    //   - Column 2: x40-60% (Q11-20 or Q51-60)
+    //   - Column 3: x60-80% (Q21-30 or Q61-70)
+    //   - Column 4: x80-100% (Q31-40 or Q71-80)
     //
-    // Each column contains 10 questions (Q1-10, Q11-20, etc.)
+    // STRATEGY: Define all 10 blocks, let block markers refine positions
     return [
-      // Top row (Q1-50)
-      {
-        xMin: 0.066,
-        xMax: 0.203,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 1,
-        numQ: 10,
-      },
-      {
-        xMin: 0.216,
-        xMax: 0.353,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 11,
-        numQ: 10,
-      },
-      {
-        xMin: 0.365,
-        xMax: 0.503,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 21,
-        numQ: 10,
-      },
-      {
-        xMin: 0.515,
-        xMax: 0.652,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 31,
-        numQ: 10,
-      },
-      {
-        xMin: 0.665,
-        xMax: 0.802,
-        yMin: 0.269,
-        yMax: 0.478,
-        startQ: 41,
-        numQ: 10,
-      },
+      // Top row (y: 10-40%)
+      { xMin: 0.18, xMax: 0.42, yMin: 0.1, yMax: 0.4, startQ: 41, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.1, yMax: 0.4, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.1, yMax: 0.4, startQ: 61, numQ: 10 },
+      { xMin: 0.78, xMax: 0.98, yMin: 0.1, yMax: 0.4, startQ: 71, numQ: 10 },
 
-      // Bottom row (Q51-100)
-      {
-        xMin: 0.066,
-        xMax: 0.203,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 51,
-        numQ: 10,
-      },
-      {
-        xMin: 0.216,
-        xMax: 0.353,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 61,
-        numQ: 10,
-      },
-      {
-        xMin: 0.365,
-        xMax: 0.503,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 71,
-        numQ: 10,
-      },
-      {
-        xMin: 0.515,
-        xMax: 0.652,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 81,
-        numQ: 10,
-      },
-      {
-        xMin: 0.665,
-        xMax: 0.802,
-        yMin: 0.52,
-        yMax: 0.729,
-        startQ: 91,
-        numQ: 10,
-      },
+      // Bottom row (y: 40-90%)
+      { xMin: 0.18, xMax: 0.42, yMin: 0.4, yMax: 0.9, startQ: 1, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.4, yMax: 0.9, startQ: 11, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.4, yMax: 0.9, startQ: 21, numQ: 10 },
+      { xMin: 0.78, xMax: 0.98, yMin: 0.4, yMax: 0.9, startQ: 31, numQ: 10 },
+
+      // Additional blocks (if needed)
+      { xMin: 0.05, xMax: 0.25, yMin: 0.1, yMax: 0.4, startQ: 81, numQ: 10 },
+      { xMin: 0.05, xMax: 0.25, yMin: 0.4, yMax: 0.9, startQ: 91, numQ: 10 },
     ];
   }
 }
@@ -581,18 +582,18 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q/100q sheets - 20q sheets should not be rotated
+      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
       // 50q sheets should be portrait (tall), but camera may capture landscape
-      // Check if rotation is needed based on question count and aspect ratio
+      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
       let workingMat = srcMat;
 
-      if (qCount !== 20) {
+      if (qCount === 50) {
         const imgAspect = srcJs.cols / srcJs.rows;
         const isLandscape = imgAspect > 1.0;
 
         // 50q sheets are very tall (aspect ~0.43), should be portrait
         // If we have a 50q exam but image is landscape, rotate 90° clockwise
-        if (qCount === 50 && isLandscape) {
+        if (isLandscape) {
           console.log(
             `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
           );
@@ -605,27 +606,6 @@ export class ZipgradeScanner {
           matsToCleanup.push(rotatedMat);
 
           // Rotate 90° clockwise (ROTATE_90_CLOCKWISE = 0)
-          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
-
-          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
-          console.log(
-            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
-          );
-          workingMat = rotatedMat;
-        } else if (qCount === 100 && !isLandscape) {
-          // 100q sheets are wide (aspect ~0.91), should be landscape
-          // If we have a 100q exam but image is portrait, rotate 90° clockwise
-          console.log(
-            `[OMR] Image is portrait (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 100q sheet should be landscape. Rotating 90° clockwise...`,
-          );
-          const rotatedMat = OpenCV.createObject(
-            ObjectType.Mat,
-            0,
-            0,
-            DataTypes.CV_8U,
-          );
-          matsToCleanup.push(rotatedMat);
-
           OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
 
           const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
@@ -796,9 +776,37 @@ export class ZipgradeScanner {
       }
 
       // ── 5. Collect bubble candidates ───────────────────────────────────────
-      // Use stricter filtering for 20q (like Main), more lenient for 50q/100q
-      const minShapeArea = Math.pow(imgWidth / 80, 2);
-      const maxShapeArea = qCount <= 20 ? imgArea * 0.05 : imgArea * 0.08;
+      // Different filtering criteria for each template type
+      // 100q has smaller bubbles (3.8mm) and needs more lenient filtering
+      let minShapeArea: number;
+      let maxShapeArea: number;
+      let minAspect: number;
+      let maxAspect: number;
+      let minExtent: number;
+
+      if (qCount <= 20) {
+        // 20q: moderate filtering
+        minShapeArea = Math.pow(imgWidth / 100, 2);
+        maxShapeArea = imgArea * 0.05;
+        minAspect = 0.4;
+        maxAspect = 2.5;
+        minExtent = 0.1;
+      } else if (qCount <= 50) {
+        // 50q: relaxed filtering
+        minShapeArea = Math.pow(imgWidth / 120, 2);
+        maxShapeArea = imgArea * 0.1;
+        minAspect = 0.25;
+        maxAspect = 4.0;
+        minExtent = 0.03;
+      } else {
+        // 100q: EXTREMELY relaxed filtering (smallest bubbles, most of them)
+        minShapeArea = Math.pow(imgWidth / 200, 2); // Very small minimum
+        maxShapeArea = imgArea * 0.15; // Very large maximum
+        minAspect = 0.1; // Accept almost any aspect ratio
+        maxAspect = 10.0;
+        minExtent = 0.01; // Accept almost any extent
+      }
+
       const rawShapes: Bubble[] = [];
 
       for (let i = 0; i < numContours; i++) {
@@ -813,15 +821,10 @@ export class ZipgradeScanner {
             ? (OpenCV.invoke("contourArea", contour) as any).value / area
             : 0;
 
-        // Stricter filtering for 20q (like Main), relaxed for 50q/100q
+        // Apply template-specific filtering
         if (area < minShapeArea || area > maxShapeArea) continue;
-        if (qCount <= 20) {
-          if (aspect < 0.4 || aspect > 2.5) continue;
-          if (extent < 0.1) continue;
-        } else {
-          if (aspect < 0.3 || aspect > 3.0) continue;
-          if (extent < 0.05) continue;
-        }
+        if (aspect < minAspect || aspect > maxAspect) continue;
+        if (extent < minExtent) continue;
 
         let fill = 0;
         try {
@@ -953,17 +956,26 @@ export class ZipgradeScanner {
       // ── 7. Detect timing marks (block markers) ────────────────────────────
       // Only use timing marks for 50q/100q sheets
       // 20q sheets use fixed regions (like Main)
+      // For 100q: block markers are smaller squares beside each question block
       const timingMarks =
         qCount > 20
-          ? rawShapes.filter(
-              (s) =>
-                s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
-                s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
-                s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
-                s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
-                s.w / s.h >= 0.4 && // More lenient aspect ratio
-                s.w / s.h <= 2.5,
-            )
+          ? rawShapes.filter((s) => {
+              const isBlockMarker =
+                qCount === 100
+                  ? s.area >= bubbleRefArea * 1.3 && // Even more relaxed for 100q
+                    s.area <= bubbleRefArea * 12 &&
+                    s.extent >= 0.55 && // More lenient
+                    s.fill >= 0.6 && // More lenient
+                    s.w / s.h >= 0.3 && // More lenient aspect ratio
+                    s.w / s.h <= 3.0
+                  : s.area >= bubbleRefArea * 1.5 &&
+                    s.area <= bubbleRefArea * 10 &&
+                    s.extent >= 0.6 &&
+                    s.fill >= 0.65 &&
+                    s.w / s.h >= 0.4 &&
+                    s.w / s.h <= 2.5;
+              return isBlockMarker;
+            })
           : [];
 
       if (qCount > 20) {
@@ -1086,70 +1098,120 @@ export class ZipgradeScanner {
 
       // ── 9. Extract answers using timing mark-based or fallback regions ────
       // For 20q: use fixed regions (like Main)
-      // For 50q/100q: try to use timing marks to dynamically locate question blocks
+      // For 50q: try to use timing marks to dynamically locate question blocks
+      // For 100q: use fixed regions (timing marks are unreliable)
       let regions = getLayoutRegions(detectedQ);
 
-      // Only use timing marks for 50q/100q sheets
-      if (detectedQ > 20 && timingMarks.length >= 3) {
+      // DISABLED: Timing mark adjustment for 50q sheets
+      // The fixed regions are already calibrated correctly based on physical measurements
+      // Timing marks were causing misalignment (Q21-30 region was being incorrectly adjusted)
+      if (false && detectedQ === 50 && timingMarks.length >= 3) {
+      } else if (detectedQ === 100) {
+        // ── 100q: Use bubble density to automatically identify question blocks ────
         console.log(
-          `[OMR] Using timing marks to refine ${regions.length} regions`,
+          `[OMR] Using bubble density analysis to identify regions for 100q`,
         );
 
-        // Translate timing marks to paper space
-        const paperTimingMarks = timingMarks
-          .map((m) => ({
-            ...m,
-            x: m.x - paperLeft,
-            y: m.y - paperTop,
-          }))
-          .filter(
-            (m) => m.x >= 0 && m.x <= paperW && m.y >= 0 && m.y <= paperH,
-          );
+        // Analyze bubble density to find question blocks
+        // Each block has ~50 bubbles (10 questions × 5 choices)
+        // Blocks are arranged in a grid pattern
 
-        // Sort timing marks by Y position (top to bottom)
-        paperTimingMarks.sort((a, b) => a.y - b.y);
+        // Group bubbles by X position (columns) and Y position (rows)
+        const xBands = 10;
+        const yBands = 10;
+        const densityGrid: number[][] = Array.from({ length: yBands }, () =>
+          new Array(xBands).fill(0),
+        );
 
-        // Group timing marks by Y position (same row = same block)
-        const markRows: (typeof paperTimingMarks)[] = [];
-        let currentRow: typeof paperTimingMarks = [];
-        const rowGap = medianH * 3; // Marks in same row should be within 3 bubble heights
+        for (const b of bubbles) {
+          const xi = Math.min(Math.floor((b.x / paperW) * xBands), xBands - 1);
+          const yi = Math.min(Math.floor((b.y / paperH) * yBands), yBands - 1);
+          densityGrid[yi][xi]++;
+        }
 
-        for (const mark of paperTimingMarks) {
-          if (currentRow.length === 0) {
-            currentRow.push(mark);
-          } else {
-            const rowMeanY =
-              currentRow.reduce((s, m) => s + m.y, 0) / currentRow.length;
-            if (Math.abs(mark.y - rowMeanY) < rowGap) {
-              currentRow.push(mark);
-            } else {
-              if (currentRow.length > 0) markRows.push([...currentRow]);
-              currentRow = [mark];
+        // Find dense regions (blocks with many bubbles)
+        const denseRegions: Array<{
+          xMin: number;
+          xMax: number;
+          yMin: number;
+          yMax: number;
+          density: number;
+        }> = [];
+
+        for (let yi = 0; yi < yBands - 1; yi++) {
+          for (let xi = 0; xi < xBands - 2; xi++) {
+            // Check if this 3×2 grid cell has high bubble density
+            const density =
+              densityGrid[yi][xi] +
+              densityGrid[yi][xi + 1] +
+              densityGrid[yi][xi + 2] +
+              (yi + 1 < yBands
+                ? densityGrid[yi + 1][xi] +
+                  densityGrid[yi + 1][xi + 1] +
+                  densityGrid[yi + 1][xi + 2]
+                : 0);
+
+            if (density >= 15) {
+              // At least 15 bubbles in this region
+              denseRegions.push({
+                xMin: xi / xBands,
+                xMax: (xi + 3) / xBands,
+                yMin: yi / yBands,
+                yMax: (yi + 2) / yBands,
+                density,
+              });
             }
           }
         }
-        if (currentRow.length > 0) markRows.push(currentRow);
 
-        console.log(`[OMR] Found ${markRows.length} timing mark rows`);
+        // Sort regions by position (top-to-bottom, left-to-right)
+        denseRegions.sort((a, b) => {
+          const rowDiff = Math.floor(a.yMin * 5) - Math.floor(b.yMin * 5);
+          if (rowDiff !== 0) return rowDiff;
+          return a.xMin - b.xMin;
+        });
 
-        // Use timing marks to adjust region Y positions
-        if (markRows.length >= regions.length) {
-          regions = regions.map((region, idx) => {
-            if (idx < markRows.length) {
-              const marks = markRows[idx];
-              const minY = Math.min(...marks.map((m) => m.y));
-              const maxY = Math.max(...marks.map((m) => m.y));
-              const blockHeight = medianH * 11; // 10 questions + spacing
+        // Merge overlapping regions
+        const mergedRegions: typeof denseRegions = [];
+        for (const region of denseRegions) {
+          const overlapping = mergedRegions.find(
+            (r) =>
+              Math.abs(r.xMin - region.xMin) < 0.2 &&
+              Math.abs(r.yMin - region.yMin) < 0.2,
+          );
+          if (overlapping) {
+            // Merge by expanding bounds
+            overlapping.xMin = Math.min(overlapping.xMin, region.xMin);
+            overlapping.xMax = Math.max(overlapping.xMax, region.xMax);
+            overlapping.yMin = Math.min(overlapping.yMin, region.yMin);
+            overlapping.yMax = Math.max(overlapping.yMax, region.yMax);
+            overlapping.density += region.density;
+          } else {
+            mergedRegions.push({ ...region });
+          }
+        }
 
-              return {
-                ...region,
-                yMin: Math.max(0, (minY - medianH) / paperH),
-                yMax: Math.min(1, (minY + blockHeight) / paperH),
-              };
-            }
-            return region;
-          });
-          console.log(`[OMR] Adjusted regions using timing marks`);
+        console.log(
+          `[OMR] Found ${mergedRegions.length} dense regions via bubble density`,
+        );
+        mergedRegions.forEach((r, idx) => {
+          console.log(
+            `[OMR] Dense region ${idx + 1}: X[${(r.xMin * 100).toFixed(0)}%-${(r.xMax * 100).toFixed(0)}%] ` +
+              `Y[${(r.yMin * 100).toFixed(0)}%-${(r.yMax * 100).toFixed(0)}%] density=${r.density}`,
+          );
+        });
+
+        // Use detected regions if we found at least 2
+        if (mergedRegions.length >= 2) {
+          regions = mergedRegions.slice(0, 10).map((r, idx) => ({
+            xMin: Math.max(0, r.xMin - 0.02),
+            xMax: Math.min(1, r.xMax + 0.02),
+            yMin: Math.max(0, r.yMin - 0.02),
+            yMax: Math.min(1, r.yMax + 0.02),
+            startQ: idx * 10 + 1,
+            numQ: 10,
+          }));
+          console.log(`[OMR] Using ${regions.length} density-based regions`);
         }
       } else {
         console.log(
@@ -1158,6 +1220,154 @@ export class ZipgradeScanner {
       }
 
       console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
+
+      // ── 9. Extract answers ────────────────────────────────────────────────
+      let allAnswers: StudentAnswer[] = [];
+
+      // For 100-item templates, use brightness-based scanning (Skia)
+      if (detectedQ === 100 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
+        );
+
+        // Import the brightness scanner
+        const {
+          scan100ItemWithBrightness,
+        } = require("./brightnessScannerFor100Item");
+
+        // Extract corner markers (sorted by position)
+        const sortedMarks = [...regMarks].sort(
+          (a, b) => a.y - b.y || a.x - b.x,
+        );
+
+        let markers;
+        if (regMarks.length >= 4) {
+          // Use all 4 corners
+          const topMarks = sortedMarks.slice(0, 2).sort((a, b) => a.x - b.x);
+          const bottomMarks = sortedMarks.slice(-2).sort((a, b) => a.x - b.x);
+
+          markers = {
+            topLeft: { x: topMarks[0].x, y: topMarks[0].y },
+            topRight: { x: topMarks[1].x, y: topMarks[1].y },
+            bottomLeft: { x: bottomMarks[0].x, y: bottomMarks[0].y },
+            bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
+          };
+        } else {
+          // Only 3 markers: estimate the missing corner
+          // Identify which corner is missing by analyzing the 3 detected markers
+          const marks = [...sortedMarks];
+
+          // Find the two markers with similar Y coordinates (top or bottom edge)
+          const yDiffs = [
+            { idx: [0, 1], diff: Math.abs(marks[0].y - marks[1].y) },
+            { idx: [0, 2], diff: Math.abs(marks[0].y - marks[2].y) },
+            { idx: [1, 2], diff: Math.abs(marks[1].y - marks[2].y) },
+          ];
+          yDiffs.sort((a, b) => a.diff - b.diff);
+
+          const edgePair = yDiffs[0].idx;
+          const loneIdx = [0, 1, 2].find((i) => !edgePair.includes(i))!;
+
+          const edge1 = marks[edgePair[0]];
+          const edge2 = marks[edgePair[1]];
+          const lone = marks[loneIdx];
+
+          // Sort edge markers by X
+          const [edgeLeft, edgeRight] =
+            edge1.x < edge2.x ? [edge1, edge2] : [edge2, edge1];
+
+          // Determine if edge is top or bottom based on Y comparison with lone marker
+          const edgeIsTop = (edgeLeft.y + edgeRight.y) / 2 < lone.y;
+
+          if (edgeIsTop) {
+            // We have TR, TL, and one bottom corner - estimate the other bottom
+            const paperWidth = edgeRight.x - edgeLeft.x;
+            const missingX =
+              lone.x < (edgeLeft.x + edgeRight.x) / 2
+                ? edgeRight.x // lone is BL, missing BR
+                : edgeLeft.x; // lone is BR, missing BL
+
+            markers = {
+              topLeft: { x: edgeLeft.x, y: edgeLeft.y },
+              topRight: { x: edgeRight.x, y: edgeRight.y },
+              bottomLeft:
+                lone.x < (edgeLeft.x + edgeRight.x) / 2
+                  ? { x: lone.x, y: lone.y }
+                  : { x: missingX, y: lone.y },
+              bottomRight:
+                lone.x >= (edgeLeft.x + edgeRight.x) / 2
+                  ? { x: lone.x, y: lone.y }
+                  : { x: missingX, y: lone.y },
+            };
+          } else {
+            // We have BL, BR, and one top corner - estimate the other top
+            const paperWidth = edgeRight.x - edgeLeft.x;
+            const missingX =
+              lone.x < (edgeLeft.x + edgeRight.x) / 2
+                ? edgeRight.x // lone is TL, missing TR
+                : edgeLeft.x; // lone is TR, missing TL
+
+            markers = {
+              topLeft:
+                lone.x < (edgeLeft.x + edgeRight.x) / 2
+                  ? { x: lone.x, y: lone.y }
+                  : { x: missingX, y: lone.y },
+              topRight:
+                lone.x >= (edgeLeft.x + edgeRight.x) / 2
+                  ? { x: lone.x, y: lone.y }
+                  : { x: missingX, y: lone.y },
+              bottomLeft: { x: edgeLeft.x, y: edgeLeft.y },
+              bottomRight: { x: edgeRight.x, y: edgeRight.y },
+            };
+          }
+
+          console.log("[OMR] Only 3 markers detected, estimating 4th corner");
+        }
+
+        console.log(
+          "[OMR] Corner markers:",
+          `TL=(${Math.round(markers.topLeft.x)},${Math.round(markers.topLeft.y)})`,
+          `TR=(${Math.round(markers.topRight.x)},${Math.round(markers.topRight.y)})`,
+          `BL=(${Math.round(markers.bottomLeft.x)},${Math.round(markers.bottomLeft.y)})`,
+          `BR=(${Math.round(markers.bottomRight.x)},${Math.round(markers.bottomRight.y)})`,
+        );
+
+        // Call brightness scanner with image URI and markers
+        allAnswers = await scan100ItemWithBrightness(imageUri, markers);
+
+        console.log(
+          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,
+        );
+      } else if (detectedQ === 100) {
+        // Fallback: not enough markers for hybrid scanning
+        console.warn(
+          "[OMR] Not enough corner markers for hybrid scanning, falling back to region-based detection",
+        );
+
+        // Use region-based contour detection (existing code)
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
+      } else {
+        // 20q/50q templates: use existing region-based detection (UNCHANGED)
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
+      }
 
       // Log detailed region information for debugging
       regions.forEach((r, idx) => {
@@ -1171,18 +1381,6 @@ export class ZipgradeScanner {
             `Y[${(r.yMin * 100).toFixed(1)}%-${(r.yMax * 100).toFixed(1)}%] (${yMinPx}-${yMaxPx}px)`,
         );
       });
-
-      const allAnswers: StudentAnswer[] = [];
-      for (const region of regions) {
-        const regionAnswers = extractAnswersFromRegion(
-          bubbles,
-          region,
-          paperW,
-          paperH,
-          medianH,
-        );
-        allAnswers.push(...regionAnswers);
-      }
 
       // Sort by question number
       allAnswers.sort((a, b) => a.questionNumber - b.questionNumber);

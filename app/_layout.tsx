@@ -6,8 +6,9 @@ import {
 } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useRef } from "react";
-import { AppState, AppStateStatus } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
+import * as NavigationBar from "expo-navigation-bar";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 
@@ -23,6 +24,48 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
+
+  // Hide Android navigation bar
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setVisibilityAsync("hidden");
+      NavigationBar.setBehaviorAsync("overlay-swipe");
+    }
+  }, []);
+
+  const performSync = async () => {
+    if (isSyncingRef.current) return;
+
+    try {
+      isSyncingRef.current = true;
+      const netState = await NetInfo.fetch();
+      if (netState.isConnected && netState.isInternetReachable) {
+        const count = await GradeStorageService.getOfflineItemCount();
+        if (count > 0) {
+          setIsSyncing(true);
+          await GradeStorageService.syncOfflineQueue();
+        }
+      }
+    } catch (err) {
+      console.warn("Sync error:", err);
+    } finally {
+      setIsSyncing(false);
+      isSyncingRef.current = false;
+    }
+  };
+
+  // Initial sync on mount
+  useEffect(() => {
+    const performInitialSync = async () => {
+      // Small delay to ensure all services are ready
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await performSync();
+    };
+    performInitialSync();
+  }, []);
+
   // Offline sync on app resume 
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
@@ -31,11 +74,7 @@ export default function RootLayout() {
       const isNowActive = nextAppState === "active";
 
       if (wasBackground && isNowActive) {
-        // Check connectivity before attempting to sync
-        const netState = await NetInfo.fetch();
-        if (netState.isConnected && netState.isInternetReachable) {
-          GradeStorageService.syncOfflineQueue();
-        }
+        await performSync();
       }
 
       appState.current = nextAppState;
@@ -62,6 +101,42 @@ export default function RootLayout() {
       </Stack>
       <StatusBar style="auto" />
       <Toast config={toastConfig} />
+      {isSyncing && (
+        <View style={styles.syncOverlay} pointerEvents="none">
+          <View style={styles.syncContainer}>
+            <ActivityIndicator color="white" size="small" />
+            <Text style={styles.syncText}>Syncing Data...</Text>
+          </View>
+        </View>
+      )}
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  syncOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999,
+    alignItems: 'center',
+    paddingTop: 60, // Place it nicely below standard top safe area
+  },
+  syncContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
+  },
+  syncText: {
+    color: 'white',
+    fontSize: 15,
+    fontWeight: 'bold',
+  }
+});

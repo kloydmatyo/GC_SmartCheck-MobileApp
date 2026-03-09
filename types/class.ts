@@ -10,11 +10,7 @@ export interface Class {
   class_name: string;
   course_subject: string;
   room: string;
-  schedule_day: string | string[]; // Can be single day or array of days
-  schedule_time: string;
-  school_year: string;
   section_block: string;
-  semester: string;
   students: Student[];
   createdBy: string;
   created_at: string;
@@ -26,10 +22,6 @@ export interface CreateClassData {
   class_name: string;
   course_subject: string;
   room: string;
-  schedule_day: string | string[]; // Can be single day or array of days
-  schedule_time: string;
-  school_year: string;
   section_block: string;
-  semester: string;
   students?: Student[];
 }

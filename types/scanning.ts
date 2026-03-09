@@ -70,7 +70,7 @@ export interface GradeStorageRecord {
   totalQuestions: number;
   dateScanned: string; // ISO 8601 — "2026-02-19T10:30:00.000Z"
   status: "saved" | "duplicate" | "pending" | "error";
-  savedBy: string; // Firebase auth UID of the faculty who scanned
+  scannedBy: string; // Firebase auth UID of the faculty who scanned
   createdAt: Date;
 }
 
