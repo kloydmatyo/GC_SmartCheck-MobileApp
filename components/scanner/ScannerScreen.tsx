@@ -3,15 +3,16 @@ import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -307,14 +308,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
             </Text>
 
             <TextInput
-              style={styles.input}
+              style={styles.examInput}
               placeholder="e.g. MATH-101"
               value={examIdInput}
               onChangeText={setExamIdInput}
               autoCapitalize="characters"
             />
-            <TouchableOpacity style={styles.btn} onPress={handleConfirmExam}>
-              {isValidatingExam ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start Scanning</Text>}
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmExam}>
+              {isValidatingExam ? <ActivityIndicator color="white" /> : <Text style={styles.confirmButtonText}>Start Scanning</Text>}
             </TouchableOpacity>
           </View>
         </View>

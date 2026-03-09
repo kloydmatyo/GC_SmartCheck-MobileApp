@@ -1,10 +1,9 @@
 import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
-import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
-import HistoryList from "./HistoryList";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
@@ -24,10 +23,6 @@ export default function CameraScanner({
 
   if (!permission) {
     return <View />;
-  }
-
-  if (showHistory) {
-    return <HistoryList onClose={() => setShowHistory(false)} />;
   }
 
   // Calculate frame dimensions based on template aspect ratio
@@ -183,116 +178,92 @@ export default function CameraScanner({
     <View style={styles.container}>
       <CameraView
         ref={cameraRef}
-        style={styles.camera}
+        style={StyleSheet.absoluteFillObject}
         facing="back"
         enableTorch={torch}
+        flash={torch ? "on" : "off"}
+      />
+
+      <TouchableOpacity
+        style={styles.torchButton}
+        onPress={() => setTorch(!torch)}
       >
-        {/* Overlay for Zipgrade answer sheet alignment */}
-        <View style={styles.overlay}>
-          <View
-            style={[
-              styles.scanFrame,
-              {
-                width: frameDimensions.width,
-                height: frameDimensions.height,
-              },
-            ]}
-          >
-            {/* Debug regions overlay - shows where scanner looks for bubbles */}
-            {debugRegions.map((region, idx) => (
-              <View
-                key={idx}
+        <Ionicons
+          name={torch ? "flash" : "flash-off"}
+          size={24}
+          color="white"
+        />
+      </TouchableOpacity>
+
+      {/* Overlay for Zipgrade answer sheet alignment */}
+      <View style={styles.overlay}>
+        <View
+          style={[
+            styles.scanFrame,
+            {
+              width: frameDimensions.width,
+              height: frameDimensions.height,
+            },
+          ]}
+        >
+          {/* Debug regions overlay - shows where scanner looks for bubbles */}
+          {debugRegions.map((region, idx) => (
+            <View
+              key={idx}
+              style={{
+                position: "absolute",
+                left: region.x * frameDimensions.width,
+                top: region.y * frameDimensions.height,
+                width: (region.xEnd - region.x) * frameDimensions.width,
+                height: (region.yEnd - region.y) * frameDimensions.height,
+                backgroundColor: region.color,
+                borderWidth: 1,
+                borderColor: region.color.replace("0.3", "0.8"),
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Text
                 style={{
-                  position: "absolute",
-                  left: region.x * frameDimensions.width,
-                  top: region.y * frameDimensions.height,
-                  width: (region.xEnd - region.x) * frameDimensions.width,
-                  height: (region.yEnd - region.y) * frameDimensions.height,
-                  backgroundColor: region.color,
-                  borderWidth: 1,
-                  borderColor: region.color.replace("0.3", "0.8"),
-                  justifyContent: "center",
-                  alignItems: "center",
+                  color: "white",
+                  fontSize: 10,
+                  fontWeight: "bold",
+                  backgroundColor: "rgba(0,0,0,0.7)",
+                  paddingHorizontal: 4,
+                  paddingVertical: 2,
+                  borderRadius: 3,
                 }}
               >
-                <Text
-                  style={{
-                    color: "white",
-                    fontSize: 10,
-                    fontWeight: "bold",
-                    backgroundColor: "rgba(0,0,0,0.7)",
-                    paddingHorizontal: 4,
-                    paddingVertical: 2,
-                    borderRadius: 3,
-                  }}
-                >
-                  {region.label}
-                </Text>
-              </View>
-            ))}
-          </View>
-          <Text style={styles.instructionText}>
-            Align Zipgrade answer sheet within the frame
-          </Text>
-          <Text style={styles.tipText}>
-            Colored boxes show scanning regions for {questionCount} questions
-          </Text>
+                {region.label}
+              </Text>
+            </View>
+          ))}
         </View>
+        <Text style={styles.instructionText}>
+          Align answer sheet within the frame
+        </Text>
+      </View>
 
-        <View style={styles.features}>
-          <View style={styles.feature}>
-            <Ionicons name="camera" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Capture answer sheets</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="person" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Read student IDs</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Auto-grade answers</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="document-text" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Zipgrade format compatible</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={() => setShowScanner(true)}
-        >
-          <Ionicons name="camera" size={24} color="white" />
-          <Text style={styles.scanButtonText}>Start Scanning</Text>
+      <View style={styles.bottomControls}>
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => setShowHistory(true)}
+          style={[
+            styles.captureButton,
+            isProcessing && styles.captureButtonDisabled,
+          ]}
+          onPress={takePicture}
+          disabled={isProcessing}
         >
-          <Ionicons name="time-outline" size={24} color="#007AFF" />
-          <Text style={styles.historyButtonText}>View History</Text>
+          {isProcessing ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Ionicons name="camera" size={32} color="white" />
+          )}
         </TouchableOpacity>
-
-        <View style={styles.instructions}>
-          <Text style={styles.instructionsTitle}>Instructions:</Text>
-          <Text style={styles.instructionText}>
-            1. Generate answer sheet using Generator tab
-          </Text>
-          <Text style={styles.instructionText}>
-            2. Ensure good lighting conditions
-          </Text>
-          <Text style={styles.instructionText}>
-            3. Align Zipgrade sheet within camera frame
-          </Text>
-          <Text style={styles.instructionText}>
-            4. Tap capture when all bubbles are visible
-          </Text>
-        </View>
-      </CameraView>
+      </View>
     </View>
   );
 }
@@ -300,7 +271,22 @@ export default function CameraScanner({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "black",
+  },
+  torchButton: {
+    position: "absolute",
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    padding: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 20,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "transparent",
+    justifyContent: "center",
+    alignItems: "center",
   },
   content: {
     flex: 1,
@@ -311,11 +297,10 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   scanFrame: {
-    // Base dimensions - will be overridden by inline styles
     borderWidth: 2,
     borderColor: "#00ff00",
-    borderRadius: 10,
     backgroundColor: "transparent",
+    borderStyle: "dashed",
   },
   instructionText: {
     color: "white",
@@ -323,95 +308,43 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
     textAlign: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  features: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  feature: {
+  bottomControls: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 15,
+    paddingHorizontal: 40,
+    paddingBottom: 40,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingTop: 20,
   },
-  featureText: {
-    fontSize: 16,
-    color: "#333",
-    marginLeft: 15,
-    fontWeight: "500",
+  cancelButton: {
+    padding: 12,
+  },
+  cancelButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "600",
   },
   captureButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: "#22c55e",
     justifyContent: "center",
     alignItems: "center",
-    justifyContent: "center",
-    padding: 18,
-    borderRadius: 12,
-    marginBottom: 30,
-    shadowColor: "#007AFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    borderWidth: 4,
+    borderColor: "rgba(255,255,255,0.4)",
   },
-  scanButtonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginLeft: 10,
-  },
-  historyButton: {
-    backgroundColor: "white",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 30,
-    borderWidth: 1,
-    borderColor: "#007AFF",
-  },
-  historyButtonText: {
-    color: "#007AFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginLeft: 8,
-  },
-  instructions: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  instructionsTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 15,
-  },
-  instructionText: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 8,
-    lineHeight: 20,
+  captureButtonDisabled: {
+    backgroundColor: "#888",
   },
 });
