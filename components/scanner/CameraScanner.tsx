@@ -22,7 +22,35 @@ export default function CameraScanner({
   const cameraRef = useRef<CameraView>(null);
 
   if (!permission) {
-    return <View />;
+    // Camera permissions are still loading
+    return <View style={styles.container} />;
+  }
+
+  if (!permission.granted) {
+    // Camera permissions are not granted yet
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Ionicons name="camera-outline" size={64} color="white" style={{ marginBottom: 20 }} />
+        <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+          We need your permission
+        </Text>
+        <Text style={{ color: '#aaa', fontSize: 16, marginBottom: 30, textAlign: 'center' }}>
+          GCSC needs access to your camera to scan Zipgrade answer sheets.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, width: '100%', alignItems: 'center' }}
+          onPress={requestPermission}
+        >
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Grant Camera Access</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ marginTop: 20, padding: 10 }}
+          onPress={onCancel}
+        >
+          <Text style={{ color: '#ff4444', fontSize: 16 }}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   // Calculate frame dimensions based on template aspect ratio

@@ -4,11 +4,12 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+import * as NavigationBar from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
-import * as NavigationBar from "expo-navigation-bar";
+import 'react-native-get-random-values';
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 

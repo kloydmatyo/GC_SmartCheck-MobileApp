@@ -275,7 +275,7 @@ export class GradeStorageService {
         totalQuestions: result.totalQuestions,
         dateScanned: result.dateScanned,
         status: "pending",
-        savedBy: uid,
+        scannedBy: uid,
         createdAt: new Date(),
       };
       return GradeStorageService.queueOffline(record);
