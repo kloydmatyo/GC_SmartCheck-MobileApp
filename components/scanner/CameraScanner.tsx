@@ -1,10 +1,9 @@
 import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
-import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
-import HistoryList from "./HistoryList";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
@@ -24,10 +23,6 @@ export default function CameraScanner({
 
   if (!permission) {
     return <View />;
-  }
-
-  if (showHistory) {
-    return <HistoryList onClose={() => setShowHistory(false)} />;
   }
 
   // Calculate frame dimensions based on template aspect ratio
@@ -239,58 +234,18 @@ export default function CameraScanner({
           </Text>
         </View>
 
-        <View style={styles.features}>
-          <View style={styles.feature}>
-            <Ionicons name="camera" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Capture answer sheets</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="person" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Read student IDs</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Auto-grade answers</Text>
-          </View>
-
-          <View style={styles.feature}>
-            <Ionicons name="document-text" size={24} color="#4CAF50" />
-            <Text style={styles.featureText}>Zipgrade format compatible</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={() => setShowScanner(true)}
-        >
-          <Ionicons name="camera" size={24} color="white" />
-          <Text style={styles.scanButtonText}>Start Scanning</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => setShowHistory(true)}
-        >
-          <Ionicons name="time-outline" size={24} color="#007AFF" />
-          <Text style={styles.historyButtonText}>View History</Text>
-        </TouchableOpacity>
-
-        <View style={styles.instructions}>
-          <Text style={styles.instructionsTitle}>Instructions:</Text>
-          <Text style={styles.instructionText}>
-            1. Generate answer sheet using Generator tab
-          </Text>
-          <Text style={styles.instructionText}>
-            2. Ensure good lighting conditions
-          </Text>
-          <Text style={styles.instructionText}>
-            3. Align Zipgrade sheet within camera frame
-          </Text>
-          <Text style={styles.instructionText}>
-            4. Tap capture when all bubbles are visible
-          </Text>
+        <View style={styles.bottomControls}>
+          <TouchableOpacity
+            style={styles.captureButton}
+            onPress={takePicture}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <Text style={{ color: "white", fontWeight: "bold" }}>...</Text>
+            ) : (
+              <Ionicons name="camera" size={40} color="white" />
+            )}
+          </TouchableOpacity>
         </View>
       </CameraView>
     </View>
@@ -301,6 +256,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+  },
+  camera: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "transparent",
+  },
+  bottomControls: {
+    position: "absolute",
+    bottom: 20,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tipText: {
+    color: "white",
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    padding: 8,
+    borderRadius: 8,
   },
   content: {
     flex: 1,
@@ -324,34 +305,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: "center",
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  features: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  feature: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  featureText: {
-    fontSize: 16,
-    color: "#333",
-    marginLeft: 15,
-    fontWeight: "500",
-  },
   captureButton: {
     width: 80,
     height: 80,
@@ -359,59 +312,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#22c55e",
     justifyContent: "center",
     alignItems: "center",
-    justifyContent: "center",
     padding: 18,
-    borderRadius: 12,
     marginBottom: 30,
     shadowColor: "#007AFF",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 5,
-  },
-  scanButtonText: {
-    color: "white",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginLeft: 10,
-  },
-  historyButton: {
-    backgroundColor: "white",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 30,
-    borderWidth: 1,
-    borderColor: "#007AFF",
-  },
-  historyButtonText: {
-    color: "#007AFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginLeft: 8,
-  },
-  instructions: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  instructionsTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 15,
-  },
-  instructionText: {
-    fontSize: 14,
-    color: "#666",
-    marginBottom: 8,
-    lineHeight: 20,
   },
 });

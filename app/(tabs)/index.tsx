@@ -1,24 +1,29 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { GradeStorageService } from "@/services/gradeStorageService";
 import { Ionicons } from "@expo/vector-icons";
-import NetInfo from "@react-native-community/netinfo";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, orderBy, query, where } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
-  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import ScannerScreen from "../../components/scanner/ScannerScreen";
 import Toast from "react-native-toast-message";
-import { GradeStorageService } from "@/services/gradeStorageService";
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 interface RecentExam {
   id: string;
@@ -75,58 +80,61 @@ export default function HomeScreen() {
   });
   const [recentExams, setRecentExams] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState("Faculty User");
+  const [userName] = useState("Faculty");
   const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingExams, setLoadingExams] = useState(false);
   const [examsError, setExamsError] = useState<string | null>(null);
   const [showAllExams, setShowAllExams] = useState(false);
 
-  const loadDashboard = useCallback(() => {
-    let cancelled = false;
+  // Unsubscribe refs for real-time listeners
+  const unsubExamsRef = useRef<(() => void) | null>(null);
+  const unsubClassesRef = useRef<(() => void) | null>(null);
+
+  // ── Fetch dark-mode preference + user profile (once on mount) ─────────
+  useEffect(() => {
     (async () => {
-      try {
-        setLoading(true);
-        const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
-        if (!cancelled) {
-          setDarkModeEnabled(savedDarkMode === "true");
-        }
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    })();
+  }, []);
 
-        const currentUser = auth.currentUser;
-        if (!currentUser) return;
+  // ── Real-time listener: exams ─────────────────────────────────────────
+  const subscribeExams = useCallback(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
 
-        // Fetch user display name
-        if (currentUser.displayName) {
-          setUserName(currentUser.displayName);
-        }
+    unsubExamsRef.current?.();
+    setLoadingExams(true);
+    setExamsError(null);
 
-        // Fetch exams
-        const examsQuery = query(
-          collection(db, "exams"),
-          where("createdBy", "==", currentUser.uid),
-        );
-        const examsSnapshot = await getDocs(examsQuery);
-        const exams = examsSnapshot.docs
-          .map((doc) => {
-            const data = doc.data();
+    const q = query(
+      collection(db, "exams"),
+      where("createdBy", "==", uid),
+      orderBy("created_at", "desc"),
+    );
+
+    unsubExamsRef.current = onSnapshot(
+      q,
+      (snap) => {
+        const exams = snap.docs
+          .map((d) => {
+            const data = d.data();
             const createdDate = toDate(data.created_at || data.createdAt);
             return {
-              id: doc.id,
-              title: data.title || "Untitled",
-              subject: data.subject || "",
+              id: d.id,
+              title: data.title ?? "Untitled Exam",
+              subject: data.subject ?? data.course_subject ?? "—",
               date: formatDate(data.created_at || data.createdAt),
-              papers: data.scanned_papers || null,
+              papers: data.scanned_papers ?? null,
               status: normalizeStatus(data.status),
               isArchived: data.isArchived || false,
               createdAtTs: createdDate ? createdDate.getTime() : 0,
-              createdAtDate: createdDate,
               generated_sheets: data.generated_sheets || [],
             };
           })
-          .filter((e) => !e.isArchived)
-          .sort((a, b) => b.createdAtTs - a.createdAtTs);
+          .filter((e) => !e.isArchived);
 
-        // Total answer sheets
         const totalSheets = exams.reduce((sum, exam) => {
           if (Array.isArray(exam.generated_sheets)) {
             return (
@@ -140,93 +148,83 @@ export default function HomeScreen() {
           return sum;
         }, 0);
 
-        // Total exams (non-archived)
-        const totalExams = exams.length;
-
-        // Fetch students from classes
-        let totalStudents = 0;
-        try {
-          const classesQuery = query(
-            collection(db, "classes"),
-            where("createdBy", "==", currentUser.uid),
-          );
-          const classesSnapshot = await getDocs(classesQuery);
-          totalStudents = classesSnapshot.docs.reduce((sum, doc) => {
-            const data = doc.data();
-            if (!data.isArchived) {
-              return sum + (data.students?.length || 0);
-            }
-            return sum;
-          }, 0);
-        } catch (e) {
-          console.warn("Could not fetch students:", e);
-        }
-
-        setStats({ totalExams, totalStudents, totalSheets });
-        setRecentExams(exams.slice(0, 3));
-      } catch (error) {
-        console.error("Error loading dashboard:", error);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+        setStats((prev) => ({
+          ...prev,
+          totalExams: exams.length,
+          totalSheets,
+        }));
+        setRecentExams(exams);
+        setLoadingExams(false);
+        setLoading(false);
+        setRefreshing(false);
+      },
+      (err) => {
+        setExamsError(err.message ?? "Failed to load exams.");
+        setLoadingExams(false);
+        setLoading(false);
+        setRefreshing(false);
+      },
+    );
   }, []);
 
-  // ── Load recent exams from Firestore (this instructor only) ───────────
-  const loadRecentExams = useCallback(async () => {
+  // ── Real-time listener: classes (for student count) ───────────────────
+  const subscribeClasses = useCallback(() => {
     const uid = auth.currentUser?.uid;
-    if (!uid) {
-      setLoadingExams(false);
-      return;
-    }
-    setLoadingExams(true);
-    setExamsError(null);
-    try {
-      const q = query(
-        collection(db, "exams"),
-        where("createdBy", "==", uid),
-        orderBy("created_at", "desc"),
-      );
-      const snap = await getDocs(q);
-      const exams: RecentExam[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title ?? "Untitled Exam",
-          subject: data.subject ?? data.course_subject ?? "—",
-          date: data.created_at
-            ? new Date(data.created_at).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })
-            : "—",
-          papers: data.scanned_papers ?? null,
-          status: data.status ?? "Draft",
-        };
-      });
-      setRecentExams(exams);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load exams.";
-      setExamsError(msg);
-    } finally {
-      setLoadingExams(false);
-      setRefreshing(false);
-    }
+    if (!uid) return;
+
+    unsubClassesRef.current?.();
+
+    const q = query(collection(db, "classes"), where("createdBy", "==", uid));
+
+    unsubClassesRef.current = onSnapshot(
+      q,
+      (snap) => {
+        const totalStudents = snap.docs.reduce((sum, d) => {
+          const data = d.data();
+          if (data.isArchived) return sum;
+          return sum + (data.students?.length || 0);
+        }, 0);
+        setStats((prev) => ({ ...prev, totalStudents }));
+      },
+      (err) => console.warn("[Dashboard] classes listener error:", err),
+    );
   }, []);
+
+  // ── Mount: start both listeners ───────────────────────────────────────
+  useEffect(() => {
+    subscribeExams();
+    subscribeClasses();
+    return () => {
+      unsubExamsRef.current?.();
+      unsubClassesRef.current?.();
+    };
+  }, [subscribeExams, subscribeClasses]);
+
+  // ── Deprecated helpers kept so pull-to-refresh still works ───────────
+  const loadDashboard = useCallback(() => {
+    subscribeExams();
+    subscribeClasses();
+  }, [subscribeExams, subscribeClasses]);
+  const loadRecentExams = useCallback(() => {
+    subscribeExams();
+  }, [subscribeExams]);
   // ── Pull-to-refresh handler ──────────────────────────────────────────────
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadRecentExams();
-  }, [loadRecentExams]);
-  // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
+    subscribeExams();
+    subscribeClasses();
+  }, [subscribeExams, subscribeClasses]);
+
+  // ── Restart listeners when screen comes back into focus ───────────────
   useFocusEffect(
     useCallback(() => {
-      loadRecentExams();
-    }, [loadRecentExams]),
+      subscribeExams();
+      subscribeClasses();
+      return () => {
+        unsubExamsRef.current?.();
+        unsubClassesRef.current?.();
+      };
+    }, [subscribeExams, subscribeClasses]),
   );
 
   // ── Manual Sync from Header ──────────────────────────────────────────────
@@ -320,7 +318,7 @@ export default function HomeScreen() {
         primary: "#3d5a3d",
         cardBg: "#f0ead6",
         cardBorder: "#8cb09a",
-        cardIconBg: "#dbe7df",
+        cardIconBg: "#b8cfbe",
         value: "#2f6a50",
         examTitle: "#333",
         examMeta: "#666",
@@ -422,7 +420,7 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons name="book-outline" size={18} color={colors.primary} />
+              <Ionicons name="book-outline" size={18} color="#24362f" />
             </View>
             <Text style={[styles.statValue, { color: colors.value }]}>
               {loading ? "-" : stats.totalExams}
@@ -447,11 +445,7 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons
-                name="people-outline"
-                size={18}
-                color={colors.primary}
-              />
+              <Ionicons name="people-outline" size={18} color="#24362f" />
             </View>
             <Text style={[styles.statValue, { color: colors.value }]}>
               {loading ? "-" : stats.totalStudents}
@@ -476,20 +470,12 @@ export default function HomeScreen() {
                 { backgroundColor: colors.cardIconBg },
               ]}
             >
-              <Ionicons
-                name="document-outline"
-                size={18}
-                color={colors.primary}
-              />
+              <Ionicons name="document-outline" size={18} color="#24362f" />
             </View>
-            <Text style={[styles.statValue, { color: colors.value }]}>
-              {loading ? "-" : stats.totalSheets}
-            </Text>
             <Text style={[styles.statLabel, { color: colors.subtitle }]}>
               Answer Sheets
             </Text>
           </View>
-
         </View>
 
         {/* Quick Actions */}
@@ -633,7 +619,9 @@ export default function HomeScreen() {
           {recentExams.length > 5 && (
             <TouchableOpacity onPress={() => setShowAllExams((prev) => !prev)}>
               <Text style={styles.viewAllText}>
-                {showAllExams ? "Show Less" : `View All (${recentExams.length})`}
+                {showAllExams
+                  ? "Show Less"
+                  : `View All (${recentExams.length})`}
               </Text>
             </TouchableOpacity>
           )}
@@ -693,76 +681,84 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            (showAllExams ? recentExams : recentExams.slice(0, 5)).map((exam) => (
-              <TouchableOpacity
-                key={exam.id}
-                style={[
-                  styles.examCard,
-                  {
-                    backgroundColor: colors.cardBg,
-                    borderColor: colors.cardBorder,
-                  },
-                ]}
-                onPress={() =>
-                  router.push(`/(tabs)/exam-preview?examId=${exam.id}`)
-                }
-              >
-                <View style={styles.examHeader}>
+            (showAllExams ? recentExams : recentExams.slice(0, 5)).map(
+              (exam) => (
+                <TouchableOpacity
+                  key={exam.id}
+                  style={[
+                    styles.examCard,
+                    {
+                      backgroundColor: colors.cardBg,
+                      borderColor: colors.cardBorder,
+                    },
+                  ]}
+                  onPress={() =>
+                    router.push(`/(tabs)/exam-preview?examId=${exam.id}`)
+                  }
+                >
+                  <View style={styles.examHeader}>
+                    <Text
+                      style={[styles.examTitle, { color: colors.examTitle }]}
+                      numberOfLines={1}
+                    >
+                      {exam.title}
+                    </Text>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: getStatusColor(exam.status) },
+                      ]}
+                    >
+                      <Text style={styles.statusText}>{exam.status}</Text>
+                    </View>
+                  </View>
                   <Text
-                    style={[styles.examTitle, { color: colors.examTitle }]}
+                    style={[styles.examSubject, { color: colors.subtitle }]}
                     numberOfLines={1}
                   >
-                    {exam.title}
+                    {exam.subject}
                   </Text>
+                  <View style={styles.examFooter}>
+                    <View style={styles.examInfo}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={14}
+                        color={colors.examMeta}
+                      />
+                      <Text
+                        style={[
+                          styles.examInfoText,
+                          { color: colors.examMeta },
+                        ]}
+                      >
+                        {exam.date}
+                      </Text>
+                    </View>
+                    <View style={styles.examInfo}>
+                      <Ionicons
+                        name="document-outline"
+                        size={14}
+                        color={colors.examMeta}
+                      />
+                      <Text
+                        style={[
+                          styles.examInfoText,
+                          { color: colors.examMeta },
+                        ]}
+                      >
+                        {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
+                      </Text>
+                    </View>
+                  </View>
                   <View
                     style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(exam.status) },
+                      styles.examBottomAccent,
+                      { backgroundColor: colors.surfaceAccent },
                     ]}
-                  >
-                    <Text style={styles.statusText}>{exam.status}</Text>
-                  </View>
-                </View>
-                <Text
-                  style={[styles.examSubject, { color: colors.subtitle }]}
-                  numberOfLines={1}
-                >
-                  {exam.subject}
-                </Text>
-                <View style={styles.examFooter}>
-                  <View style={styles.examInfo}>
-                    <Ionicons
-                      name="calendar-outline"
-                      size={14}
-                      color={colors.examMeta}
-                    />
-                    <Text
-                      style={[styles.examInfoText, { color: colors.examMeta }]}
-                    >
-                      {exam.date}
-                    </Text>
-                  </View>
-                  <View style={styles.examInfo}>
-                    <Ionicons
-                      name="document-outline"
-                      size={14}
-                      color={colors.examMeta}
-                    />
-                    <Text
-                      style={[styles.examInfoText, { color: colors.examMeta }]}
-                    >
-                      {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
-                    </Text>
-                  </View>
-                </View>
-                <View
-                  style={[
-                    styles.examBottomAccent,
-                    { backgroundColor: colors.surfaceAccent },
-                  ]}
-                />
-              </TouchableOpacity>
-            ))
+                  />
+                </TouchableOpacity>
+              ),
+            )
           )}
         </View>
 
@@ -1106,7 +1102,7 @@ const styles = StyleSheet.create({
   },
   fab: {
     position: "absolute",
-    bottom: 80,
+    bottom: 10,
     right: 20,
     flexDirection: "row",
     alignItems: "center",

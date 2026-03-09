@@ -129,7 +129,6 @@ export class ExamService {
           }
         } else {
           console.log("[ExamService] No answer key found for exam:", examId);
-          console.log("[ExamService] Tried timestamp ID:", timestampBasedId);
 
           // Strategy 3: Try to find by ID pattern (for web app compatibility)
           console.log("[ExamService] Trying Strategy 3: Search by ID pattern");
@@ -241,27 +240,27 @@ export class ExamService {
         },
         answerKey: answerKeyData
           ? {
-              id: answerKeyId || "",
-              examId: examData.examId || examSnap.id,
-              answers: extractedAnswers, // Use extracted answers
-              questionSettings: answerKeyData.questionSettings || [],
-              locked: answerKeyData.locked || false,
-              createdAt: answerKeyData.createdAt?.toDate() || new Date(),
-              updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
-              createdBy: answerKeyData.createdBy || "",
-              version: answerKeyData.version || 1,
-            }
+            id: answerKeyId || "",
+            examId: examData.examId || examSnap.id,
+            answers: extractedAnswers, // Use extracted answers
+            questionSettings: answerKeyData.questionSettings || [],
+            locked: answerKeyData.locked || false,
+            createdAt: answerKeyData.createdAt?.toDate() || new Date(),
+            updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
+            createdBy: answerKeyData.createdBy || "",
+            version: answerKeyData.version || 1,
+          }
           : {
-              id: "",
-              examId: examSnap.id,
-              answers: extractedAnswers, // Use extracted answers (empty)
-              questionSettings: [],
-              locked: false,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              createdBy: "",
-              version: 1,
-            },
+            id: "",
+            examId: examSnap.id,
+            answers: extractedAnswers, // Use extracted answers (empty)
+            questionSettings: [],
+            locked: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            createdBy: "",
+            version: 1,
+          },
         templateLayout: {
           name: "Standard Template",
           totalQuestions: totalQuestions,
