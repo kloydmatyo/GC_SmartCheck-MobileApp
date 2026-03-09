@@ -5,6 +5,7 @@
 
 import { CacheSyncIndicator } from "@/components/student/CacheSyncIndicator";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
 import { ClassService } from "@/services/classService";
@@ -850,77 +851,16 @@ export default function StudentsScreen() {
   );
 
   const renderDeleteStudentModal = () => (
-    <Modal
+    <ConfirmationModal
       visible={Boolean(pendingDeleteStudent)}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setPendingDeleteStudent(null)}
-    >
-      <View
-        style={[
-          styles.deleteModalOverlay,
-          { backgroundColor: colors.modalOverlay },
-        ]}
-      >
-        <View
-          style={[
-            styles.deleteModalCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: darkModeEnabled ? "#34483f" : "#d8dfda",
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.deleteModalIconWrap,
-              { backgroundColor: darkModeEnabled ? "#3f2a2a" : "#fde8e7" },
-            ]}
-          >
-            <Ionicons name="trash-outline" size={24} color="#d9534f" />
-          </View>
-
-          <Text style={[styles.deleteModalTitle, { color: colors.text }]}>
-            Delete student
-          </Text>
-          <Text
-            style={[styles.deleteModalMessage, { color: colors.textSecondary }]}
-          >
-            Delete {pendingDeleteStudent?.first_name} {pendingDeleteStudent?.last_name}?
-            This cannot be undone.
-          </Text>
-
-          <View style={styles.deleteModalActions}>
-            <TouchableOpacity
-              style={[
-                styles.deleteModalSecondaryButton,
-                {
-                  backgroundColor: darkModeEnabled ? "#22302a" : "#f3f7f4",
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={() => setPendingDeleteStudent(null)}
-            >
-              <Text
-                style={[
-                  styles.deleteModalSecondaryText,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                Cancel
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.deleteModalPrimaryButton}
-              onPress={confirmDeleteStudent}
-            >
-              <Text style={styles.deleteModalPrimaryText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
+      title="Delete Student"
+      message={`Delete ${pendingDeleteStudent?.first_name ?? ""} ${pendingDeleteStudent?.last_name ?? ""}? This cannot be undone.`.trim()}
+      cancelText="Cancel"
+      confirmText="Delete"
+      destructive
+      onCancel={() => setPendingDeleteStudent(null)}
+      onConfirm={confirmDeleteStudent}
+    />
   );
 
   // REQ 37: Pagination controls
@@ -1826,64 +1766,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingBottom: 40,
     borderTopWidth: 1,
-  },
-  deleteModalOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 24,
-  },
-  deleteModalCard: {
-    width: "100%",
-    maxWidth: 360,
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1,
-  },
-  deleteModalIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 18,
-  },
-  deleteModalTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
-  deleteModalMessage: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  deleteModalActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 24,
-  },
-  deleteModalSecondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  deleteModalSecondaryText: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  deleteModalPrimaryButton: {
-    flex: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-    backgroundColor: "#d9534f",
-  },
-  deleteModalPrimaryText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#fff",
   },
   studentModalContent: {
     flex: 1,

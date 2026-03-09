@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
@@ -77,6 +78,7 @@ export default function ClassesScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [creating, setCreating] = useState(false);
   const [classMenuVisible, setClassMenuVisible] = useState(false);
+  const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [classMenuPosition, setClassMenuPosition] = useState({ top: 0, left: 0 });
 
@@ -334,7 +336,7 @@ export default function ClassesScreen() {
     setSelectedClass(null);
   };
 
-  const handleArchiveClass = async (classItem: Class) => {
+  const archiveClass = async (classItem: Class) => {
     try {
       await ClassService.updateClass(classItem.id, { isArchived: true });
       setClassMenuVisible(false);
@@ -354,6 +356,12 @@ export default function ClassesScreen() {
         text2: "Failed to archive class",
       });
     }
+  };
+
+  const handleArchiveClass = (classItem: Class) => {
+    setSelectedClass(classItem);
+    setClassMenuVisible(false);
+    setArchiveConfirmVisible(true);
   };
 
   if (loading) {
@@ -607,6 +615,22 @@ export default function ClassesScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <ConfirmationModal
+        visible={archiveConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${selectedClass?.class_name ?? "this class"}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveConfirmVisible(false)}
+        onConfirm={() => {
+          if (selectedClass) {
+            setArchiveConfirmVisible(false);
+            archiveClass(selectedClass);
+          }
+        }}
+      />
+
       <Toast />
     </View>
   );
@@ -698,34 +722,35 @@ const styles = StyleSheet.create({
   },
   classCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    marginBottom: 14,
+    borderRadius: 20,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: "#E7EBF0",
     overflow: "hidden",
     flexDirection: "row",
+    minHeight: 96,
   },
   cardAccent: {
-    width: 5,
-    borderTopLeftRadius: 18,
-    borderBottomLeftRadius: 18,
+    width: 6,
+    borderTopLeftRadius: 20,
+    borderBottomLeftRadius: 20,
   },
   classCardBody: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
   },
   classHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 10,
+    marginBottom: 12,
   },
   className: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: "800",
     color: "#1F2937",
-    lineHeight: 22,
+    lineHeight: 24,
   },
   classHeaderLeft: {
     flex: 1,
@@ -734,31 +759,31 @@ const styles = StyleSheet.create({
   classHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   classRate: {
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: "800",
   },
   cardMenuButton: {
-    width: 22,
-    height: 22,
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
   classMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 18,
-    marginBottom: 14,
+    gap: 20,
+    marginBottom: 16,
   },
   metaItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 7,
   },
   metaText: {
-    fontSize: 12,
+    fontSize: 13,
     color: "#7E8798",
   },
   scoreTrack: {

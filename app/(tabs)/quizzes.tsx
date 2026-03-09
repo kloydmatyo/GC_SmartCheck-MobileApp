@@ -2,12 +2,12 @@ import { auth } from "@/config/firebase";
 import { ResultsService } from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  Share,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -25,104 +25,6 @@ type ResultRow = {
   dateLabel: string;
   correctLabel: string;
 };
-
-const MOCK_RESULTS: ResultRow[] = [
-  {
-    id: "mock-1",
-    studentName: "Jess Taylor",
-    classLabel: "BSIT 3B",
-    examLabel: "Chapter Test",
-    percentage: 95,
-    dateLabel: "3/8/2026",
-    correctLabel: "19/20 correct",
-  },
-  {
-    id: "mock-2",
-    studentName: "Sarah Davis",
-    classLabel: "BSIT 3B",
-    examLabel: "Chapter Test",
-    percentage: 55,
-    dateLabel: "3/8/2026",
-    correctLabel: "11/20 correct",
-  },
-  {
-    id: "mock-3",
-    studentName: "Alyssa Cruz",
-    classLabel: "BSIT 3B",
-    examLabel: "Chapter Test",
-    percentage: 88,
-    dateLabel: "3/8/2026",
-    correctLabel: "18/20 correct",
-  },
-  {
-    id: "mock-4",
-    studentName: "Darren Lim",
-    classLabel: "BSIT 3B",
-    examLabel: "Chapter Test",
-    percentage: 73,
-    dateLabel: "3/8/2026",
-    correctLabel: "15/20 correct",
-  },
-  {
-    id: "mock-5",
-    studentName: "Bea Mendoza",
-    classLabel: "BSIT 3B",
-    examLabel: "Chapter Test",
-    percentage: 90,
-    dateLabel: "3/8/2026",
-    correctLabel: "18/20 correct",
-  },
-  {
-    id: "mock-6",
-    studentName: "Marco Reyes",
-    classLabel: "BSCS 2A",
-    examLabel: "Midterm Exam",
-    percentage: 84,
-    dateLabel: "3/7/2026",
-    correctLabel: "42/50 correct",
-  },
-  {
-    id: "mock-7",
-    studentName: "Nina Flores",
-    classLabel: "BSCS 2A",
-    examLabel: "Midterm Exam",
-    percentage: 91,
-    dateLabel: "3/7/2026",
-    correctLabel: "46/50 correct",
-  },
-  {
-    id: "mock-8",
-    studentName: "Paolo Santos",
-    classLabel: "BSCS 2A",
-    examLabel: "Midterm Exam",
-    percentage: 67,
-    dateLabel: "3/7/2026",
-    correctLabel: "34/50 correct",
-  },
-  {
-    id: "mock-9",
-    studentName: "Lara Gomez",
-    classLabel: "BSCS 2A",
-    examLabel: "Midterm Exam",
-    percentage: 78,
-    dateLabel: "3/7/2026",
-    correctLabel: "39/50 correct",
-  },
-  {
-    id: "mock-10",
-    studentName: "Ken Bautista",
-    classLabel: "BSCS 2A",
-    examLabel: "Midterm Exam",
-    percentage: 93,
-    dateLabel: "3/7/2026",
-    correctLabel: "47/50 correct",
-  },
-];
-
-const MOCK_CLASS_FILTERS = [
-  "All Classes",
-  ...Array.from(new Set(MOCK_RESULTS.map((item) => item.classLabel))),
-];
 
 function scoreTone(value: number) {
   if (value >= 85) return { badge: "#D8F3E7", text: "#20A86B" };
@@ -146,6 +48,7 @@ export default function ResultsScreen() {
   const [selectedClass, setSelectedClass] = useState("All Classes");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [classFilters, setClassFilters] = useState<string[]>(["All Classes"]);
+  const listRef = useRef<FlatList<ResultRow>>(null);
 
   const loadResults = useCallback(() => {
     let active = true;
@@ -195,7 +98,12 @@ export default function ResultsScreen() {
     };
   }, []);
 
-  useFocusEffect(loadResults);
+  useFocusEffect(
+    useCallback(() => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+      return loadResults();
+    }, [loadResults]),
+  );
 
   const filteredResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -212,22 +120,12 @@ export default function ResultsScreen() {
     });
   }, [results, searchQuery, selectedClass]);
 
-  const displayResults = filteredResults.length
-    ? filteredResults
-    : MOCK_RESULTS.filter((item) => {
-        const q = searchQuery.trim().toLowerCase();
-        const matchesClass =
-          selectedClass === "All Classes" || item.classLabel === selectedClass;
-        const matchesSearch =
-          !q ||
-          item.studentName.toLowerCase().includes(q) ||
-          item.classLabel.toLowerCase().includes(q) ||
-          item.examLabel.toLowerCase().includes(q);
+  const displayResults = filteredResults;
+  const displayClassFilters = classFilters;
 
-        return matchesClass && matchesSearch;
-      });
-
-  const displayClassFilters = results.length ? classFilters : MOCK_CLASS_FILTERS;
+  useEffect(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [searchQuery, selectedClass]);
 
   const handleExport = useCallback(async () => {
     if (!filteredResults.length) {
@@ -302,82 +200,77 @@ export default function ResultsScreen() {
     );
   }, []);
 
-  const renderHeader = useCallback(
-    () => (
-      <>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>All Results</Text>
-          <TouchableOpacity style={styles.exportButton} onPress={handleExport}>
-            <Ionicons name="download-outline" size={18} color="#19B97C" />
-            <Text style={styles.exportText}>Export</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.searchWrap}>
-          <Ionicons name="search-outline" size={22} color="#C4CAD5" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search by student, class, or exam..."
-            placeholderTextColor="#C4CAD5"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsRow}
-        >
-          {displayClassFilters.map((filter) => (
-            <TouchableOpacity
-              key={filter}
-              style={[
-                styles.chip,
-                selectedClass === filter && styles.chipActive,
-              ]}
-              onPress={() => setSelectedClass(filter)}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  selectedClass === filter && styles.chipTextActive,
-                ]}
-              >
-                {filter}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </>
-    ),
-    [displayClassFilters, handleExport, searchQuery, selectedClass],
-  );
-
   return (
     <View style={styles.container}>
-      <FlatList
-        data={loading ? [] : displayResults}
-        keyExtractor={(item) => item.id}
-        renderItem={renderResultCard}
-        ListHeaderComponent={renderHeader}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator size="large" color="#20BE7B" />
-            </View>
-          ) : (
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>All Results</Text>
+        <TouchableOpacity style={styles.exportButton} onPress={handleExport}>
+          <Ionicons name="download-outline" size={18} color="#19B97C" />
+          <Text style={styles.exportText}>Export</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.searchWrap}>
+        <Ionicons name="search-outline" size={22} color="#C4CAD5" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search by student, class, or exam..."
+          placeholderTextColor="#C4CAD5"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+        style={styles.chipsScroll}
+        alwaysBounceVertical={false}
+      >
+        {displayClassFilters.map((filter) => (
+          <TouchableOpacity
+            key={filter}
+            style={[styles.chip, selectedClass === filter && styles.chipActive]}
+            onPress={() => setSelectedClass(filter)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                selectedClass === filter && styles.chipTextActive,
+              ]}
+            >
+              {filter}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* ✅ FIX: Render spinner outside FlatList to prevent the large empty gap */}
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#20BE7B" />
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          data={displayResults}
+          keyExtractor={(item) => item.id}
+          renderItem={renderResultCard}
+          ListEmptyComponent={
             <View style={styles.emptyState}>
               <Ionicons name="clipboard-outline" size={44} color="#C5CBD6" />
-              <Text style={styles.emptyTitle}>No results found</Text>
+              <Text style={styles.emptyTitle}>No results yet</Text>
+              <Text style={styles.emptySubtitle}>
+                Try scanning an answer sheet to see results here.
+              </Text>
             </View>
-          )
-        }
-        ItemSeparatorComponent={() => <View style={styles.resultSeparator} />}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+          }
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       <Toast />
     </View>
@@ -395,7 +288,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 20,
     paddingTop: 56,
-    marginBottom: 20,
+    paddingBottom: 14,
   },
   headerTitle: {
     fontSize: 28,
@@ -434,42 +327,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#1F2937",
   },
+  chipsScroll: {
+    height: 52,
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 8,
+  },
   chipsRow: {
     paddingHorizontal: 20,
     gap: 10,
-    paddingBottom: 12,
   },
   chip: {
     paddingHorizontal: 18,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "#F2F4F7",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.5,
+    borderColor: "#E2E6EC",
     justifyContent: "center",
   },
   chipActive: {
     backgroundColor: "#20BE7B",
+    borderColor: "#20BE7B",
   },
   chipText: {
     fontSize: 14,
-    fontWeight: "700",
-    color: "#253041",
+    fontWeight: "600",
+    color: "#4B5563",
   },
   chipTextActive: {
     color: "#FFFFFF",
   },
   list: {
     flex: 1,
+    flexGrow: 1,
   },
   listContent: {
+    paddingHorizontal: 22,
+    paddingTop: 4,
     paddingBottom: 120,
   },
   loadingWrap: {
+    flex: 1,
     alignItems: "center",
+    justifyContent: "flex-start",
     paddingTop: 32,
-    paddingBottom: 40,
-  },
-  resultSeparator: {
-    height: 14,
   },
   resultCard: {
     flexDirection: "row",
@@ -479,7 +381,7 @@ const styles = StyleSheet.create({
     borderColor: "#E8EBF0",
     paddingHorizontal: 14,
     paddingVertical: 14,
-    marginHorizontal: 20,
+    marginBottom: 14,
   },
   scoreCircle: {
     width: 56,
@@ -528,6 +430,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     marginTop: 12,
     fontSize: 16,
+    fontWeight: "600",
     color: "#6B7280",
+  },
+  emptySubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    color: "#9CA3AF",
+    textAlign: "center",
   },
 });

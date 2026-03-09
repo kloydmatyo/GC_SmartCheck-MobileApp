@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
 import { DashboardService } from "@/services/dashboardService";
 import { ImportResult } from "@/types/student";
@@ -47,6 +48,7 @@ type ExamRow = {
   scans: number;
   average: number;
   subject: string;
+  examCode?: string;
   classId?: string;
   className?: string;
 };
@@ -126,7 +128,11 @@ export default function ClassDetailsScreen() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [examMenuVisible, setExamMenuVisible] = useState(false);
   const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
+  const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
+  const [deleteExamConfirmVisible, setDeleteExamConfirmVisible] = useState(false);
   const [examRows, setExamRows] = useState<ExamRow[]>([]);
+  const [examRowsLoading, setExamRowsLoading] = useState(true);
+  const examLoadRequestRef = React.useRef(0);
 
   const loadClassData = useCallback(async () => {
     try {
@@ -147,7 +153,10 @@ export default function ClassDetailsScreen() {
   }, [classId]);
 
   const loadExams = useCallback(async () => {
+    const requestId = ++examLoadRequestRef.current;
     try {
+      setExamRowsLoading(true);
+      setExamRows([]);
       const currentUser = auth.currentUser;
       if (!currentUser || !classData) {
         setExamRows([]);
@@ -163,6 +172,7 @@ export default function ClassDetailsScreen() {
           const data = item.data();
           const subject = String(data.subject || "General");
           const title = String(data.title || "Untitled Exam");
+          const examCode = String(data.examCode || "").trim();
           const questions =
             Number(data.num_items || data.totalQuestions || 0) ||
             (Array.isArray(data.questions) ? data.questions.length : 0) ||
@@ -177,6 +187,7 @@ export default function ClassDetailsScreen() {
             scans: 0,
             average: 0,
             subject,
+            examCode,
             classId: linkedClassId,
             className: linkedClassName,
             isArchived: Boolean(data.isArchived),
@@ -207,12 +218,24 @@ export default function ClassDetailsScreen() {
         }),
       );
 
+      if (requestId !== examLoadRequestRef.current) return;
       setExamRows(examsWithStats);
     } catch (error) {
       console.error("Error loading exams:", error);
+      if (requestId !== examLoadRequestRef.current) return;
       setExamRows([]);
+    } finally {
+      if (requestId !== examLoadRequestRef.current) return;
+      setExamRowsLoading(false);
     }
   }, [classData]);
+
+  useEffect(() => {
+    examLoadRequestRef.current += 1;
+    setExamRows([]);
+    setExamRowsLoading(true);
+    clearExamSelection();
+  }, [classId]);
 
   useEffect(() => {
     if (
@@ -295,7 +318,12 @@ export default function ClassDetailsScreen() {
 
   const closeExamMenu = useCallback(() => {
     setExamMenuVisible(false);
+  }, []);
+
+  const clearExamSelection = useCallback(() => {
     setSelectedExam(null);
+    setArchiveExamConfirmVisible(false);
+    setDeleteExamConfirmVisible(false);
   }, []);
 
   const handleImportComplete = async (result: ImportResult) => {
@@ -346,6 +374,7 @@ export default function ClassDetailsScreen() {
       const examTitle = selectedExam.title;
       await updateDoc(doc(db, "exams", selectedExam.id), { isArchived: true });
       closeExamMenu();
+      clearExamSelection();
       Toast.show({
         type: "success",
         text1: "Archived",
@@ -367,6 +396,7 @@ export default function ClassDetailsScreen() {
     try {
       await deleteDoc(doc(db, "exams", selectedExam.id));
       closeExamMenu();
+      clearExamSelection();
       Toast.show({
         type: "success",
         text1: "Deleted",
@@ -381,6 +411,18 @@ export default function ClassDetailsScreen() {
         text2: "Failed to delete exam",
       });
     }
+  };
+
+  const requestArchiveExam = () => {
+    if (!selectedExam) return;
+    setExamMenuVisible(false);
+    setArchiveExamConfirmVisible(true);
+  };
+
+  const requestDeleteExam = () => {
+    if (!selectedExam) return;
+    setExamMenuVisible(false);
+    setDeleteExamConfirmVisible(true);
   };
 
   const stats = useMemo(() => {
@@ -506,7 +548,15 @@ export default function ClassDetailsScreen() {
             <Text style={styles.createExamText}>Create Exam</Text>
           </TouchableOpacity>
 
-          {!examRows.length ? (
+          {examRowsLoading ? (
+            <View style={styles.emptyStateCard}>
+              <ActivityIndicator size="small" color="#20BE7B" />
+              <Text style={styles.emptyStateTitle}>Loading exams...</Text>
+              <Text style={styles.emptyStateText}>
+                Please wait while we load this class&apos;s exams.
+              </Text>
+            </View>
+          ) : !examRows.length ? (
             <View style={styles.emptyStateCard}>
               <View style={styles.emptyStateIconWrap}>
                 <Ionicons name="document-text-outline" size={26} color="#20BE7B" />
@@ -549,6 +599,9 @@ export default function ClassDetailsScreen() {
                     <Text style={styles.examMeta}>
                       {exam.questions} Questions • {exam.scans} Scans
                     </Text>
+                    {exam.examCode ? (
+                      <Text style={styles.examCodeMeta}>{exam.examCode}</Text>
+                    ) : null}
                   </View>
                   <View style={styles.examRight}>
                     <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
@@ -674,7 +727,7 @@ export default function ClassDetailsScreen() {
           style={styles.iconButton}
           onPress={() => setSettingsMenuVisible(true)}
         >
-          <Ionicons name="settings-outline" size={20} color="#5C6575" />
+          <Ionicons name="settings-outline" size={20} color="#111827" />
         </TouchableOpacity>
       </View>
 
@@ -714,11 +767,26 @@ export default function ClassDetailsScreen() {
           onPress={() => setSettingsMenuVisible(false)}
         >
           <View style={styles.menuContent}>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {classData?.class_name || "Class"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setSettingsMenuVisible(false)}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setSettingsMenuVisible(false);
-                router.push("/(tabs)/sync");
+                Toast.show({
+                  type: "info",
+                  text1: "Sync to Web",
+                  text2: "Sync to Web is still not available.",
+                });
               }}
             >
               <Text style={styles.menuItemText}>Sync to Web</Text>
@@ -777,15 +845,43 @@ export default function ClassDetailsScreen() {
           onPress={closeExamMenu}
         >
           <View style={styles.examMenuContent}>
-            <TouchableOpacity style={styles.menuItem} onPress={handleArchiveExam}>
+            <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
               <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={handleDeleteExam}>
+            <TouchableOpacity style={styles.menuItem} onPress={requestDeleteExam}>
               <Text style={[styles.menuItemText, styles.menuDeleteText]}>Delete Exam</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmationModal
+        visible={archiveExamConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${selectedExam?.title ?? "this exam"}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={clearExamSelection}
+        onConfirm={() => {
+          setArchiveExamConfirmVisible(false);
+          handleArchiveExam();
+        }}
+      />
+
+      <ConfirmationModal
+        visible={deleteExamConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${selectedExam?.title ?? "this exam"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={clearExamSelection}
+        onConfirm={() => {
+          setDeleteExamConfirmVisible(false);
+          handleDeleteExam();
+        }}
+      />
 
       <StudentImportModal
         visible={showImportModal}
@@ -1014,6 +1110,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#9CA3AF",
   },
+  examCodeMeta: {
+    marginTop: 3,
+    fontSize: 11,
+    color: "#6B7280",
+    fontWeight: "600",
+  },
   examRight: {
     alignItems: "flex-end",
     marginRight: 12,
@@ -1189,12 +1291,37 @@ const styles = StyleSheet.create({
     width: 172,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
-    paddingVertical: 8,
+    paddingTop: 8,
+    paddingBottom: 8,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.16,
     shadowRadius: 16,
     elevation: 8,
+  },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  menuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#273142",
+    marginRight: 8,
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+    zIndex: 2,
+    elevation: 2,
   },
   examMenuContent: {
     width: 164,

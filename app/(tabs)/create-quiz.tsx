@@ -346,7 +346,11 @@ export default function CreateQuizScreen() {
       <View style={styles.lightHeader}>
         <View style={styles.placeholder} />
         <Text style={styles.lightHeaderTitle}>Create Exam</Text>
-        <TouchableOpacity style={styles.closeButton} onPress={goBack}>
+        <TouchableOpacity
+          style={[styles.closeButton, loading && { opacity: 0.45 }]}
+          onPress={goBack}
+          disabled={loading}
+        >
           <Ionicons name="close" size={22} color="#A8AFBC" />
         </TouchableOpacity>
       </View>

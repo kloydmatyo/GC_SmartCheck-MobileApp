@@ -1,4 +1,5 @@
 import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { ResultsService } from "@/services/resultsService";
@@ -17,6 +18,7 @@ import { signOut } from "firebase/auth";
 import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Modal,
   Platform,
   ScrollView,
@@ -166,6 +168,8 @@ function formatLastSync(lastSync: Date | null) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const syncBannerOffset = useState(new Animated.Value(-16))[0];
+  const syncBannerOpacity = useState(new Animated.Value(0))[0];
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<SummaryStats>(emptyStats);
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
@@ -176,10 +180,51 @@ export default function HomeScreen() {
   const [pendingCount, setPendingCount] = useState(0);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [showSyncBanner, setShowSyncBanner] = useState(false);
   const displayRecentScans = recentScans.length ? recentScans : MOCK_RECENT_SCANS;
+
+  const animateSyncBannerOut = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(syncBannerOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(syncBannerOffset, {
+        toValue: -16,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setShowSyncBanner(false);
+      }
+    });
+  }, [syncBannerOffset, syncBannerOpacity]);
+
+  const showSyncBannerTemporarily = useCallback(() => {
+    setShowSyncBanner(true);
+    syncBannerOpacity.setValue(0);
+    syncBannerOffset.setValue(-16);
+
+    Animated.parallel([
+      Animated.timing(syncBannerOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(syncBannerOffset, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [syncBannerOffset, syncBannerOpacity]);
 
   useEffect(() => {
     let mounted = true;
+    let hideBannerTimer: ReturnType<typeof setTimeout> | null = null;
 
     const loadSyncStatus = async () => {
       const stats = await OfflineStorageService.getStorageStats();
@@ -189,6 +234,16 @@ export default function HomeScreen() {
       setLastSync(stats.lastSync);
       setIsSyncing(SyncService.isSyncInProgress());
       setIsOnline(NetworkService.getConnectionStatus());
+
+      showSyncBannerTemporarily();
+      if (hideBannerTimer) {
+        clearTimeout(hideBannerTimer);
+      }
+      hideBannerTimer = setTimeout(() => {
+        if (mounted) {
+          animateSyncBannerOut();
+        }
+      }, 2200);
     };
 
     NetworkService.initialize();
@@ -214,8 +269,11 @@ export default function HomeScreen() {
       unsubscribeNetwork();
       unsubscribeSync();
       clearInterval(interval);
+      if (hideBannerTimer) {
+        clearTimeout(hideBannerTimer);
+      }
     };
-  }, []);
+  }, [animateSyncBannerOut, showSyncBannerTemporarily]);
 
   const loadHome = useCallback(() => {
     let active = true;
@@ -357,7 +415,7 @@ export default function HomeScreen() {
 
   const handleLogout = async () => {
     try {
-      setSettingsMenuVisible(false);
+      setLogoutConfirmVisible(false);
       await signOut(auth);
       router.replace("/sign-in");
     } catch (error) {
@@ -379,31 +437,49 @@ export default function HomeScreen() {
         >
           <View style={styles.topRow}>
             <View style={styles.topSpacer} />
-            <View style={styles.syncPill}>
-              <View
+            {showSyncBanner ? (
+              <Animated.View
                 style={[
-                  styles.syncIconWrap,
-                  { backgroundColor: `${syncVisual.color}1A` },
+                  styles.syncPill,
+                  {
+                    opacity: syncBannerOpacity,
+                    transform: [{ translateY: syncBannerOffset }],
+                  },
                 ]}
               >
-                {isSyncing ? (
-                  <ActivityIndicator size="small" color={syncVisual.color} />
-                ) : (
-                  <Ionicons
-                    name={syncVisual.icon}
-                    size={14}
-                    color={syncVisual.color}
-                  />
-                )}
-              </View>
-              <Text style={styles.syncText}>{syncVisual.text}</Text>
-            </View>
+                <TouchableOpacity
+                  style={styles.syncPillTouch}
+                  activeOpacity={0.85}
+                  onPress={animateSyncBannerOut}
+                >
+                  <View
+                    style={[
+                      styles.syncIconWrap,
+                      { backgroundColor: `${syncVisual.color}1A` },
+                    ]}
+                  >
+                    {isSyncing ? (
+                      <ActivityIndicator size="small" color={syncVisual.color} />
+                    ) : (
+                      <Ionicons
+                        name={syncVisual.icon}
+                        size={14}
+                        color={syncVisual.color}
+                      />
+                    )}
+                  </View>
+                  <Text style={styles.syncText}>{syncVisual.text}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            ) : (
+              <View style={styles.topSpacer} />
+            )}
             <TouchableOpacity
               style={styles.settingsButton}
               onPress={() => setSettingsMenuVisible(true)}
               activeOpacity={0.85}
             >
-              <Ionicons name="settings-sharp" size={18} color="#111827" />
+              <Ionicons name="settings-outline" size={20} color="#111827" />
             </TouchableOpacity>
           </View>
 
@@ -534,13 +610,30 @@ export default function HomeScreen() {
                 {teacherEmail || auth.currentUser?.email || "teacher@school.edu"}
               </Text>
             </View>
-            <TouchableOpacity style={styles.accountMenuAction} onPress={handleLogout}>
+            <TouchableOpacity
+              style={styles.accountMenuAction}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setLogoutConfirmVisible(true);
+              }}
+            >
               <Ionicons name="log-out-outline" size={20} color="#D7426B" />
               <Text style={styles.accountMenuActionText}>Log Out</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmationModal
+        visible={logoutConfirmVisible}
+        title="Log Out"
+        message="Are you sure you want to log out of your account?"
+        cancelText="Cancel"
+        confirmText="Log Out"
+        destructive
+        onCancel={() => setLogoutConfirmVisible(false)}
+        onConfirm={handleLogout}
+      />
     </SafeAreaView>
   );
 }
@@ -569,9 +662,6 @@ const styles = StyleSheet.create({
     width: 28,
   },
   syncPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#ECEEF2",
@@ -583,6 +673,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 8,
     elevation: 2,
+  },
+  syncPillTouch: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   syncIconWrap: {
     width: 18,
@@ -597,12 +694,8 @@ const styles = StyleSheet.create({
     color: "#5A6475",
   },
   settingsButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECEEF2",
+    width: 32,
+    height: 32,
     alignItems: "center",
     justifyContent: "center",
   },

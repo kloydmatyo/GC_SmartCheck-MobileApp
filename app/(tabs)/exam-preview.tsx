@@ -2,6 +2,7 @@ import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { ResultsService, type UnifiedResultRow } from "@/services/resultsService";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { ExamService as ExamApi } from "@/services/examService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,10 +16,12 @@ import {
     StatusBar,
     StyleSheet,
     Text,
-    TouchableOpacity,
-    View,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { auth } from "../../config/firebase";
+import Toast from "react-native-toast-message";
+import { deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { auth, db } from "../../config/firebase";
 import { ExamPreviewData } from "../../types/exam";
 
 export default function ExamPreviewScreen() {
@@ -44,8 +47,14 @@ export default function ExamPreviewScreen() {
     requestedTab === "results" ? "results" : "answerKey",
   );
   const [examResults, setExamResults] = useState<UnifiedResultRow[]>([]);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [viewCodeVisible, setViewCodeVisible] = useState(false);
+  const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const loadRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
+  const isCurrentExamReady =
+    Boolean(exam) && String(exam?.metadata.examId || "") === String(examId);
 
   const resolvedAnswers = React.useMemo(() => {
     if (!exam) return [];
@@ -111,6 +120,15 @@ export default function ExamPreviewScreen() {
   };
 
   useEffect(() => {
+    setExam(null);
+    setExamResults([]);
+    setError(null);
+    setLoading(true);
+    setResultsLoading(true);
+    setSettingsMenuVisible(false);
+    setViewCodeVisible(false);
+    setArchiveConfirmVisible(false);
+    setDeleteConfirmVisible(false);
     loadExamData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId, refreshKey]); // Reload when refreshKey changes
@@ -194,7 +212,7 @@ export default function ExamPreviewScreen() {
       const examData: ExamPreviewData = {
         metadata: {
           examId,
-          examCode: examId,
+          examCode: String((offlineExam as any).examCode || examId),
           title: offlineExam.title,
           subject: "",
           section: "",
@@ -243,17 +261,63 @@ export default function ExamPreviewScreen() {
     }
   };
 
+  const closeSettingsMenu = () => {
+    setSettingsMenuVisible(false);
+  };
+
+  const handleArchiveExam = async () => {
+    try {
+      await updateDoc(doc(db, "exams", examId), { isArchived: true });
+      setArchiveConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Archived",
+        text2: `${exam?.metadata.title || "Exam"} moved to Archived`,
+      });
+      goToQuizzes();
+    } catch (error) {
+      console.error("Error archiving exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to archive exam",
+      });
+    }
+  };
+
+  const handleDeleteExam = async () => {
+    try {
+      await deleteDoc(doc(db, "exams", examId));
+      setDeleteConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Exam deleted successfully",
+      });
+      goToQuizzes();
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete exam",
+      });
+    }
+  };
+
   const renderAnswerKeyGrid = () => {
     if (!exam) return null;
 
-    const columns = 2;
+    const columns = 5;
     const rows = Math.ceil(exam.totalQuestions / columns);
     const grid: number[][] = [];
 
     for (let i = 0; i < rows; i++) {
       const row: number[] = [];
       for (let j = 0; j < columns; j++) {
-        const questionNum = i + j * rows + 1;
+        const questionNum = i * columns + j + 1;
         if (questionNum <= exam.totalQuestions) {
           row.push(questionNum);
         }
@@ -391,7 +455,7 @@ export default function ExamPreviewScreen() {
     );
   };
 
-  if (loading) {
+  if (loading || (!error && !isCurrentExamReady)) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
@@ -435,18 +499,18 @@ export default function ExamPreviewScreen() {
           <Text style={[styles.headerTitle, { color: colors.title }]}>
             {exam.metadata.title}
           </Text>
+          {exam.metadata.examCode ? (
+            <Text style={[styles.headerCode, { color: colors.text }]}>
+              {exam.metadata.examCode}
+            </Text>
+          ) : null}
           <Text style={[styles.headerSubtitle, { color: colors.text }]}>
             {exam.totalQuestions} Questions
           </Text>
         </View>
         <TouchableOpacity
           style={styles.headerAction}
-          onPress={() => {
-            if (exam.metadata.status === "Draft") {
-              router.push(`/(tabs)/edit-exam?examId=${examId}`);
-            }
-          }}
-          disabled={exam.metadata.status !== "Draft"}
+          onPress={() => setSettingsMenuVisible(true)}
         >
           <Ionicons
             name={isOffline ? "cloud-offline-outline" : "settings-outline"}
@@ -548,6 +612,103 @@ export default function ExamPreviewScreen() {
         )}
       </ScrollView>
 
+      {settingsMenuVisible ? (
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={closeSettingsMenu}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.examMenuContent}
+          >
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setViewCodeVisible(true);
+              }}
+            >
+              <Text style={styles.menuItemText}>View Code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setArchiveConfirmVisible(true);
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuArchiveText]}>
+                Archive Exam
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setDeleteConfirmVisible(true);
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuDeleteText]}>
+                Delete Exam
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
+
+      {viewCodeVisible ? (
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setViewCodeVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.codeCard}
+          >
+            <View style={styles.codeHeader}>
+              <Text style={styles.codeTitle}>Exam Code</Text>
+              <TouchableOpacity
+                style={styles.codeCloseButton}
+                onPress={() => setViewCodeVisible(false)}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.codeValue}>
+              {exam.metadata.examCode || "No exam code available"}
+            </Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
+
+      <ConfirmationModal
+        visible={archiveConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${exam.metadata.title}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveConfirmVisible(false)}
+        onConfirm={handleArchiveExam}
+      />
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${exam.metadata.title}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteConfirmVisible(false)}
+        onConfirm={handleDeleteExam}
+      />
+
+      <Toast />
+
     </SafeAreaView>
   );
 }
@@ -594,11 +755,96 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: "#98A2B3",
   },
+  headerCode: {
+    fontSize: 11,
+    marginTop: 3,
+    color: "#7B8494",
+    fontWeight: "600",
+  },
   headerAction: {
     width: 32,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  menuOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.18)",
+    justifyContent: "flex-start",
+    alignItems: "flex-end",
+    paddingTop: 112,
+    paddingHorizontal: 20,
+  },
+  examMenuContent: {
+    width: 196,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  menuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  menuArchiveText: {
+    color: "#F59E0B",
+  },
+  menuDeleteText: {
+    color: "#E24E5C",
+  },
+  codeCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  codeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  codeTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+  codeCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  codeValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#20BE7B",
+    textAlign: "center",
   },
   tabSwitcher: {
     flexDirection: "row",
@@ -734,17 +980,16 @@ const styles = StyleSheet.create({
     color: "#4f6b5a",
   },
   answerKeyGrid: {
-    gap: 18,
+    gap: 14,
   },
   answerKeyRow: {
     flexDirection: "row",
-    gap: 44,
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
   },
   answerKeyItem: {
-    width: 64,
+    width: 56,
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   questionNumber: {
     fontSize: 12,
@@ -752,21 +997,22 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   answerBubble: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#F3F4F6",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#D6F2DE",
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#B7E8C6",
     justifyContent: "center",
     alignItems: "center",
   },
   answerBubbleEmpty: {
     backgroundColor: "#F3F4F6",
+    borderColor: "#E5E7EB",
   },
   answerText: {
     fontSize: 13,
-    color: "#98A2B3",
+    color: "#16A34A",
     fontWeight: "700",
   },
   answerTextEmpty: {

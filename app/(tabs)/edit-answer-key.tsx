@@ -48,6 +48,8 @@ export default function EditAnswerKeyScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
+  const [examTitle, setExamTitle] = useState("Untitled Exam");
+  const [examCode, setExamCode] = useState("");
   const [choicesPerItem, setChoicesPerItem] = useState(4);
   const [answerKeyId, setAnswerKeyId] = useState("");
   const [answerKeyVersion, setAnswerKeyVersion] = useState(1);
@@ -270,6 +272,8 @@ export default function EditAnswerKeyScreen() {
 
           const numItems = examData.num_items || 20;
           const choices = examData.choices_per_item || 4;
+          setExamTitle(String(examData.title || "Untitled Exam"));
+          setExamCode(String(examData.examCode || "").trim());
           setChoicesPerItem(choices);
 
           const resolvedAnswerKey = await resolveAnswerKeyDoc(
@@ -320,6 +324,8 @@ export default function EditAnswerKeyScreen() {
 
       const numItems = offlineExam.questions?.length || 20;
       const choices = 4;
+      setExamTitle(String(offlineExam.title || "Untitled Exam"));
+      setExamCode(String((offlineExam as any).examCode || "").trim());
       setChoicesPerItem(choices);
 
       const answerKeyIdStr = `ak_${examId}_offline`;
@@ -577,7 +583,11 @@ export default function EditAnswerKeyScreen() {
     return (
       <View style={[styles.container, { backgroundColor: colors.bg }]}>
         <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
-          <TouchableOpacity style={styles.backButton} onPress={goBack}>
+          <TouchableOpacity
+            style={[styles.backButton, saving && styles.headerActionDisabled]}
+            onPress={goBack}
+            disabled={saving}
+          >
             <Ionicons
               name="arrow-back"
               size={24}
@@ -606,22 +616,52 @@ export default function EditAnswerKeyScreen() {
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
-        <TouchableOpacity style={styles.backButton} onPress={goBack}>
+        <TouchableOpacity
+          style={[styles.backButton, saving && styles.headerActionDisabled]}
+          onPress={goBack}
+          disabled={saving}
+        >
           <Ionicons
             name="arrow-back"
             size={24}
             color={darkModeEnabled ? "#fff" : "#1D2433"}
           />
         </TouchableOpacity>
-        <Text
-          style={[
-            styles.headerTitle,
-            { color: darkModeEnabled ? "#fff" : "#1D2433" },
-          ]}
+        <View style={styles.headerCenter}>
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: darkModeEnabled ? "#fff" : "#1D2433" },
+            ]}
+            numberOfLines={1}
+          >
+            {examTitle}
+          </Text>
+          {examCode ? (
+            <Text
+              style={[
+                styles.headerCode,
+                { color: darkModeEnabled ? "#B8C1D1" : "#7B8494" },
+              ]}
+              numberOfLines={1}
+            >
+              {examCode}
+            </Text>
+          ) : null}
+          <Text
+            style={[
+              styles.headerSubtitle,
+              { color: darkModeEnabled ? "#B8C1D1" : "#98A1B2" },
+            ]}
+          >
+            {answers.length} Questions
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.closeButton, saving && styles.headerActionDisabled]}
+          onPress={goBack}
+          disabled={saving}
         >
-          Set Answer Key
-        </Text>
-        <TouchableOpacity style={styles.closeButton} onPress={goBack}>
           <Ionicons name="close" size={20} color="#A8AFBC" />
         </TouchableOpacity>
       </View>
@@ -722,10 +762,29 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 4,
   },
+  headerActionDisabled: {
+    opacity: 0.45,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: "800",
     color: "#1D2433",
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  headerCode: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "500",
   },
   closeButton: {
     width: 36,
@@ -754,32 +813,32 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    minHeight: 104,
-    paddingVertical: 18,
+    minHeight: 96,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderColor: "#E8EBF0",
   },
   questionNumber: {
-    width: 42,
-    fontSize: 28,
-    lineHeight: 32,
+    width: 52,
+    fontSize: 24,
+    lineHeight: 28,
     fontWeight: "700",
     color: "#98A1B2",
-    textAlign: "left",
+    textAlign: "center",
     fontVariant: ["tabular-nums"],
   },
   choicesContainer: {
     flexDirection: "row",
-    gap: 10,
+    gap: 8,
     flex: 1,
     justifyContent: "space-between",
-    marginLeft: 14,
+    marginLeft: 10,
   },
   choiceButton: {
-    width: 48,
-    height: 48,
+    width: 42,
+    height: 42,
     backgroundColor: "#F8FAFC",
-    borderRadius: 24,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
@@ -790,7 +849,7 @@ const styles = StyleSheet.create({
     borderColor: "#20BE7B",
   },
   choiceText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: "#8F98A8",
   },

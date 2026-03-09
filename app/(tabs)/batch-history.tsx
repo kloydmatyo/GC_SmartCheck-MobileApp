@@ -1,4 +1,5 @@
 import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import {
@@ -37,6 +38,11 @@ type ArchivedExam = {
   dateLabel: string;
 };
 
+type RestoreTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
 function formatDateLabel(value: any) {
   if (!value) return "No date";
   const parsed =
@@ -60,6 +66,7 @@ export default function ArchivedScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [archivedClasses, setArchivedClasses] = useState<ArchivedClass[]>([]);
   const [archivedExams, setArchivedExams] = useState<ArchivedExam[]>([]);
+  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget>(null);
 
   const loadArchivedItems = useCallback(() => {
     let active = true;
@@ -156,6 +163,7 @@ export default function ArchivedScreen() {
   const restoreClass = async (id: string) => {
     try {
       await updateDoc(doc(db, "classes", id), { isArchived: false });
+      setRestoreTarget(null);
       Toast.show({
         type: "success",
         text1: "Restored",
@@ -175,6 +183,7 @@ export default function ArchivedScreen() {
   const restoreExam = async (id: string) => {
     try {
       await updateDoc(doc(db, "exams", id), { isArchived: false });
+      setRestoreTarget(null);
       Toast.show({
         type: "success",
         text1: "Restored",
@@ -249,7 +258,13 @@ export default function ArchivedScreen() {
                       </View>
                       <TouchableOpacity
                         style={styles.restoreButton}
-                        onPress={() => restoreClass(item.id)}
+                        onPress={() =>
+                          setRestoreTarget({
+                            type: "class",
+                            id: item.id,
+                            title: item.title,
+                          })
+                        }
                       >
                         <Ionicons name="archive-outline" size={18} color="#20BE7B" />
                       </TouchableOpacity>
@@ -279,7 +294,13 @@ export default function ArchivedScreen() {
                       </View>
                       <TouchableOpacity
                         style={styles.restoreButton}
-                        onPress={() => restoreExam(item.id)}
+                        onPress={() =>
+                          setRestoreTarget({
+                            type: "exam",
+                            id: item.id,
+                            title: item.title,
+                          })
+                        }
                       >
                         <Ionicons name="archive-outline" size={18} color="#20BE7B" />
                       </TouchableOpacity>
@@ -310,6 +331,22 @@ export default function ArchivedScreen() {
       )}
 
       <Toast />
+      <ConfirmationModal
+        visible={Boolean(restoreTarget)}
+        title="Restore Item"
+        message={`Are you sure you want to restore ${restoreTarget?.title ?? "this item"}? It will appear again in its active section.`}
+        cancelText="Cancel"
+        confirmText="Restore"
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={() => {
+          if (!restoreTarget) return;
+          if (restoreTarget.type === "class") {
+            restoreClass(restoreTarget.id);
+            return;
+          }
+          restoreExam(restoreTarget.id);
+        }}
+      />
     </View>
   );
 }
