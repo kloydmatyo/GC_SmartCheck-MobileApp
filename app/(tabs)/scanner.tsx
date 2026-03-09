@@ -11,7 +11,7 @@ import HistoryList from "../../components/scanner/HistoryList";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function ScannerTab() {
-  const [showScanner, setShowScanner] = useState(false);
+  const [showScanner, setShowScanner] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
 
   if (showScanner) {
