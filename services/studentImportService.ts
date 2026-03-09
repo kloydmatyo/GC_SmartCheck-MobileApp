@@ -278,7 +278,7 @@ export class StudentImportService {
         rowNumber: row.rowNumber,
         field: "student_id",
         value: row.studentId,
-        error: "Invalid student ID format (must be 8 digits)",
+        error: "Invalid student ID format (must be 8-9 digits)",
         severity: "error",
       });
     }
@@ -633,19 +633,22 @@ export class StudentImportService {
         const studentsRef = collection(db, "students");
 
         batch.forEach((row) => {
-          const studentData: Omit<StudentExtended, "student_id"> & {
-            student_id: string;
-          } = {
+          const studentData: any = {
             student_id: row.studentId,
             first_name: row.firstName,
             last_name: row.lastName,
-            email: row.email,
-            section: row.section,
             is_active: true,
-            createdBy: currentUser.uid,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           };
+
+          // Only add optional fields if they have values
+          if (row.email) {
+            studentData.email = row.email;
+          }
+          if (row.section) {
+            studentData.section = row.section;
+          }
 
           const newDocRef = doc(studentsRef); // auto-generate Firestore doc ID
           firestoreBatch.set(newDocRef, studentData);
@@ -686,12 +689,24 @@ export class StudentImportService {
     result: ImportResult,
   ): Promise<void> {
     try {
-      const completedSession: ImportSession = {
-        ...session,
+      const completedSession: any = {
+        id: session.id,
+        filename: session.filename,
+        fileSize: session.fileSize,
+        startedAt: session.startedAt,
         completedAt: new Date().toISOString(),
-        status: result.errorCount > 0 ? "completed" : "completed",
-        result,
+        status: result.errorCount > 0 ? "completed_with_errors" : "completed",
+        totalRows: result.totalRows,
+        successCount: result.successCount,
+        errorCount: result.errorCount,
+        warningCount: result.warningCount,
+        duplicateCount: result.duplicateCount,
       };
+
+      // Only add userId if it exists
+      if (session.userId) {
+        completedSession.userId = session.userId;
+      }
 
       // REQ 28: Save import session to Firestore
       console.log("[Import] Session logged:", completedSession);
