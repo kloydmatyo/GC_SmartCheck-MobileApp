@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { auth } from "@/config/firebase";
+import React from "react";
 
 export default function Index() {
   const [authState, setAuthState] = useState<
