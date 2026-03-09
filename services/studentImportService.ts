@@ -21,6 +21,7 @@ import {
     where,
     writeBatch,
 } from "firebase/firestore";
+import * as XLSX from 'xlsx';
 import { StudentValidationService } from "./studentValidationService";
 // Offline cache disabled due to SQLite compatibility issues
 // import { StudentDatabaseService } from "./studentDatabaseService";
@@ -153,6 +154,82 @@ export class StudentImportService {
     }
 
     return rows;
+  }
+
+  /**
+   * REQ 24: Parse XLSX file content
+   */
+  static parseXLSX(fileContent: string): ImportRow[] {
+    try {
+      // Read the workbook from base64 string
+      const workbook = XLSX.read(fileContent, { type: 'base64' });
+      
+      // Get the first worksheet
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      
+      // Convert to JSON
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      
+      if (jsonData.length === 0) return [];
+      
+      // Parse headers
+      const headers = (jsonData[0] as string[]).map((h) => this.normalizeHeader(String(h || '')));
+      
+      // Parse rows
+      const rows: ImportRow[] = [];
+      
+      for (let i = 1; i < jsonData.length; i++) {
+        const values = jsonData[i] as any[];
+        
+        if (!values || values.length === 0) continue; // Skip empty rows
+        
+        const row: ImportRow = {
+          rowNumber: i + 1,
+          studentId: "",
+          firstName: "",
+          lastName: "",
+          email: undefined,
+          section: undefined,
+        };
+        
+        headers.forEach((header, index) => {
+          const value = String(values[index] || '').trim();
+          
+          switch (header) {
+            case "student_id":
+            case "studentid":
+            case "id":
+              row.studentId = value;
+              break;
+            case "first_name":
+            case "firstname":
+              row.firstName = value;
+              break;
+            case "last_name":
+            case "lastname":
+              row.lastName = value;
+              break;
+            case "email":
+              row.email = value;
+              break;
+            case "section":
+              row.section = value;
+              break;
+          }
+        });
+        
+        // Only add rows with at least a student ID
+        if (row.studentId) {
+          rows.push(row);
+        }
+      }
+      
+      return rows;
+    } catch (error) {
+      console.error('[Import] XLSX parsing failed:', error);
+      throw new Error('Failed to parse Excel file. Please ensure it is a valid .xlsx file.');
+    }
   }
 
   /**
@@ -413,24 +490,34 @@ export class StudentImportService {
         };
       }
 
-      // REQ 25: Validate headers before parsing
-      const headerErrors = this.validateCSVHeaders(fileContent);
-      if (headerErrors.length > 0) {
-        return {
-          totalRows: 0,
-          successCount: 0,
-          errorCount: headerErrors.length,
-          warningCount: 0,
-          duplicateCount: 0,
-          errors: headerErrors,
-          processedRows: [],
-          sessionId,
-          timestamp,
-        };
+      // Determine file type and parse accordingly
+      const isExcel = mimeType.includes('spreadsheet') || mimeType.includes('excel') || fileUri.endsWith('.xlsx');
+      let rows: ImportRow[];
+
+      if (isExcel) {
+        // Parse XLSX
+        rows = this.parseXLSX(fileContent);
+      } else {
+        // REQ 25: Validate headers before parsing CSV
+        const headerErrors = this.validateCSVHeaders(fileContent);
+        if (headerErrors.length > 0) {
+          return {
+            totalRows: 0,
+            successCount: 0,
+            errorCount: headerErrors.length,
+            warningCount: 0,
+            duplicateCount: 0,
+            errors: headerErrors,
+            processedRows: [],
+            sessionId,
+            timestamp,
+          };
+        }
+
+        // Parse CSV
+        rows = this.parseCSV(fileContent);
       }
 
-      // REQ 24: Parse file
-      const rows = this.parseCSV(fileContent);
       const totalRows = rows.length;
 
       onProgress?.(10);

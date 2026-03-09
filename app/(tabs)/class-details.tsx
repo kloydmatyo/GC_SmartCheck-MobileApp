@@ -2,6 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
 import {
     ActivityIndicator,
     Animated,
@@ -17,6 +19,7 @@ import {
 import Toast from "react-native-toast-message";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
+import { StudentImportService } from "../../services/studentImportService";
 import { Class, Student } from "../../types/class";
 
 export default function ClassDetailsScreen() {
@@ -42,6 +45,8 @@ export default function ClassDetailsScreen() {
     studentId: string;
     studentName: string;
   } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
 
   // Student form state
   const [studentForm, setStudentForm] = useState({
@@ -144,6 +149,79 @@ export default function ClassDetailsScreen() {
   const handleRemoveStudent = (studentId: string, studentName: string) => {
     setStudentToRemove({ studentId, studentName });
     setRemoveStudentConfirmVisible(true);
+  };
+
+  const handleBulkImport = async () => {
+    try {
+      // Pick document
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const file = result.assets[0];
+      
+      setImporting(true);
+      setImportProgress(0);
+
+      // Read file content
+      let fileContent: string;
+      
+      if (file.mimeType?.includes('spreadsheet') || file.mimeType?.includes('excel') || file.name.endsWith('.xlsx')) {
+        // For XLSX, read as base64
+        fileContent = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } else {
+        // For CSV, read as UTF8
+        fileContent = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+      }
+
+      // Process import
+      const importResult = await StudentImportService.processImport(
+        file.uri,
+        file.size || 0,
+        file.mimeType || 'text/csv',
+        fileContent,
+        (progress) => setImportProgress(progress),
+      );
+
+      // Show results
+      if (importResult.errorCount > 0) {
+        Toast.show({
+          type: 'warning',
+          text1: 'Import Completed with Errors',
+          text2: `${importResult.successCount} students added, ${importResult.errorCount} errors`,
+          visibilityTime: 4000,
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Import Successful',
+          text2: `${importResult.successCount} students added successfully`,
+        });
+      }
+
+      // Reload class data
+      await loadClassData();
+      
+    } catch (error) {
+      console.error('Import error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Import Failed',
+        text2: error instanceof Error ? error.message : 'Failed to import students',
+      });
+    } finally {
+      setImporting(false);
+      setImportProgress(0);
+    }
   };
 
   const filteredStudents = (classData?.students ?? []).filter((student) => {
@@ -437,12 +515,25 @@ export default function ClassDetailsScreen() {
                   : "Recent Quizzes"}
               </Text>
               {activeTab === "students" && (
-                <TouchableOpacity
-                  style={styles.addStudentButton}
-                  onPress={() => setAddStudentModalVisible(true)}
-                >
-                  <Ionicons name="add" size={18} color="#fff" />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                  <TouchableOpacity
+                    style={styles.importButton}
+                    onPress={handleBulkImport}
+                    disabled={importing}
+                  >
+                    {importing ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.addStudentButton}
+                    onPress={() => setAddStudentModalVisible(true)}
+                  >
+                    <Ionicons name="add" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           )}
@@ -816,6 +907,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#214132",
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  importButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#2d7a5f",
+    alignItems: "center",
+    justifyContent: "center",
   },
   addStudentButton: {
     width: 28,
