@@ -13,6 +13,29 @@ import {
 } from "firebase/firestore";
 import { Class, CreateClassData, Student } from "../types/class";
 
+function getClassSortTime(item: {
+  createdAt?: Date;
+  updatedAt?: Date;
+  created_at?: string;
+}) {
+  if (item.createdAt instanceof Date && !Number.isNaN(item.createdAt.getTime())) {
+    return item.createdAt.getTime();
+  }
+
+  if (item.updatedAt instanceof Date && !Number.isNaN(item.updatedAt.getTime())) {
+    return item.updatedAt.getTime();
+  }
+
+  if (item.created_at) {
+    const parsed = new Date(item.created_at);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.getTime();
+    }
+  }
+
+  return 0;
+}
+
 export class ClassService {
   private static COLLECTION = "classes";
 
@@ -82,6 +105,8 @@ export class ClassService {
           updatedAt: data.updatedAt?.toDate(),
         });
       });
+
+      classes.sort((a, b) => getClassSortTime(b) - getClassSortTime(a));
 
       return classes;
     } catch (error) {

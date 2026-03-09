@@ -5,7 +5,9 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Animated,
+    Dimensions,
     FlatList,
+    GestureResponderEvent,
     Modal,
     Platform,
     ScrollView,
@@ -21,6 +23,10 @@ import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const CLASS_MENU_WIDTH = 190;
+const CLASS_MENU_HEIGHT = 116;
 
 function AnimatedFillBar({
   progress,
@@ -72,6 +78,7 @@ export default function ClassesScreen() {
   const [creating, setCreating] = useState(false);
   const [classMenuVisible, setClassMenuVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  const [classMenuPosition, setClassMenuPosition] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     if (
@@ -278,10 +285,7 @@ export default function ClassesScreen() {
               <TouchableOpacity
                 style={styles.cardMenuButton}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                onPress={() => {
-                  setSelectedClass(item);
-                  setClassMenuVisible(true);
-                }}
+                onPress={(event) => openClassMenu(event, item)}
               >
                 <Ionicons
                   name="ellipsis-vertical"
@@ -307,6 +311,27 @@ export default function ClassesScreen() {
         </View>
       </TouchableOpacity>
     );
+  };
+
+  const openClassMenu = (event: GestureResponderEvent, classItem: Class) => {
+    const { pageX, pageY } = event.nativeEvent;
+    const left = Math.min(
+      Math.max(12, pageX - CLASS_MENU_WIDTH + 28),
+      SCREEN_WIDTH - CLASS_MENU_WIDTH - 12,
+    );
+    const top = Math.min(
+      Math.max(80, pageY - 8),
+      SCREEN_HEIGHT - CLASS_MENU_HEIGHT - 24,
+    );
+
+    setSelectedClass(classItem);
+    setClassMenuPosition({ top, left });
+    setClassMenuVisible(true);
+  };
+
+  const closeClassMenu = () => {
+    setClassMenuVisible(false);
+    setSelectedClass(null);
   };
 
   const handleArchiveClass = async (classItem: Class) => {
@@ -537,17 +562,34 @@ export default function ClassesScreen() {
         visible={classMenuVisible}
         animationType="fade"
         transparent
-        onRequestClose={() => setClassMenuVisible(false)}
+        onRequestClose={closeClassMenu}
       >
         <TouchableOpacity
           style={styles.menuOverlay}
           activeOpacity={1}
-          onPress={() => setClassMenuVisible(false)}
+          onPress={closeClassMenu}
         >
-          <View style={styles.menuContent}>
-            <Text style={styles.menuTitle}>
-              {selectedClass?.class_name ?? "Class"}
-            </Text>
+          <View
+            style={[
+              styles.menuContent,
+              {
+                top: classMenuPosition.top,
+                left: classMenuPosition.left,
+              },
+            ]}
+          >
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle}>
+                {selectedClass?.class_name ?? "Class"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={closeClassMenu}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={styles.menuAction}
               onPress={() => {
@@ -974,13 +1016,11 @@ const styles = StyleSheet.create({
   menuOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.08)",
-    justifyContent: "flex-start",
-    alignItems: "flex-end",
-    padding: 20,
-    paddingTop: 190,
+    position: "relative",
   },
   menuContent: {
-    width: 170,
+    position: "absolute",
+    width: CLASS_MENU_WIDTH,
     backgroundColor: COLORS.white,
     borderRadius: 14,
     paddingVertical: 10,
@@ -990,13 +1030,28 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 8,
   },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 4,
+  },
   menuTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#2f433a",
-    marginBottom: 2,
-    paddingHorizontal: 14,
+    flex: 1,
     paddingVertical: 6,
+    paddingRight: 8,
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
   },
   menuAction: {
     flexDirection: "row",

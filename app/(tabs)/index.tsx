@@ -403,7 +403,7 @@ export default function HomeScreen() {
               onPress={() => setSettingsMenuVisible(true)}
               activeOpacity={0.85}
             >
-              <Ionicons name="settings-outline" size={18} color="#7C8494" />
+              <Ionicons name="settings-sharp" size={18} color="#111827" />
             </TouchableOpacity>
           </View>
 

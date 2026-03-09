@@ -165,6 +165,7 @@ export default function TabLayout() {
         name="quizzes"
         options={{
           title: "Results",
+          unmountOnBlur: true,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "clipboard" : "clipboard-outline"}

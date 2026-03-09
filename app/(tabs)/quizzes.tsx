@@ -5,6 +5,7 @@ import { useFocusEffect } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  FlatList,
   Share,
   ScrollView,
   StyleSheet,
@@ -277,93 +278,106 @@ export default function ResultsScreen() {
     }
   }, [filteredResults]);
 
+  const renderResultCard = useCallback(({ item }: { item: ResultRow }) => {
+    const tone = scoreTone(item.percentage);
+
+    return (
+      <TouchableOpacity style={styles.resultCard} activeOpacity={0.88}>
+        <View style={[styles.scoreCircle, { backgroundColor: tone.badge }]}>
+          <Text style={[styles.scoreCircleText, { color: tone.text }]}>
+            {item.percentage}%
+          </Text>
+        </View>
+        <View style={styles.resultBody}>
+          <Text style={styles.resultName}>{item.studentName}</Text>
+          <Text style={styles.resultMeta}>
+            {item.classLabel} • {item.examLabel}
+          </Text>
+          <View style={styles.resultFooter}>
+            <Text style={styles.resultDate}>{item.dateLabel}</Text>
+            <Text style={styles.resultCorrect}>{item.correctLabel}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }, []);
+
+  const renderHeader = useCallback(
+    () => (
+      <>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>All Results</Text>
+          <TouchableOpacity style={styles.exportButton} onPress={handleExport}>
+            <Ionicons name="download-outline" size={18} color="#19B97C" />
+            <Text style={styles.exportText}>Export</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={22} color="#C4CAD5" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by student, class, or exam..."
+            placeholderTextColor="#C4CAD5"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+        >
+          {displayClassFilters.map((filter) => (
+            <TouchableOpacity
+              key={filter}
+              style={[
+                styles.chip,
+                selectedClass === filter && styles.chipActive,
+              ]}
+              onPress={() => setSelectedClass(filter)}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  selectedClass === filter && styles.chipTextActive,
+                ]}
+              >
+                {filter}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </>
+    ),
+    [displayClassFilters, handleExport, searchQuery, selectedClass],
+  );
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>All Results</Text>
-        <TouchableOpacity
-          style={styles.exportButton}
-          onPress={handleExport}
-        >
-          <Ionicons name="download-outline" size={18} color="#19B97C" />
-          <Text style={styles.exportText}>Export</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={22} color="#C4CAD5" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by student, class, or exam..."
-          placeholderTextColor="#C4CAD5"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsRow}
-      >
-        {displayClassFilters.map((filter) => (
-          <TouchableOpacity
-            key={filter}
-            style={[
-              styles.chip,
-              selectedClass === filter && styles.chipActive,
-            ]}
-            onPress={() => setSelectedClass(filter)}
-          >
-            <Text
-              style={[
-                styles.chipText,
-                selectedClass === filter && styles.chipTextActive,
-              ]}
-            >
-              {filter}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-
-      {loading ? (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color="#20BE7B" />
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.listContent}>
-          {displayResults.map((item) => {
-            const tone = scoreTone(item.percentage);
-            return (
-              <TouchableOpacity key={item.id} style={styles.resultCard} activeOpacity={0.88}>
-                <View style={[styles.scoreCircle, { backgroundColor: tone.badge }]}>
-                  <Text style={[styles.scoreCircleText, { color: tone.text }]}>
-                    {item.percentage}%
-                  </Text>
-                </View>
-                <View style={styles.resultBody}>
-                  <Text style={styles.resultName}>{item.studentName}</Text>
-                  <Text style={styles.resultMeta}>
-                    {item.classLabel} • {item.examLabel}
-                  </Text>
-                  <View style={styles.resultFooter}>
-                    <Text style={styles.resultDate}>{item.dateLabel}</Text>
-                    <Text style={styles.resultCorrect}>{item.correctLabel}</Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-
-          {!displayResults.length && (
+      <FlatList
+        data={loading ? [] : displayResults}
+        keyExtractor={(item) => item.id}
+        renderItem={renderResultCard}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color="#20BE7B" />
+            </View>
+          ) : (
             <View style={styles.emptyState}>
               <Ionicons name="clipboard-outline" size={44} color="#C5CBD6" />
               <Text style={styles.emptyTitle}>No results found</Text>
             </View>
-          )}
-        </ScrollView>
-      )}
+          )
+        }
+        ItemSeparatorComponent={() => <View style={styles.resultSeparator} />}
+        style={styles.list}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
 
       <Toast />
     </View>
@@ -374,13 +388,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F7F7F8",
-    paddingTop: 56,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
+    paddingTop: 56,
     marginBottom: 20,
   },
   headerTitle: {
@@ -443,16 +457,19 @@ const styles = StyleSheet.create({
   chipTextActive: {
     color: "#FFFFFF",
   },
-  loadingWrap: {
+  list: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
   },
   listContent: {
-    paddingHorizontal: 20,
-    paddingTop: 2,
     paddingBottom: 120,
-    gap: 14,
+  },
+  loadingWrap: {
+    alignItems: "center",
+    paddingTop: 32,
+    paddingBottom: 40,
+  },
+  resultSeparator: {
+    height: 14,
   },
   resultCard: {
     flexDirection: "row",
@@ -462,6 +479,7 @@ const styles = StyleSheet.create({
     borderColor: "#E8EBF0",
     paddingHorizontal: 14,
     paddingVertical: 14,
+    marginHorizontal: 20,
   },
   scoreCircle: {
     width: 56,
@@ -504,6 +522,7 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: "center",
+    paddingHorizontal: 20,
     paddingVertical: 60,
   },
   emptyTitle: {
