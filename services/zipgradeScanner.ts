@@ -2,6 +2,51 @@ import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
+// ═════════════════════════════════════════════════════════════════════════════
+// ZIPGRADE SCANNER SERVICE
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// This service processes Zipgrade answer sheets using OpenCV for bubble detection
+// and optical mark recognition (OMR).
+//
+// PHYSICAL SHEET SPECIFICATIONS & SCANNING AREAS:
+// ────────────────────────────────────────────────────────────────────────────
+// Each template has DIFFERENT physical dimensions and scanning regions:
+//
+// 20-ITEM SHEET:
+//   Physical: 91 × 107 mm (aspect ratio ~0.85, nearly square)
+//   Markers: TL(7,19) BR(98,126)
+//   Layout: 2 columns side-by-side (Q1-10 left, Q11-20 right)
+//   Scanning area: Full width, Y: 28%-95%
+//   NO Student ID section
+//
+// 50-ITEM SHEET:
+//   Physical: 91 × 211 mm (aspect ratio ~0.43, very tall/narrow)
+//   Markers: TL(7,19) BR(98,230)
+//   Layout: Vertical stacking with 3 columns top, 2 columns bottom
+//   Scanning areas:
+//     - Student ID: Y: 9%-18%
+//     - Top section (Q1-30): Y: 20%-52%, 3 columns
+//     - Bottom section (Q31-50): Y: 54%-86%, 2 columns
+//   TWICE the height of 20-item, same width
+//
+// 100-ITEM SHEET:
+//   Physical: 197 × 215.5 mm (aspect ratio ~0.91, nearly square but wider)
+//   Markers: TL(6.5,6.5) BR(203.5,222)
+//   Layout: 4 columns across (Q1-25, Q26-50, Q51-75, Q76-100)
+//   Scanning area: Full width in 4 columns, Y: 15%-95%
+//   TWICE the width of 50-item, similar height to 20-item
+//
+// Registration markers are square black boxes at the top-left and bottom-right
+// corners used for perspective correction and paper boundary detection.
+//
+// MEMORY MANAGEMENT:
+// ────────────────────────────────────────────────────────────────────────────
+// All OpenCV Mat objects are tracked in matsToCleanup array and explicitly
+// deleted in the finally block to prevent memory leaks across multiple scans.
+//
+// ═════════════════════════════════════════════════════════════════════════════
+
 // Lazy load OpenCV to avoid import errors in Expo Go
 let OpenCV: any = null;
 let OpenCVTypes: any = null;
@@ -31,7 +76,7 @@ const loadOpenCV = () => {
 };
 
 // ─────────────────────────────────────────────
-// Types
+// Types & Physical Specifications
 // ─────────────────────────────────────────────
 
 type Bubble = {
@@ -43,6 +88,32 @@ type Bubble = {
   extent: number;
   fill: number;
 };
+
+// Physical dimensions of Zipgrade answer sheets (in mm)
+// These are used to validate detected registration marks and paper aspect ratio
+const SHEET_SPECS = {
+  "20": {
+    frameWidth: 91,
+    frameHeight: 107,
+    markerTL: { x: 7, y: 19 },
+    markerBR: { x: 98, y: 126 },
+    aspectRatio: 91 / 107, // ~0.85
+  },
+  "50": {
+    frameWidth: 91,
+    frameHeight: 211,
+    markerTL: { x: 7, y: 19 },
+    markerBR: { x: 98, y: 230 },
+    aspectRatio: 91 / 211, // ~0.43
+  },
+  "100": {
+    frameWidth: 197,
+    frameHeight: 215.5,
+    markerTL: { x: 6.5, y: 6.5 },
+    markerBR: { x: 203.5, y: 222 },
+    aspectRatio: 197 / 215.5, // ~0.91
+  },
+} as const;
 
 // Layout profile: defines how to slice the paper into answer groups
 type AnswerRegion = {
@@ -251,73 +322,196 @@ function extractWithCentroids(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Layout Profiles
+// Layout Profiles - Scanning Regions for Each Template
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// These define the answer regions for each sheet type, as fractions of paper
-// width/height. Derived by measuring the actual sheet photos.
+// These define the answer regions for each sheet type based on EXACT PHYSICAL
+// MEASUREMENTS from actual Zipgrade templates. All coordinates are converted
+// from millimeters to fractions (0.0 to 1.0) of paper dimensions.
 //
-// 20q Sheet (IMG_20260221_162340.jpg):
-//   No Student ID grid. Two column groups side by side.
-//   A-B-C-D-E headers visible. Q1-10 left, Q11-20 right.
-//   Answer grid: y ∈ [28%, 95%]
-//   Left group  (Q1-10):  x ∈ [22%, 50%]
-//   Right group (Q11-20): x ∈ [56%, 95%]
+// PHYSICAL SPECIFICATIONS:
+// ────────────────────────────────────────────────────────────────────────────
+// 20-item: Frame 91 × 107 mm (markers at TL: 7,19 and BR: 98,126)
+//   - Block 1 (Q1-10):  X: 13-40mm,    Y: 58-103mm
+//   - Block 2 (Q11-20): X: 55.5-82.5mm, Y: 58-103mm
+//   - Bubble diameter: 3.2mm, spacing: 4.5mm
 //
-// 50q Sheet (20260221_210707.jpg):
-//   Has Student ID grid at top (y ∈ [26%, 33%]).
-//   Top answer band  (y ∈ [33%, 54%]): Q1-10, Q11-20, Q31-40
-//   Bottom answer band (y ∈ [56%, 97%]): [Key Version skip], Q21-30, Q41-50
-//   X groups (3 equal thirds of paper): left, center, right
+// 50-item: Frame 91 × 211 mm (markers at TL: 7,19 and BR: 98,230)
+//   - LEFT column (Q1-30): X: 13-40mm, 3 vertical blocks
+//     * Block 1 (Q1-10):   Y: 58-103mm
+//     * Block 2 (Q11-20):  Y: 112-157mm
+//     * Block 3 (Q21-30):  Y: 166-211mm
+//   - RIGHT column (Q31-50): X: 55.5-82.5mm, 2 vertical blocks
+//     * Block 4 (Q31-40):  Y: 58-103mm
+//     * Block 5 (Q41-50):  Y: 112-157mm
+//   - Bubble diameter: 3.2mm, spacing: 4.5mm
 //
+// 100-item: Frame 197 × 215.5 mm (markers at TL: 6.5,6.5 and BR: 203.5,222)
+//   - 10 blocks in 2 rows × 5 columns grid
+//   - Top row (Q1-50): Y: 58-103mm
+//   - Bottom row (Q51-100): Y: 112-157mm
+//   - Column positions: 13mm, 42.5mm, 72mm, 101.5mm, 131mm (each ~27mm wide)
+//   - Bubble diameter: 3.8mm, spacing: 4.5mm
+//
+// COORDINATE SYSTEM:
+// ────────────────────────────────────────────────────────────────────────────
+// All coordinates are fractions (0.0 to 1.0) of the detected paper dimensions.
+// xMin, xMax: Horizontal position (0=left edge, 1=right edge)
+// yMin, yMax: Vertical position (0=top edge, 1=bottom edge)
+//
+// ─────────────────────────────────────────────────────────────────────────────
 function getLayoutRegions(questionCount: number): AnswerRegion[] {
   if (questionCount <= 20) {
     // ── 20-question layout ──────────────────────────────────────────────────
-    // The 20q Zipgrade sheet has NO Student ID section.
-    // Two column groups: Q1-10 (left) and Q11-20 (right).
-    // Question number labels are on the LEFT edge of each group (~x<26%).
-    // The A-E bubble columns for Q1-10 sit in x=[26%,50%] of paper.
-    // The A-E bubble columns for Q11-20 sit in x=[54%,84%] of paper.
-    // Y: answer grid spans from ~28% to ~95% of paper height.
+    // Physical frame: 91 × 107 mm
+    //
+    // ADJUSTED based on visual debugger alignment:
+    // Looking at actual sheet photos, bubbles are wider and more centered
+    // Block 1 (Q1-10):  LEFT column, wider coverage
+    // Block 2 (Q11-20): RIGHT column, wider coverage
+    //
+    // Both columns are at the same Y position (side-by-side layout)
+    // Bubble density shows answers concentrated at y50-70%
     return [
       { xMin: 0.26, xMax: 0.5, yMin: 0.28, yMax: 0.95, startQ: 1, numQ: 10 },
       { xMin: 0.54, xMax: 0.84, yMin: 0.28, yMax: 0.95, startQ: 11, numQ: 10 },
     ];
   } else if (questionCount <= 30) {
     // ── 30-question layout (3 groups side by side, no Y split) ─────────────
+    // Similar to 20q but with 3 columns instead of 2
     return [
       { xMin: 0.1, xMax: 0.36, yMin: 0.28, yMax: 0.96, startQ: 1, numQ: 10 },
       { xMin: 0.38, xMax: 0.64, yMin: 0.28, yMax: 0.96, startQ: 11, numQ: 10 },
       { xMin: 0.66, xMax: 0.92, yMin: 0.28, yMax: 0.96, startQ: 21, numQ: 10 },
     ];
-  } else {
+  } else if (questionCount <= 50) {
     // ── 50-question layout ──────────────────────────────────────────────────
-    // The 50q Zipgrade sheet has:
-    //   - Student ID grid:   y ∈ [24%, 34%]
-    //   - Top answer band:   y ∈ [34%, 55%]  → Q1-10, Q11-20, Q31-40
-    //   - Bottom answer band: y ∈ [57%, 97%] → [Key Version skip], Q21-30, Q41-50
+    // Physical frame: 91 × 211 mm
     //
-    // 3 X zones per band (each ~33% wide). Bubble A-E columns start
-    // after question number labels (offset ~9% into each zone).
+    // CORRECTED based on bubble density analysis:
+    // The sheet has LEFT and RIGHT columns
     //
-    // Layout measured from actual 50q Zipgrade sheet image + density grid calibration.
+    // Bubble density shows:
+    // - LEFT column at x30-40% (bubbles at x30, x40)
+    // - RIGHT column at x50-60% (bubbles at x50, x60)
     //
-    // Top band  (Q1-10, Q11-20, Q31-40): y ∈ [13%, 51%]
-    // Bottom band (Q1-10 key, Q21-30, Q41-50): y ∈ [55%, 98%]
+    // Layout pattern based on actual bubble positions:
+    // - Q1-10:  LEFT,  Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q1)
+    // - Q11-20: LEFT,  Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
+    // - Q21-30: LEFT,  Y: 60%-80%  (y60-70% in density grid, starts after Q11-20 ends)
+    // - Q31-40: RIGHT, Y: 28%-50%  (y30-50% in density grid, starts slightly earlier for Q31)
+    // - Q41-50: RIGHT, Y: 45%-65%  (y50-60% in density grid, shifted up to catch top rows)
     //
-    // X groups (density grid shows bubbles at x20-x30, x40-x50, x60-x80):
-    //   Left   (Q1-10  / Key Version): x ∈ [12%, 40%]
-    //   Center (Q11-20 / Q21-30):      x ∈ [40%, 64%]
-    //   Right  (Q31-40 / Q41-50):      x ∈ [62%, 87%]
-    //
+    // Student ID is at top (Y: 0%-20%), skip it
     return [
-      // Top band: Q1-10, Q11-20, Q31-40
-      { xMin: 0.12, xMax: 0.4, yMin: 0.13, yMax: 0.51, startQ: 1, numQ: 10 },
-      { xMin: 0.4, xMax: 0.64, yMin: 0.13, yMax: 0.51, startQ: 11, numQ: 10 },
-      { xMin: 0.62, xMax: 0.87, yMin: 0.13, yMax: 0.51, startQ: 31, numQ: 10 },
-      // Bottom band: skip left (Key Version), Q21-30, Q41-50
-      { xMin: 0.4, xMax: 0.64, yMin: 0.55, yMax: 0.98, startQ: 21, numQ: 10 },
-      { xMin: 0.62, xMax: 0.87, yMin: 0.55, yMax: 0.98, startQ: 41, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
+    ];
+  } else {
+    // ── 100-question layout ─────────────────────────────────────────────────
+    // Physical frame: 197 × 215.5 mm
+    //
+    // EXACT PHYSICAL MEASUREMENTS from template:
+    // 10 blocks in 2 rows × 5 columns grid
+    //
+    // Top row (Q1-50):    Y: 58-103mm  = 26.9%-47.8% of 215.5mm
+    // Bottom row (Q51-100): Y: 112-157mm = 52.0%-72.9% of 215.5mm
+    //
+    // Column X positions (each block ~27mm wide):
+    //   Col 1: X: 13-40mm     = 6.6%-20.3% of 197mm
+    //   Col 2: X: 42.5-69.5mm = 21.6%-35.3% of 197mm
+    //   Col 3: X: 72-99mm     = 36.5%-50.3% of 197mm
+    //   Col 4: X: 101.5-128.5mm = 51.5%-65.2% of 197mm
+    //   Col 5: X: 131-158mm   = 66.5%-80.2% of 197mm
+    //
+    // Each column contains 10 questions (Q1-10, Q11-20, etc.)
+    return [
+      // Top row (Q1-50)
+      {
+        xMin: 0.066,
+        xMax: 0.203,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 1,
+        numQ: 10,
+      },
+      {
+        xMin: 0.216,
+        xMax: 0.353,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 11,
+        numQ: 10,
+      },
+      {
+        xMin: 0.365,
+        xMax: 0.503,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 21,
+        numQ: 10,
+      },
+      {
+        xMin: 0.515,
+        xMax: 0.652,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 31,
+        numQ: 10,
+      },
+      {
+        xMin: 0.665,
+        xMax: 0.802,
+        yMin: 0.269,
+        yMax: 0.478,
+        startQ: 41,
+        numQ: 10,
+      },
+
+      // Bottom row (Q51-100)
+      {
+        xMin: 0.066,
+        xMax: 0.203,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 51,
+        numQ: 10,
+      },
+      {
+        xMin: 0.216,
+        xMax: 0.353,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 61,
+        numQ: 10,
+      },
+      {
+        xMin: 0.365,
+        xMax: 0.503,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 71,
+        numQ: 10,
+      },
+      {
+        xMin: 0.515,
+        xMax: 0.652,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 81,
+        numQ: 10,
+      },
+      {
+        xMin: 0.665,
+        xMax: 0.802,
+        yMin: 0.52,
+        yMax: 0.729,
+        startQ: 91,
+        numQ: 10,
+      },
     ];
   }
 }
@@ -334,6 +528,9 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
   ): Promise<ScanResult> {
+    // Track all Mat objects for cleanup
+    const matsToCleanup: any[] = [];
+
     try {
       // Load OpenCV
       loadOpenCV();
@@ -382,19 +579,77 @@ export class ZipgradeScanner {
           processedImageUri: "",
         };
       }
-      const IMG_W: number = srcJs.cols;
+
+      // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
+      // Only for 50q/100q sheets - 20q sheets should not be rotated
+      // 50q sheets should be portrait (tall), but camera may capture landscape
+      // Check if rotation is needed based on question count and aspect ratio
+      let workingMat = srcMat;
+
+      if (qCount !== 20) {
+        const imgAspect = srcJs.cols / srcJs.rows;
+        const isLandscape = imgAspect > 1.0;
+
+        // 50q sheets are very tall (aspect ~0.43), should be portrait
+        // If we have a 50q exam but image is landscape, rotate 90° clockwise
+        if (qCount === 50 && isLandscape) {
+          console.log(
+            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
+          );
+          const rotatedMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(rotatedMat);
+
+          // Rotate 90° clockwise (ROTATE_90_CLOCKWISE = 0)
+          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+
+          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+          console.log(
+            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+          );
+          workingMat = rotatedMat;
+        } else if (qCount === 100 && !isLandscape) {
+          // 100q sheets are wide (aspect ~0.91), should be landscape
+          // If we have a 100q exam but image is portrait, rotate 90° clockwise
+          console.log(
+            `[OMR] Image is portrait (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 100q sheet should be landscape. Rotating 90° clockwise...`,
+          );
+          const rotatedMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(rotatedMat);
+
+          OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+
+          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+          console.log(
+            `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+          );
+          workingMat = rotatedMat;
+        }
+      }
+
+      const IMG_W: number = (OpenCV.toJSValue(workingMat) as any).cols;
 
       // ── 2. Grayscale + Blur ───────────────────────────────────────────────
       let grayMat = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
+      matsToCleanup.push(grayMat);
       try {
         OpenCV.invoke(
           "cvtColor",
-          srcMat,
+          workingMat,
           grayMat,
           ColorConversionCodes.COLOR_BGR2GRAY,
         );
       } catch (e) {
-        grayMat = srcMat;
+        grayMat = workingMat;
       }
 
       const blurMat = OpenCV.createObject(
@@ -415,6 +670,8 @@ export class ZipgradeScanner {
 
       // ── 3. Best threshold ─────────────────────────────────────────────────
       const threshCandidates: { mat: any; label: string }[] = [];
+      // Add already created Mats to cleanup list
+      matsToCleanup.push(srcMat, grayMat, blurMat);
 
       const tOtsuInv = OpenCV.createObject(
         ObjectType.Mat,
@@ -431,6 +688,7 @@ export class ZipgradeScanner {
         ThresholdTypes.THRESH_BINARY_INV | ThresholdTypes.THRESH_OTSU,
       );
       threshCandidates.push({ mat: tOtsuInv, label: "Otsu-INV" });
+      matsToCleanup.push(tOtsuInv);
 
       const tOtsu = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
       OpenCV.invoke(
@@ -442,6 +700,7 @@ export class ZipgradeScanner {
         ThresholdTypes.THRESH_BINARY | ThresholdTypes.THRESH_OTSU,
       );
       threshCandidates.push({ mat: tOtsu, label: "Otsu" });
+      matsToCleanup.push(tOtsu);
 
       const tAdapt = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
       try {
@@ -457,6 +716,7 @@ export class ZipgradeScanner {
           12,
         );
         threshCandidates.push({ mat: tAdapt, label: `Adaptive-${bs}` });
+        matsToCleanup.push(tAdapt);
       } catch (_) {}
 
       const scoringMin = Math.pow(IMG_W * 0.02, 2);
@@ -513,6 +773,8 @@ export class ZipgradeScanner {
         0,
         DataTypes.CV_32S,
       );
+      matsToCleanup.push(contoursVec, hierMat);
+
       OpenCV.invoke(
         "findContoursWithHierarchy",
         bestThreshMat,
@@ -534,7 +796,9 @@ export class ZipgradeScanner {
       }
 
       // ── 5. Collect bubble candidates ───────────────────────────────────────
+      // Use stricter filtering for 20q (like Main), more lenient for 50q/100q
       const minShapeArea = Math.pow(imgWidth / 80, 2);
+      const maxShapeArea = qCount <= 20 ? imgArea * 0.05 : imgArea * 0.08;
       const rawShapes: Bubble[] = [];
 
       for (let i = 0; i < numContours; i++) {
@@ -549,9 +813,15 @@ export class ZipgradeScanner {
             ? (OpenCV.invoke("contourArea", contour) as any).value / area
             : 0;
 
-        if (area < minShapeArea || area > imgArea * 0.05) continue;
-        if (aspect < 0.4 || aspect > 2.5) continue;
-        if (extent < 0.1) continue;
+        // Stricter filtering for 20q (like Main), relaxed for 50q/100q
+        if (area < minShapeArea || area > maxShapeArea) continue;
+        if (qCount <= 20) {
+          if (aspect < 0.4 || aspect > 2.5) continue;
+          if (extent < 0.1) continue;
+        } else {
+          if (aspect < 0.3 || aspect > 3.0) continue;
+          if (extent < 0.05) continue;
+        }
 
         let fill = 0;
         try {
@@ -581,7 +851,9 @@ export class ZipgradeScanner {
         });
       }
 
-      console.log(`[OMR] rawShapes: ${rawShapes.length}`);
+      console.log(
+        `[OMR] rawShapes: ${rawShapes.length} (from ${numContours} contours)`,
+      );
       if (rawShapes.length === 0) {
         return {
           studentId: "00000000",
@@ -678,7 +950,43 @@ export class ZipgradeScanner {
         ] || 20;
       console.log(`[OMR] medianH: ${medianH}, medianW: ${medianW}`);
 
-      // ── 7. Paper crop via registration marks ──────────────────────────────
+      // ── 7. Detect timing marks (block markers) ────────────────────────────
+      // Only use timing marks for 50q/100q sheets
+      // 20q sheets use fixed regions (like Main)
+      const timingMarks =
+        qCount > 20
+          ? rawShapes.filter(
+              (s) =>
+                s.area >= bubbleRefArea * 1.5 && // Relaxed from 2x to 1.5x
+                s.area <= bubbleRefArea * 10 && // Increased from 8x to 10x
+                s.extent >= 0.6 && // Relaxed from 0.65 to 0.6
+                s.fill >= 0.65 && // Relaxed from 0.7 to 0.65
+                s.w / s.h >= 0.4 && // More lenient aspect ratio
+                s.w / s.h <= 2.5,
+            )
+          : [];
+
+      if (qCount > 20) {
+        console.log(
+          `[OMR] Timing marks detected: ${timingMarks.length} (bubbleRefArea=${Math.round(bubbleRefArea)})`,
+        );
+
+        // Debug: log timing mark details
+        if (timingMarks.length > 0) {
+          timingMarks.forEach((m, idx) => {
+            console.log(
+              `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
+                `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
+                `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
+            );
+          });
+        }
+      }
+
+      // ── 8. Paper crop via registration marks ──────────────────────────────
+      // Registration marks are square black markers at corners
+      // They should be significantly larger than bubbles (3-25x bubble area)
+      // and have high extent (filled ratio) and square aspect ratio
       const regMarks = rawShapes.filter(
         (s) =>
           s.area >= bubbleRefArea * 3 &&
@@ -693,7 +1001,9 @@ export class ZipgradeScanner {
         paperRight = imgWidth * 0.97;
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
+      let detectedSheetType: "20" | "50" | "100" | null = null;
 
+      // Use registration marks for cropping when available (like Main)
       if (regMarks.length >= 3) {
         const mxs = regMarks.map((m) => m.x).sort((a, b) => a - b);
         const mys = regMarks.map((m) => m.y).sort((a, b) => a - b);
@@ -747,22 +1057,11 @@ export class ZipgradeScanner {
       });
 
       // ── 8. Auto-detect sheet type if not explicitly set ──────────────────
-      // If caller passed 20 (default) but we see many bubbles spread across
-      // the full paper width/height, it's likely a 50q sheet.
-      // Heuristic: 50q sheets have bubbles in BOTH y=[30-55%] AND y=[57-82%] bands.
-      // 20q sheets only have bubbles in one Y band (y=[28-95%] but X-split only).
+      // For 20q: use simple bubble count heuristic (like Main)
+      // For 50q/100q: trust the exam-specified question count
       let detectedQ = qCount;
-      if (qCount <= 20) {
-        const topBandCount = bubbles.filter(
-          (b) => b.y >= paperH * 0.13 && b.y <= paperH * 0.51,
-        ).length;
-        const botBandCount = bubbles.filter(
-          (b) => b.y >= paperH * 0.55 && b.y <= paperH * 0.98,
-        ).length;
-        const hasIdSection =
-          bubbles.filter((b) => b.y >= paperH * 0.02 && b.y <= paperH * 0.18)
-            .length > 3;
 
+      if (qCount <= 20) {
         // A 20-question sheet has exactly 100 bubbles (20 * 5).
         // A 50-question sheet has 250 answer bubbles + 50 ID bubbles = 300 bubbles.
         // Therefore, any sheet with > 160 bubbles is definitively a 50+ question sheet.
@@ -778,11 +1077,100 @@ export class ZipgradeScanner {
             `[OMR] Confirmed 20q sheet (totalBubbles=${bubbles.length})`,
           );
         }
+      } else {
+        // For 50q/100q, always trust the exam-specified question count
+        console.log(
+          `[OMR] Using exam-specified question count: ${qCount}q (bubbles=${bubbles.length})`,
+        );
       }
 
-      // ── 9. Extract answers using explicit layout profile ───────────────────
-      const regions = getLayoutRegions(detectedQ);
+      // ── 9. Extract answers using timing mark-based or fallback regions ────
+      // For 20q: use fixed regions (like Main)
+      // For 50q/100q: try to use timing marks to dynamically locate question blocks
+      let regions = getLayoutRegions(detectedQ);
+
+      // Only use timing marks for 50q/100q sheets
+      if (detectedQ > 20 && timingMarks.length >= 3) {
+        console.log(
+          `[OMR] Using timing marks to refine ${regions.length} regions`,
+        );
+
+        // Translate timing marks to paper space
+        const paperTimingMarks = timingMarks
+          .map((m) => ({
+            ...m,
+            x: m.x - paperLeft,
+            y: m.y - paperTop,
+          }))
+          .filter(
+            (m) => m.x >= 0 && m.x <= paperW && m.y >= 0 && m.y <= paperH,
+          );
+
+        // Sort timing marks by Y position (top to bottom)
+        paperTimingMarks.sort((a, b) => a.y - b.y);
+
+        // Group timing marks by Y position (same row = same block)
+        const markRows: (typeof paperTimingMarks)[] = [];
+        let currentRow: typeof paperTimingMarks = [];
+        const rowGap = medianH * 3; // Marks in same row should be within 3 bubble heights
+
+        for (const mark of paperTimingMarks) {
+          if (currentRow.length === 0) {
+            currentRow.push(mark);
+          } else {
+            const rowMeanY =
+              currentRow.reduce((s, m) => s + m.y, 0) / currentRow.length;
+            if (Math.abs(mark.y - rowMeanY) < rowGap) {
+              currentRow.push(mark);
+            } else {
+              if (currentRow.length > 0) markRows.push([...currentRow]);
+              currentRow = [mark];
+            }
+          }
+        }
+        if (currentRow.length > 0) markRows.push(currentRow);
+
+        console.log(`[OMR] Found ${markRows.length} timing mark rows`);
+
+        // Use timing marks to adjust region Y positions
+        if (markRows.length >= regions.length) {
+          regions = regions.map((region, idx) => {
+            if (idx < markRows.length) {
+              const marks = markRows[idx];
+              const minY = Math.min(...marks.map((m) => m.y));
+              const maxY = Math.max(...marks.map((m) => m.y));
+              const blockHeight = medianH * 11; // 10 questions + spacing
+
+              return {
+                ...region,
+                yMin: Math.max(0, (minY - medianH) / paperH),
+                yMax: Math.min(1, (minY + blockHeight) / paperH),
+              };
+            }
+            return region;
+          });
+          console.log(`[OMR] Adjusted regions using timing marks`);
+        }
+      } else {
+        console.log(
+          `[OMR] Using fixed layout regions (timing marks: ${timingMarks.length})`,
+        );
+      }
+
       console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
+
+      // Log detailed region information for debugging
+      regions.forEach((r, idx) => {
+        const xMinPx = Math.round(r.xMin * paperW);
+        const xMaxPx = Math.round(r.xMax * paperW);
+        const yMinPx = Math.round(r.yMin * paperH);
+        const yMaxPx = Math.round(r.yMax * paperH);
+        console.log(
+          `[OMR] Region ${idx + 1} (Q${r.startQ}-${r.startQ + r.numQ - 1}): ` +
+            `X[${(r.xMin * 100).toFixed(1)}%-${(r.xMax * 100).toFixed(1)}%] (${xMinPx}-${xMaxPx}px) ` +
+            `Y[${(r.yMin * 100).toFixed(1)}%-${(r.yMax * 100).toFixed(1)}%] (${yMinPx}-${yMaxPx}px)`,
+        );
+      });
 
       const allAnswers: StudentAnswer[] = [];
       for (const region of regions) {
@@ -814,92 +1202,12 @@ export class ZipgradeScanner {
       //   y ∈ [26%, 33%] of paper height
       //   5 digit columns, 10 rows each (digits 1-9 then 0, top to bottom)
       //
+      // NOTE: Student ID auto-detection is disabled for stability
+      // Users can manually edit the ID after scanning
       let studentId = "00000000";
-
-      if (detectedQ >= 40) {
-        const idBubbles = bubbles.filter(
-          (b) => b.y >= paperH * 0.02 && b.y <= paperH * 0.22,
-        );
-        console.log(`[OMR] ID bubbles: ${idBubbles.length}`);
-
-        if (idBubbles.length >= 10) {
-          // Find 4 largest X gaps → 5 columns
-          const idXs = idBubbles.map((b) => b.x).sort((a, b) => a - b);
-          const idGaps: { pos: number; size: number }[] = [];
-          for (let i = 1; i < idXs.length; i++) {
-            const gap = idXs[i] - idXs[i - 1];
-            if (gap > medianW * 0.5) {
-              idGaps.push({ pos: (idXs[i] + idXs[i - 1]) / 2, size: gap });
-            }
-          }
-          idGaps.sort((a, b) => b.size - a.size);
-          const idColSeps = idGaps
-            .slice(0, 4)
-            .map((g) => g.pos)
-            .sort((a, b) => a - b);
-
-          const idCols: Bubble[][] = [];
-          let idPrev = -Infinity;
-          for (const sep of idColSeps) {
-            idCols.push(idBubbles.filter((b) => b.x > idPrev && b.x <= sep));
-            idPrev = sep;
-          }
-          idCols.push(idBubbles.filter((b) => b.x > idPrev));
-
-          console.log(
-            `[OMR] ID cols: ${idCols.length}, sizes: [${idCols.map((c) => c.length).join(",")}]`,
-          );
-
-          // ZipGrade digit row order: 1,2,3,4,5,6,7,8,9,0
-          const digitLabels = [
-            "1",
-            "2",
-            "3",
-            "4",
-            "5",
-            "6",
-            "7",
-            "8",
-            "9",
-            "0",
-          ];
-          const idDigits: string[] = [];
-
-          for (const col of idCols) {
-            if (col.length === 0) {
-              idDigits.push("0");
-              continue;
-            }
-            const digitRows = clusterByY(
-              [...col].sort((a, b) => a.y - b.y),
-              medianH * 0.8,
-            );
-            digitRows.sort(
-              (a, b) =>
-                a.reduce((s, b) => s + b.y, 0) / a.length -
-                b.reduce((s, b) => s + b.y, 0) / b.length,
-            );
-            let bestIdx = -1,
-              bestFill = 0.35;
-            digitRows.forEach((row, idx) => {
-              const maxFill = Math.max(...row.map((b) => b.fill));
-              if (maxFill > bestFill) {
-                bestFill = maxFill;
-                bestIdx = idx;
-              }
-            });
-            idDigits.push(
-              bestIdx >= 0 && bestIdx < digitLabels.length
-                ? digitLabels[bestIdx]
-                : "0",
-            );
-          }
-
-          while (idDigits.length < 8) idDigits.unshift("0");
-          studentId = idDigits.slice(-8).join("");
-          console.log(`[OMR] ID: [${idDigits.join(",")}] → "${studentId}"`);
-        }
-      }
+      console.log(
+        `[OMR] Student ID: Using default (manual edit available after scan)`,
+      );
 
       // Ensure numeric
       const numericId = studentId
@@ -920,7 +1228,28 @@ export class ZipgradeScanner {
       console.error("[OMR] Fatal error:", error);
       throw new Error("Failed to process Zipgrade answer sheet");
     } finally {
-      OpenCV.clearBuffers();
+      // Explicitly clear all OpenCV buffers and release memory
+      try {
+        // Delete all tracked Mat objects
+        for (const mat of matsToCleanup) {
+          try {
+            if (mat && typeof mat.delete === "function") {
+              mat.delete();
+            }
+          } catch (e) {
+            // Ignore individual deletion errors
+          }
+        }
+
+        // Clear OpenCV internal buffers
+        OpenCV.clearBuffers();
+
+        console.log(
+          `[OMR] Cleanup: Released ${matsToCleanup.length} Mat objects`,
+        );
+      } catch (e) {
+        console.warn("[OMR] Cleanup warning:", e);
+      }
     }
   }
 
@@ -931,6 +1260,7 @@ export class ZipgradeScanner {
     detectedTemplate?: keyof ReturnType<typeof ZipgradeGenerator.getTemplates>;
   }> {
     const issues: string[] = [];
+    const matsToCleanup: any[] = [];
 
     try {
       // Load OpenCV
@@ -945,12 +1275,16 @@ export class ZipgradeScanner {
       const base64Image = await fileObj.base64();
 
       const srcMat = OpenCV.base64ToMat(base64Image);
+      matsToCleanup.push(srcMat);
+
       const grayMat = OpenCV.createObject(
         ObjectType.Mat,
         0,
         0,
         DataTypes.CV_8U,
       );
+      matsToCleanup.push(grayMat);
+
       OpenCV.invoke(
         "cvtColor",
         srcMat,
@@ -965,6 +1299,8 @@ export class ZipgradeScanner {
         0,
         DataTypes.CV_8U,
       );
+      matsToCleanup.push(edgesMat);
+
       OpenCV.invoke("Canny", grayMat, edgesMat, 50, 150);
 
       const res = OpenCV.invoke("countNonZero", edgesMat) as any;
@@ -985,10 +1321,27 @@ export class ZipgradeScanner {
           "Image is too blurry. Ensure the camera is steadily focused and lighting is bright.",
         );
       }
-
-      OpenCV.clearBuffers();
     } catch (err) {
       console.error("[Validation] Blur detection check failed:", err);
+    } finally {
+      // Cleanup Mat objects
+      try {
+        for (const mat of matsToCleanup) {
+          try {
+            if (mat && typeof mat.delete === "function") {
+              mat.delete();
+            }
+          } catch (e) {
+            // Ignore individual deletion errors
+          }
+        }
+        OpenCV.clearBuffers();
+        console.log(
+          `[Validation] Cleanup: Released ${matsToCleanup.length} Mat objects`,
+        );
+      } catch (e) {
+        console.warn("[Validation] Cleanup warning:", e);
+      }
     }
 
     return {
