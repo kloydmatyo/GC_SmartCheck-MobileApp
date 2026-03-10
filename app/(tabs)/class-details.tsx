@@ -517,13 +517,16 @@ export default function ClassDetailsScreen() {
       return (
         <>
           <View style={styles.searchRow}>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search students..."
-              placeholderTextColor="#C2C9D4"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={18} color="#9CA3AF" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search students..."
+                placeholderTextColor="#7B8794"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
             <TouchableOpacity
               style={styles.exportButton}
               onPress={() => setShowImportModal(true)}
@@ -1057,16 +1060,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
-  searchInput: {
+  searchWrap: {
     flex: 1,
     height: 42,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     borderWidth: 1,
     borderColor: "#E8EBF0",
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 42,
+    paddingHorizontal: 2,
     fontSize: 14,
-    color: "#1F2937",
+    color: "#111827",
+    fontWeight: "600",
   },
   exportButton: {
     width: 42,

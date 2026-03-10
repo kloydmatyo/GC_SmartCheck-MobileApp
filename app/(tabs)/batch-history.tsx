@@ -295,7 +295,7 @@ export default function ArchivedScreen() {
           placeholder={
             mode === "classes" ? "Search archived classes..." : "Search archived exams..."
           }
-          placeholderTextColor="#C4CAD5"
+          placeholderTextColor="#7B8794"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -562,7 +562,8 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: "#1F2937",
+    color: "#111827",
+    fontWeight: "600",
   },
   loadingWrap: {
     flex: 1,

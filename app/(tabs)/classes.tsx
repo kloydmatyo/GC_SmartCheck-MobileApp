@@ -523,10 +523,11 @@ export default function ClassesScreen() {
       </View>
 
       <View style={styles.searchContainer}>
+        <Ionicons name="search-outline" size={18} color="#9CA3AF" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search classes..."
-          placeholderTextColor="#C2C9D4"
+          placeholderTextColor="#7B8794"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -825,16 +826,23 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     marginTop: 6,
     marginBottom: 18,
-  },
-  searchInput: {
     height: 40,
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E8EBF0",
     borderRadius: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    paddingHorizontal: 2,
     fontSize: 14,
-    color: "#1F2937",
+    color: "#111827",
+    fontWeight: "600",
   },
   listContent: {
     paddingHorizontal: 22,
