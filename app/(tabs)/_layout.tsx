@@ -78,19 +78,19 @@ export default function TabLayout() {
 
   const tabColors = darkModeEnabled
     ? {
-        active: "#20BE7B",
-        inactive: "#A7B0BE",
-        bg: "#FFFFFF",
-        border: "#ECEEF2",
-        shadow: "#0F172A",
-      }
+      active: "#20BE7B",
+      inactive: "#A7B0BE",
+      bg: "#FFFFFF",
+      border: "#ECEEF2",
+      shadow: "#0F172A",
+    }
     : {
-        active: "#20BE7B",
-        inactive: "#A7B0BE",
-        bg: "#FFFFFF",
-        border: "#ECEEF2",
-        shadow: "#0F172A",
-      };
+      active: "#20BE7B",
+      inactive: "#A7B0BE",
+      bg: "#FFFFFF",
+      border: "#ECEEF2",
+      shadow: "#0F172A",
+    };
 
   return (
     <Tabs
@@ -159,6 +159,7 @@ export default function TabLayout() {
         options={{
           title: "Scanner",
           tabBarButton: (props) => <ScannerTabButton {...props} />,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen

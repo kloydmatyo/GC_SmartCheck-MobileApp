@@ -321,9 +321,9 @@ export default function HomeScreen() {
         const averageScore =
           scanRows.length > 0
             ? Math.round(
-                scanRows.reduce((sum, item) => sum + item.percentage, 0) /
-                  scanRows.length,
-              )
+              scanRows.reduce((sum, item) => sum + item.percentage, 0) /
+              scanRows.length,
+            )
             : 0;
 
         const recent = scanRows.slice(0, 4).map((scan) => {
@@ -496,7 +496,7 @@ export default function HomeScreen() {
                   styles.statCard,
                   styles.statCardStatic,
                   Platform.OS === "web"
-                    ? { cursor: card.route ? "pointer" : "default" }
+                    ? { cursor: card.route ? "pointer" : "auto" } as any
                     : null,
                 ]}
                 activeOpacity={card.route ? 0.82 : 1}
@@ -528,7 +528,9 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.quickScanButton}
-            onPress={() => router.push("/(tabs)/scanner")}
+            onPress={() =>
+              router.push(`/scanner?quick=${Date.now()}`)
+            }
             activeOpacity={0.9}
           >
             <Ionicons name="scan-outline" size={20} color="#FFFFFF" />

@@ -1,22 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Platform,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { ClassService } from "../../services/classService";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import {
-    DuplicateScoreDetectionService,
-    DuplicateScoreMatch,
+  DuplicateScoreDetectionService,
+  DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
@@ -30,14 +32,41 @@ type ScannerState = "exam-select" | "camera" | "results";
 interface ScannerScreenProps {
   onClose: () => void;
   sectionId?: string; // Section context for validation
+  /**
+   * value passed from the parent when a "quick scan" navigation occurs.
+   * changing this prop should reset the local scanner state so the user is
+   * shown the exam‑id entry screen rather than resuming whatever they were
+   * doing previously.
+   */
+  resetFlag?: string;
 }
 
-export default function ScannerScreen({ onClose }: ScannerScreenProps) {
+export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps) {
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
-  const [examIdInput, setExamIdInput] = useState("");
-  const [isValidatingExam, setIsValidatingExam] = useState(false);
+
+  // class/exam dropdown state
+  const [classesList, setClassesList] = useState<Array<{ id: string; class_name?: string }>>([]);
+  const [selectedClass, setSelectedClass] = useState<{ id: string; class_name?: string } | null>(null);
+  const [examsList, setExamsList] = useState<Array<any>>([]);
+  const [selectedExam, setSelectedExam] = useState<any | null>(null);
+  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [examDropdownOpen, setExamDropdownOpen] = useState(false);
+
+  // when resetFlag changes we should return to the initial exam-select
+  // state and clear any existing exam context. this allows the home screen's
+  // quick scan button to behave predictably even if the user previously
+  // navigated to this tab and left while inside the camera view.
+  React.useEffect(() => {
+    if (resetFlag) {
+      setActiveExamId("");
+      setExamQuestionCount(20);
+      setSelectedClass(null);
+      setSelectedExam(null);
+      // stay in camera mode but clear selections
+    }
+  }, [resetFlag]);
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
     null,
   );
@@ -51,6 +80,58 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     null,
   );
   const [scanCount, setScanCount] = useState(0); // Track scan count to force camera remount
+
+  // ----- new behaviour for class/exam selection UI -----
+  // load classes for teacher
+  React.useEffect(() => {
+    const fetchClasses = async () => {
+      try {
+        const cls = await ClassService.getClassesByUser();
+        setClassesList(cls);
+      } catch (error) {
+        console.error("[ScannerScreen] failed loading classes", error);
+      }
+    };
+    fetchClasses();
+  }, []);
+
+  // when class changes fetch its exams
+  React.useEffect(() => {
+    if (!selectedClass) {
+      setExamsList([]);
+      setSelectedExam(null);
+      return;
+    }
+
+    const fetchExams = async () => {
+      try {
+        const { collection, query, where, getDocs } = await import(
+          "firebase/firestore"
+        );
+        const examsRef = collection(db, "exams");
+        const examsQuery = query(
+          examsRef,
+          where("classId", "==", selectedClass.id),
+        );
+        const snap = await getDocs(examsQuery);
+        const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setExamsList(list);
+      } catch (error) {
+        console.error("[ScannerScreen] failed loading exams", error);
+      }
+    };
+    fetchExams();
+  }, [selectedClass]);
+
+  // when an exam is chosen, set up camera parameters
+  React.useEffect(() => {
+    if (selectedExam) {
+      setActiveExamId(selectedExam.id);
+      const questionCount = selectedExam.num_items || 20;
+      setExamQuestionCount(questionCount);
+      // stay in camera mode with exam selected
+    }
+  }, [selectedExam]);
 
   const handleScanComplete = async (
     scanResult: ScanResult,
@@ -277,89 +358,6 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     }
   };
 
-  const handleConfirmExam = async () => {
-    if (!examIdInput.trim()) return;
-
-    setIsValidatingExam(true);
-    try {
-      const inputValue = examIdInput.trim();
-      console.log(`[ScannerScreen] Looking up exam: ${inputValue}`);
-
-      // Try to find exam by examCode or document ID
-      const { collection, query, where, getDocs } =
-        await import("firebase/firestore");
-      const examsRef = collection(db, "exams");
-
-      // First, try to find by examCode
-      const examCodeQuery = query(
-        examsRef,
-        where("examCode", "==", inputValue),
-      );
-      const examCodeSnapshot = await getDocs(examCodeQuery);
-
-      console.log(
-        `[ScannerScreen] Query by examCode returned ${examCodeSnapshot.size} documents`,
-      );
-
-      let examDocId = null;
-
-      if (!examCodeSnapshot.empty) {
-        // Found by exam code
-        examDocId = examCodeSnapshot.docs[0].id;
-        const examData = examCodeSnapshot.docs[0].data();
-        console.log(
-          `[ScannerScreen] Found exam by code: ${inputValue} -> ${examDocId}`,
-        );
-        console.log(`[ScannerScreen] Exam title: ${examData.title}`);
-
-        // Store question count for scanner
-        const questionCount = examData.num_items || 20;
-        setExamQuestionCount(questionCount);
-        console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
-      } else {
-        console.log(
-          `[ScannerScreen] No exam found with examCode: ${inputValue}, trying as document ID`,
-        );
-        // Try as document ID directly
-        const { doc, getDoc } = await import("firebase/firestore");
-        const examDocRef = doc(db, "exams", inputValue);
-        const examDocSnap = await getDoc(examDocRef);
-
-        if (examDocSnap.exists()) {
-          examDocId = examDocSnap.id;
-          const examData = examDocSnap.data();
-          console.log(
-            `[ScannerScreen] Found exam by document ID: ${examDocId}`,
-          );
-
-          // Store question count for scanner
-          const questionCount = examData.num_items || 20;
-          setExamQuestionCount(questionCount);
-          console.log(`[ScannerScreen] Exam question count: ${questionCount}`);
-        } else {
-          console.log(
-            `[ScannerScreen] No exam found with document ID: ${inputValue}`,
-          );
-        }
-      }
-
-      if (!examDocId) {
-        Alert.alert(
-          "Exam Not Found",
-          `No exam found with code or ID: ${inputValue}`,
-        );
-        return;
-      }
-
-      setActiveExamId(examDocId);
-      setCurrentState("camera");
-    } catch (error) {
-      console.error("[ScannerScreen] Error validating exam:", error);
-      Alert.alert("Error", "Failed to validate exam ID");
-    } finally {
-      setIsValidatingExam(false);
-    }
-  };
 
   const handleScanAnother = () => {
     setGradingResult(null);
@@ -372,6 +370,9 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
     setGradingResult(null);
     setScannedImage(undefined);
     setCurrentState("camera");
+    // clear selection so reopening starts fresh
+    setSelectedClass(null);
+    setSelectedExam(null);
     onClose();
   };
 
@@ -434,61 +435,9 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
 
   return (
     <View style={styles.container}>
-      {/* ── Step 5: Exam Selector ── */}
-      {currentState === "exam-select" && (
-        <View style={styles.examSelector}>
-          <View style={styles.topBar}>
-            <TouchableOpacity onPress={handleClose} style={styles.backButton}>
-              <Ionicons name="arrow-back" size={22} color="#3d5a3d" />
-              <Text style={styles.backButtonText}>Back</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.examSelectorContent}>
-            <Ionicons name="document-text" size={56} color="#3d5a3d" />
-            <Text style={styles.examSelectorTitle}>Select Exam</Text>
-            <Text style={styles.examSelectorSubtitle}>
-              Enter the Exam ID before scanning answer sheets
-            </Text>
-
-            <TextInput
-              style={styles.examInput}
-              placeholder="Exam ID (e.g. abc123xyz)"
-              placeholderTextColor="#aaa"
-              value={examIdInput}
-              onChangeText={setExamIdInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={handleConfirmExam}
-            />
-
-            <TouchableOpacity
-              style={[
-                styles.confirmButton,
-                (!examIdInput.trim() || isValidatingExam) &&
-                  styles.confirmButtonDisabled,
-              ]}
-              onPress={handleConfirmExam}
-              disabled={!examIdInput.trim() || isValidatingExam}
-            >
-              {isValidatingExam ? (
-                <ActivityIndicator color="white" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle" size={20} color="white" />
-                  <Text style={styles.confirmButtonText}>
-                    Confirm & Start Scanning
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* ── Camera ── */}
-      {currentState === "camera" && (
+      <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
+      {/* ── Camera (Always Visible) ── */}
+      {currentState !== "results" && (
         <CameraScanner
           key={`camera-${scanCount}`}
           questionCount={examQuestionCount}
@@ -496,6 +445,143 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
           onCancel={handleClose}
         />
       )}
+
+      {/* ── Header Overlay (Back + Title) ── */}
+      {currentState !== "results" && (
+        <View style={styles.headerOverlay}>
+          <TouchableOpacity onPress={handleClose} style={styles.backButtonOverlay}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Scanner</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      )}
+
+      {/* ── Selectors Overlay (Class & Exam) ── */}
+      {currentState !== "results" && (
+        <View style={styles.selectorsOverlay}>
+          <TouchableOpacity
+            style={[styles.selectorField, { marginBottom: 12 }]}
+            onPress={() => setClassDropdownOpen(true)}
+          >
+            <Text style={styles.selectorFieldText}>
+              {selectedClass?.class_name || "Select Class..."}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.selectorField,
+              !selectedClass && styles.selectorFieldDisabled,
+            ]}
+            onPress={() => selectedClass && setExamDropdownOpen(true)}
+            disabled={!selectedClass}
+          >
+            <Text style={styles.selectorFieldText}>
+              {selectedExam?.title || "Select Exam..."}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Class Selector Dropdown Modal ── */}
+      <Modal
+        visible={classDropdownOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setClassDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setClassDropdownOpen(false)}
+        />
+        <View style={styles.dropdownPanel}>
+          <ScrollView
+            showsVerticalScrollIndicator={true}
+            contentContainerStyle={styles.dropdownScrollContent}
+          >
+            {classesList.map((cls) => {
+              const selected = cls.id === selectedClass?.id;
+              return (
+                <TouchableOpacity
+                  key={cls.id}
+                  style={[
+                    styles.dropdownItem,
+                    selected && styles.dropdownSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedClass(cls);
+                    setClassDropdownOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownName,
+                      selected && { color: "#fff" },
+                    ]}
+                  >
+                    {cls.class_name || "Unnamed"}
+                  </Text>
+                  {selected && (
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      {/* ── Exam Selector Dropdown Modal ── */}
+      <Modal
+        visible={examDropdownOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setExamDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownBackdrop}
+          activeOpacity={1}
+          onPress={() => setExamDropdownOpen(false)}
+        />
+        <View style={styles.dropdownPanel}>
+          <ScrollView
+            showsVerticalScrollIndicator={true}
+            contentContainerStyle={styles.dropdownScrollContent}
+          >
+            {examsList.map((ex) => {
+              const selected = ex.id === selectedExam?.id;
+              return (
+                <TouchableOpacity
+                  key={ex.id}
+                  style={[
+                    styles.dropdownItem,
+                    selected && styles.dropdownSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedExam(ex);
+                    setExamDropdownOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownName,
+                      selected && { color: "#fff" },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {ex.title || ex.name || "Unnamed Exam"}
+                  </Text>
+                  {selected && (
+                    <Ionicons name="checkmark" size={16} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* ── Results ── */}
       {currentState === "results" && gradingResult && (
@@ -577,34 +663,127 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     lineHeight: 22,
   },
-  examInput: {
+  selectorRow: {
+    flexDirection: "row",
     width: "100%",
-    backgroundColor: "white",
-    borderWidth: 1.5,
-    borderColor: "#3d5a3d",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: "#333",
-    marginBottom: 20,
+    justifyContent: "space-between",
+    marginTop: 24,
   },
-  confirmButton: {
-    width: "100%",
-    backgroundColor: "#3d5a3d",
+  selector: {
+    flex: 1,
+    marginHorizontal: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#3d5a3d",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
+    justifyContent: "space-between",
   },
-  confirmButtonDisabled: {
-    backgroundColor: "#95bba6",
+  selectorDisabled: {
+    opacity: 0.6,
   },
-  confirmButtonText: {
-    color: "white",
+  selectorName: {
     fontSize: 16,
-    fontWeight: "bold",
+    color: "#333",
+  },
+  dropdownBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+  },
+  dropdownPanel: {
+    position: "absolute",
+    top: 150,
+    left: 20,
+    right: 20,
+    maxHeight: "60%",
+    backgroundColor: "#1A1A1A",
+    borderRadius: 20,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+    zIndex: 1000,
+    overflow: "hidden", // Ensures content stays inside rounded corners
+  },
+  dropdownScrollContent: {
+    paddingVertical: 8,
+  },
+  dropdownItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255, 255, 255, 0.05)",
+  },
+  dropdownSelected: {
+    backgroundColor: "rgba(31, 194, 125, 0.15)",
+  },
+  dropdownName: {
+    fontSize: 15,
+    color: "#E0E0E0",
+    fontWeight: "500",
+  },
+  // ── Overlay styles for camera-first UI ──
+  headerOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : 55,
+    paddingBottom: 15,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "transparent",
+  },
+  backButtonOverlay: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+    flex: 1,
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  selectorsOverlay: {
+    position: "absolute",
+    top: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 60 : 100,
+    left: 20,
+    right: 20,
+    zIndex: 90,
+  },
+  selectorField: {
+    backgroundColor: "rgba(30, 30, 30, 0.7)",
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+  },
+  selectorFieldDisabled: {
+    opacity: 0.5,
+  },
+  selectorFieldText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
 });
