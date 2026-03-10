@@ -29,6 +29,7 @@ import {
 } from "react-native";
 
 const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
+const MAX_FIELD_LENGTH = 50;
 
 interface ClassOption {
   id: string;
@@ -172,6 +173,16 @@ export default function CreateQuizScreen() {
         type: "error",
         title: "Error",
         message: "Please enter a quiz name",
+      });
+      return;
+    }
+
+    if (quizName.trim().length > MAX_FIELD_LENGTH) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Exam name must be 50 characters or fewer",
       });
       return;
     }
@@ -336,7 +347,11 @@ export default function CreateQuizScreen() {
     }
   };
 
-  const canProceed = Boolean(quizName.trim() && numQuestions);
+  const canProceed = Boolean(
+    quizName.trim() &&
+      quizName.trim().length <= MAX_FIELD_LENGTH &&
+      numQuestions,
+  );
 
   return (
     <KeyboardAvoidingView
@@ -369,6 +384,7 @@ export default function CreateQuizScreen() {
             value={quizName}
             onChangeText={setQuizName}
             editable={!loading}
+            maxLength={MAX_FIELD_LENGTH}
           />
         </View>
 

@@ -29,6 +29,7 @@ import { Class } from "../../types/class";
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const CLASS_MENU_WIDTH = 190;
 const CLASS_MENU_HEIGHT = 116;
+const MAX_FIELD_LENGTH = 50;
 
 function AnimatedFillBar({
   progress,
@@ -201,10 +202,26 @@ export default function ClassesScreen() {
         recentQuizTitle: "#4f4538",
       };
 
+  const trimmedForm = {
+    class_name: formData.class_name.trim(),
+    course_subject: formData.course_subject.trim(),
+    section_block: formData.section_block.trim(),
+    room: formData.room.trim(),
+  };
+  const requiredFields = [
+    trimmedForm.class_name,
+    trimmedForm.course_subject,
+    trimmedForm.section_block,
+    trimmedForm.room,
+  ];
+  const hasMissingRequired = requiredFields.some((value) => !value);
+  const hasTooLong = requiredFields.some((value) => value.length > MAX_FIELD_LENGTH);
+  const canCreateClass = !hasMissingRequired && !hasTooLong && !creating;
+
   // Create new class
   const handleCreateClass = async () => {
     // Validation
-    if (!formData.class_name.trim()) {
+    if (!trimmedForm.class_name) {
       Toast.show({
         type: "error",
         text1: "Validation Error",
@@ -213,7 +230,7 @@ export default function ClassesScreen() {
       return;
     }
 
-    if (!formData.course_subject.trim()) {
+    if (!trimmedForm.course_subject) {
       Toast.show({
         type: "error",
         text1: "Validation Error",
@@ -222,9 +239,42 @@ export default function ClassesScreen() {
       return;
     }
 
+    if (!trimmedForm.section_block) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course block is required",
+      });
+      return;
+    }
+
+    if (!trimmedForm.room) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Room is required",
+      });
+      return;
+    }
+
+    if (hasTooLong) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Each field must be 50 characters or fewer",
+      });
+      return;
+    }
+
     try {
       setCreating(true);
-      await ClassService.createClass(formData);
+      await ClassService.createClass({
+        ...formData,
+        class_name: trimmedForm.class_name,
+        course_subject: trimmedForm.course_subject,
+        section_block: trimmedForm.section_block,
+        room: trimmedForm.room,
+      });
 
       Toast.show({
         type: "success",
@@ -534,6 +584,7 @@ export default function ClassesScreen() {
               style={styles.sheetInput}
               placeholder="e.g. Biology 101"
               placeholderTextColor="#B5BCC8"
+              maxLength={MAX_FIELD_LENGTH}
               value={formData.class_name}
               onChangeText={(text) =>
                 setFormData({ ...formData, class_name: text })
@@ -545,6 +596,7 @@ export default function ClassesScreen() {
               style={styles.sheetInput}
               placeholder="e.g. Science Dept"
               placeholderTextColor="#B5BCC8"
+              maxLength={MAX_FIELD_LENGTH}
               value={formData.course_subject}
               onChangeText={(text) =>
                 setFormData({ ...formData, course_subject: text })
@@ -558,6 +610,7 @@ export default function ClassesScreen() {
                   style={styles.sheetInput}
                   placeholder="e.g. Period 1"
                   placeholderTextColor="#B5BCC8"
+                  maxLength={MAX_FIELD_LENGTH}
                   value={formData.section_block}
                   onChangeText={(text) =>
                     setFormData({ ...formData, section_block: text })
@@ -570,6 +623,7 @@ export default function ClassesScreen() {
                   style={styles.sheetInput}
                   placeholder="e.g. Room 402"
                   placeholderTextColor="#B5BCC8"
+                  maxLength={MAX_FIELD_LENGTH}
                   value={formData.room}
                   onChangeText={(text) =>
                     setFormData({ ...formData, room: text })
@@ -580,10 +634,20 @@ export default function ClassesScreen() {
           </ScrollView>
 
           <View style={styles.createScreenFooter}>
+            {!canCreateClass && (
+              <Text style={styles.validationText}>
+                {hasTooLong
+                  ? "Keep each field under 50 characters."
+                  : "Complete all required fields to continue."}
+              </Text>
+            )}
             <TouchableOpacity
-              style={[styles.sheetPrimaryButton, creating && styles.createButtonDisabled]}
+              style={[
+                styles.sheetPrimaryButton,
+                (!canCreateClass || creating) && styles.createButtonDisabled,
+              ]}
               onPress={handleCreateClass}
-              disabled={creating}
+              disabled={!canCreateClass}
             >
               {creating ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -953,6 +1017,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "900",
     color: "#FFFFFF",
+  },
+  validationText: {
+    marginBottom: 10,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#EF4444",
+    textAlign: "center",
   },
   createScreenFooter: {
     padding: 20,

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   query,
@@ -43,6 +44,11 @@ type RestoreTarget =
   | { type: "exam"; id: string; title: string }
   | null;
 
+type DeleteTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
 function formatDateLabel(value: any) {
   if (!value) return "No date";
   const parsed =
@@ -67,6 +73,7 @@ export default function ArchivedScreen() {
   const [archivedClasses, setArchivedClasses] = useState<ArchivedClass[]>([]);
   const [archivedExams, setArchivedExams] = useState<ArchivedExam[]>([]);
   const [restoreTarget, setRestoreTarget] = useState<RestoreTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
 
   const loadArchivedItems = useCallback(() => {
     let active = true;
@@ -200,6 +207,46 @@ export default function ArchivedScreen() {
     }
   };
 
+  const deleteClass = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "classes", id));
+      setDeleteTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Class deleted successfully",
+      });
+      loadArchivedItems();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Delete failed",
+        text2: "Failed to delete class",
+      });
+    }
+  };
+
+  const deleteExam = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "exams", id));
+      setDeleteTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Exam deleted successfully",
+      });
+      loadArchivedItems();
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Delete failed",
+        text2: "Failed to delete exam",
+      });
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Archived Items</Text>
@@ -278,6 +325,19 @@ export default function ArchivedScreen() {
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
                       </View>
+                      <View style={styles.metaSpacer} />
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() =>
+                          setDeleteTarget({
+                            type: "class",
+                            id: item.id,
+                            title: item.title,
+                          })
+                        }
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                      </TouchableOpacity>
                     </View>
                     <View style={styles.grayBar} />
                   </View>
@@ -311,6 +371,19 @@ export default function ArchivedScreen() {
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
                       </View>
+                      <View style={styles.metaSpacer} />
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() =>
+                          setDeleteTarget({
+                            type: "exam",
+                            id: item.id,
+                            title: item.title,
+                          })
+                        }
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                      </TouchableOpacity>
                     </View>
                     <View style={styles.grayBar} />
                   </View>
@@ -345,6 +418,24 @@ export default function ArchivedScreen() {
             return;
           }
           restoreExam(restoreTarget.id);
+        }}
+      />
+
+      <ConfirmationModal
+        visible={Boolean(deleteTarget)}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${deleteTarget?.title ?? "this class"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          if (deleteTarget.type === "class") {
+            deleteClass(deleteTarget.id);
+            return;
+          }
+          deleteExam(deleteTarget.id);
         }}
       />
     </View>
@@ -452,6 +543,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 10,
     backgroundColor: "#F3F4F6",
+    alignSelf: "center",
   },
   archivedBadgeText: {
     fontSize: 12,
@@ -459,6 +551,18 @@ const styles = StyleSheet.create({
     color: "#6B7280",
   },
   restoreButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  metaSpacer: {
+    flex: 1,
+  },
+  deleteButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
