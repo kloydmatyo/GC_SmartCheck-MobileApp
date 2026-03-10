@@ -14,6 +14,8 @@ import {
 import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,6 +51,15 @@ type DeleteTarget =
   | { type: "exam"; id: string; title: string }
   | null;
 
+type MenuTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const ARCHIVE_MENU_WIDTH = 170;
+const ARCHIVE_MENU_HEIGHT = 112;
+
 function formatDateLabel(value: any) {
   if (!value) return "No date";
   const parsed =
@@ -74,6 +85,9 @@ export default function ArchivedScreen() {
   const [archivedExams, setArchivedExams] = useState<ArchivedExam[]>([]);
   const [restoreTarget, setRestoreTarget] = useState<RestoreTarget>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [menuTarget, setMenuTarget] = useState<MenuTarget>(null);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
   const loadArchivedItems = useCallback(() => {
     let active = true;
@@ -304,16 +318,23 @@ export default function ArchivedScreen() {
                         <Text style={styles.archivedBadgeText}>Archived</Text>
                       </View>
                       <TouchableOpacity
-                        style={styles.restoreButton}
-                        onPress={() =>
-                          setRestoreTarget({
-                            type: "class",
-                            id: item.id,
-                            title: item.title,
-                          })
-                        }
+                        style={styles.menuTrigger}
+                        onPress={(event) => {
+                          const { pageX, pageY } = event.nativeEvent;
+                          const left = Math.min(
+                            Math.max(12, pageX - ARCHIVE_MENU_WIDTH + 22),
+                            SCREEN_WIDTH - ARCHIVE_MENU_WIDTH - 12,
+                          );
+                          const top = Math.min(
+                            Math.max(80, pageY - 8),
+                            SCREEN_HEIGHT - ARCHIVE_MENU_HEIGHT - 24,
+                          );
+                          setMenuTarget({ type: "class", id: item.id, title: item.title });
+                          setMenuPosition({ top, left });
+                          setMenuVisible(true);
+                        }}
                       >
-                        <Ionicons name="archive-outline" size={18} color="#20BE7B" />
+                        <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
                       </TouchableOpacity>
                     </View>
                     <View style={styles.metaRow}>
@@ -325,19 +346,6 @@ export default function ArchivedScreen() {
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
                       </View>
-                      <View style={styles.metaSpacer} />
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() =>
-                          setDeleteTarget({
-                            type: "class",
-                            id: item.id,
-                            title: item.title,
-                          })
-                        }
-                      >
-                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                      </TouchableOpacity>
                     </View>
                     <View style={styles.grayBar} />
                   </View>
@@ -353,16 +361,23 @@ export default function ArchivedScreen() {
                         <Text style={styles.archivedBadgeText}>Archived</Text>
                       </View>
                       <TouchableOpacity
-                        style={styles.restoreButton}
-                        onPress={() =>
-                          setRestoreTarget({
-                            type: "exam",
-                            id: item.id,
-                            title: item.title,
-                          })
-                        }
+                        style={styles.menuTrigger}
+                        onPress={(event) => {
+                          const { pageX, pageY } = event.nativeEvent;
+                          const left = Math.min(
+                            Math.max(12, pageX - ARCHIVE_MENU_WIDTH + 22),
+                            SCREEN_WIDTH - ARCHIVE_MENU_WIDTH - 12,
+                          );
+                          const top = Math.min(
+                            Math.max(80, pageY - 8),
+                            SCREEN_HEIGHT - ARCHIVE_MENU_HEIGHT - 24,
+                          );
+                          setMenuTarget({ type: "exam", id: item.id, title: item.title });
+                          setMenuPosition({ top, left });
+                          setMenuVisible(true);
+                        }}
                       >
-                        <Ionicons name="archive-outline" size={18} color="#20BE7B" />
+                        <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
                       </TouchableOpacity>
                     </View>
                     <Text style={styles.examSubtitle}>{item.subtitle}</Text>
@@ -371,19 +386,6 @@ export default function ArchivedScreen() {
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
                       </View>
-                      <View style={styles.metaSpacer} />
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() =>
-                          setDeleteTarget({
-                            type: "exam",
-                            id: item.id,
-                            title: item.title,
-                          })
-                        }
-                      >
-                        <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                      </TouchableOpacity>
                     </View>
                     <View style={styles.grayBar} />
                   </View>
@@ -438,6 +440,69 @@ export default function ArchivedScreen() {
           deleteExam(deleteTarget.id);
         }}
       />
+
+      <Modal
+        visible={menuVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setMenuVisible(false)}
+        >
+          <View
+            style={[
+              styles.menuContent,
+              {
+                top: menuPosition.top,
+                left: menuPosition.left,
+              },
+            ]}
+          >
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {menuTarget?.title ?? "Archived"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setMenuVisible(false)}
+              >
+                <Ionicons name="close" size={16} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                if (!menuTarget) return;
+                setMenuVisible(false);
+                setRestoreTarget({
+                  type: menuTarget.type,
+                  id: menuTarget.id,
+                  title: menuTarget.title,
+                });
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuRestoreText]}>Restore</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                if (!menuTarget) return;
+                setMenuVisible(false);
+                setDeleteTarget({
+                  type: menuTarget.type,
+                  id: menuTarget.id,
+                  title: menuTarget.title,
+                });
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuDeleteText]}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -559,9 +624,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  metaSpacer: {
-    flex: 1,
-  },
   deleteButton: {
     width: 40,
     height: 40,
@@ -570,6 +632,66 @@ const styles = StyleSheet.create({
     borderColor: "#E8EBF0",
     alignItems: "center",
     justifyContent: "center",
+  },
+  menuTrigger: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
+    position: "relative",
+  },
+  menuContent: {
+    position: "absolute",
+    width: ARCHIVE_MENU_WIDTH,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 4,
+  },
+  menuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#273142",
+    marginRight: 8,
+  },
+  menuCloseButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  menuItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#273142",
+  },
+  menuRestoreText: {
+    color: "#20BE7B",
+  },
+  menuDeleteText: {
+    color: "#EF4444",
   },
   metaRow: {
     flexDirection: "row",
