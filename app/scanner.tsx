@@ -18,14 +18,6 @@ import {
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
-const MOCK_QUIZZES = [
-  { id: "1", name: "Midterms Exam - BSIT - 3A", status: "ACTIVE SESSION" },
-  { id: "2", name: "Midterms Exam - BSIT - 3B", status: "ACTIVE SESSION" },
-  { id: "3", name: "Midterms Exam - BSIT - 3C", status: "ACTIVE SESSION" },
-  { id: "4", name: "Quiz 2 - BSIT - 3B", status: "ACTIVE SESSION" },
-  { id: "5", name: "Quiz 3 - BSIT - 3B", status: "ACTIVE SESSION" },
-];
-
 type ScanState = "idle" | "scanning" | "success" | "failed";
 
 const FRAME_W = SCREEN_W * 0.82;
@@ -38,13 +30,33 @@ export default function ScannerScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
 
-  const [selectedQuiz, setSelectedQuiz] = useState(MOCK_QUIZZES[0]);
+  const [quizzes, setQuizzes] = useState<any[]>([]);
+  const [selectedQuiz, setSelectedQuiz] = useState<any>(null);
+  const [loadingQuizzes, setLoadingQuizzes] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [lastResult, setLastResult] = useState<{
     studentId: string;
     score: string;
   } | null>(null);
+
+  React.useEffect(() => {
+    async function loadQuizzes() {
+      try {
+        const { ExamService } = await import("../services/examService");
+        const list = await ExamService.getExamsByUser();
+        setQuizzes(list);
+        if (list.length > 0) {
+          setSelectedQuiz(list[0]);
+        }
+      } catch (error) {
+        console.error("Failed to load quizzes for scanner:", error);
+      } finally {
+        setLoadingQuizzes(false);
+      }
+    }
+    loadQuizzes();
+  }, []);
 
   // Guard: if not navigated from home, redirect declaratively.
   // Using <Redirect> instead of router.replace() in useEffect avoids the
@@ -130,7 +142,7 @@ export default function ScannerScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.selectorTop}>QUIZ</Text>
               <Text style={styles.selectorName} numberOfLines={1}>
-                {selectedQuiz.name}
+                {selectedQuiz?.title || "Select Quiz"}
               </Text>
             </View>
             <Ionicons name="chevron-down" size={15} color="#9ec3ef" />
@@ -219,8 +231,13 @@ export default function ScannerScreen() {
           onPress={() => setDropdownOpen(false)}
         />
         <View style={styles.dropdownPanel}>
-          {MOCK_QUIZZES.map((q) => {
-            const selected = q.id === selectedQuiz.id;
+          {quizzes.length === 0 && !loadingQuizzes && (
+            <View style={styles.dropdownItem}>
+              <Text style={styles.dropdownName}>No quizzes found</Text>
+            </View>
+          )}
+          {quizzes.map((q) => {
+            const selected = q.id === selectedQuiz?.id;
             return (
               <TouchableOpacity
                 key={q.id}
@@ -237,7 +254,7 @@ export default function ScannerScreen() {
                   <Text
                     style={[styles.dropdownName, selected && { color: "#fff" }]}
                   >
-                    {q.name}
+                    {q.title}
                   </Text>
                   <Text
                     style={[
@@ -245,7 +262,7 @@ export default function ScannerScreen() {
                       selected && { color: "rgba(255,255,255,0.75)" },
                     ]}
                   >
-                    {q.status}
+                    {q.class} • {q.status}
                   </Text>
                 </View>
                 {selected && (

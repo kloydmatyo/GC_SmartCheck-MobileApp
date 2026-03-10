@@ -1,28 +1,24 @@
-import { auth, db } from "@/config/firebase";
+import { db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    where,
+  doc,
+  getDoc
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 interface Quiz {
@@ -49,78 +45,12 @@ export default function QuizzesScreen() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [quizToDelete, setQuizToDelete] = useState<Quiz | null>(null);
 
-  // Fetch quizzes from Firebase
+  // Fetch quizzes from Realm/Firebase
   const loadQuizzes = async () => {
     try {
       setLoading(true);
-      const currentUser = auth.currentUser;
-
-      if (!currentUser) {
-        console.log("No user logged in");
-        setQuizzes([]);
-        return;
-      }
-
-      const q = query(
-        collection(db, "exams"),
-        where("createdBy", "==", currentUser.uid),
-      );
-
-      const querySnapshot = await getDocs(q);
-      const examsList: Quiz[] = [];
-
-      // Check which exams are downloaded
-      const downloadedExams = await OfflineStorageService.getDownloadedExams();
-      const downloadedIds = new Set(downloadedExams.map((e) => e.id));
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-
-        // Map status to proper case
-        let status: "Draft" | "Scheduled" | "Active" | "Completed" = "Draft";
-        if (data.status) {
-          const statusLower = data.status.toLowerCase();
-          switch (statusLower) {
-            case "draft":
-              status = "Draft";
-              break;
-            case "scheduled":
-              status = "Scheduled";
-              break;
-            case "active":
-              status = "Active";
-              break;
-            case "completed":
-              status = "Completed";
-              break;
-            default:
-              status = "Draft";
-          }
-        }
-
-        examsList.push({
-          id: doc.id,
-          title: data.title || "Untitled Exam",
-          class: data.subject || data.className || "No Subject",
-          date: data.created_at
-            ? typeof data.created_at === "string"
-              ? new Date(data.created_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-              : data.createdAt?.toDate?.()?.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                }) || "No Date"
-            : "No Date",
-          papers: data.scanned_papers || null,
-          status: status,
-          isDownloaded: downloadedIds.has(doc.id),
-        });
-      });
-
+      const { ExamService } = await import("@/services/examService");
+      const examsList = await ExamService.getExamsByUser();
       setQuizzes(examsList);
     } catch (error) {
       console.error("Error fetching quizzes:", error);
@@ -148,25 +78,25 @@ export default function QuizzesScreen() {
 
   const colors = darkModeEnabled
     ? {
-        screenBg: "#111815",
-        headerBg: "#1a2520",
-        headerBorder: "#2b3b34",
-        title: "#e7f1eb",
-        primary: "#1f3a2f",
-        primaryDark: "#2b3b34",
-        cardBg: "#1f2b26",
-        cardBorder: "#34483f",
-      }
+      screenBg: "#111815",
+      headerBg: "#1a2520",
+      headerBorder: "#2b3b34",
+      title: "#e7f1eb",
+      primary: "#1f3a2f",
+      primaryDark: "#2b3b34",
+      cardBg: "#1f2b26",
+      cardBorder: "#34483f",
+    }
     : {
-        screenBg: "#eef1ef",
-        headerBg: "#fff",
-        headerBorder: "#d8dfda",
-        title: "#24362f",
-        primary: "#3d5a3d",
-        primaryDark: "#2f4a38",
-        cardBg: "#3d5a3d",
-        cardBorder: "#2f4a38",
-      };
+      screenBg: "#eef1ef",
+      headerBg: "#fff",
+      headerBorder: "#d8dfda",
+      title: "#24362f",
+      primary: "#3d5a3d",
+      primaryDark: "#2f4a38",
+      cardBg: "#3d5a3d",
+      cardBorder: "#2f4a38",
+    };
 
   const filteredQuizzes = quizzes.filter((q) => {
     const matchesFilter = filter === "All" ? true : q.status === filter;

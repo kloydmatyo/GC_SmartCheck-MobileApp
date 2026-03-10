@@ -1,22 +1,19 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import { auth, db } from "@/config/firebase";
+import { ExamService } from "@/services/examService";
 import { NetworkService } from "@/services/networkService";
-import { OfflineStorageService } from "@/services/offlineStorageService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   query,
-  runTransaction,
-  serverTimestamp,
-  where,
+  where
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -107,19 +104,19 @@ export default function EditAnswerKeyScreen() {
 
   const colors = darkModeEnabled
     ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        cardBg: "#1f2b26",
-        border: "#34483f",
-        title: "#e7f1eb",
-      }
+      bg: "#111815",
+      headerBg: "#1a2520",
+      cardBg: "#1f2b26",
+      border: "#34483f",
+      title: "#e7f1eb",
+    }
     : {
-        bg: "#f5f5f5",
-        headerBg: "#3d5a3d",
-        cardBg: "#ffffff",
-        border: "#e0e0e0",
-        title: "#333333",
-      };
+      bg: "#f5f5f5",
+      headerBg: "#3d5a3d",
+      cardBg: "#ffffff",
+      border: "#e0e0e0",
+      title: "#333333",
+    };
 
   useEffect(() => {
     if (!answerKeyId || isOffline) return;
@@ -161,9 +158,9 @@ export default function EditAnswerKeyScreen() {
   ): QuestionAnswer[] => {
     const settingsAnswers = Array.isArray(data.questionSettings)
       ? data.questionSettings
-          .slice()
-          .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
-          .map((q: any) => String(q.correctAnswer ?? ""))
+        .slice()
+        .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+        .map((q: any) => String(q.correctAnswer ?? ""))
       : [];
 
     const numericAnswers = Object.keys(data)
@@ -230,112 +227,40 @@ export default function EditAnswerKeyScreen() {
   const loadAnswerKey = async () => {
     try {
       setLoading(true);
+      const data = await ExamService.getExamById(examId as string);
 
-      // Check if we're online
-      const online = await NetworkService.isOnline();
-      setIsOffline(!online);
-
-      if (online) {
-        try {
-          // Load exam data from Firebase
-          const examRef = doc(db, "exams", examId as string);
-          const examSnap = await getDoc(examRef);
-
-          if (!examSnap.exists()) {
-            setStatusModal({
-              visible: true,
-              type: "error",
-              title: "Error",
-              message: "Exam not found",
-              onClose: goToQuizzes,
-            });
-            return;
-          }
-
-          const examData = examSnap.data();
-
-          // Check if exam is in Draft status
-          if (examData.status !== "Draft") {
-            setStatusModal({
-              visible: true,
-              type: "error",
-              title: "Edit Restricted",
-              message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
-              onClose: goToQuizzes,
-            });
-            return;
-          }
-
-          const numItems = examData.num_items || 20;
-          const choices = examData.choices_per_item || 4;
-          setChoicesPerItem(choices);
-
-          const resolvedAnswerKey = await resolveAnswerKeyDoc(
-            examId as string,
-            examData.createdAt?.toMillis?.(),
-          );
-
-          setAnswerKeyId(resolvedAnswerKey.id);
-
-          const initialAnswers = resolvedAnswerKey.data
-            ? parseAnswersFromAnswerKey(resolvedAnswerKey.data, numItems)
-            : Array.from({ length: numItems }, (_, i) => ({
-                questionNumber: i + 1,
-                answer: "",
-              }));
-
-          setAnswers(initialAnswers);
-          const loadedVersion = Number(resolvedAnswerKey.data?.version ?? 1);
-          setAnswerKeyVersion(loadedVersion);
-          setRemoteVersion(loadedVersion);
-          setConflictDetected(false);
-          setHasLocalChanges(false);
-          return;
-        } catch (onlineError) {
-          console.warn(
-            "Failed loading live answer key, attempting offline fallback:",
-            onlineError,
-          );
-        }
-      }
-
-      // Offline fallback
-      const offlineExam = await OfflineStorageService.getDownloadedExam(
-        examId as string,
-      );
-
-      if (!offlineExam) {
+      if (!data) {
         setStatusModal({
           visible: true,
           type: "error",
-          title: "Offline",
-          message:
-            "This exam is not available offline. Please connect to the internet or download it first.",
+          title: "Error",
+          message: "Exam not found",
           onClose: goToQuizzes,
         });
         return;
       }
 
-      const numItems = offlineExam.questions?.length || 20;
-      const choices = 4;
-      setChoicesPerItem(choices);
+      const numItems = data.totalQuestions || 20;
+      setChoicesPerItem(data.choiceFormat === "A-E" ? 5 : 4);
 
-      const answerKeyIdStr = `ak_${examId}_offline`;
-      setAnswerKeyId(answerKeyIdStr);
-
-      const initialAnswers: QuestionAnswer[] = Array.from(
-        { length: numItems },
-        (_, i) => ({
+      const initialAnswers = data.answerKey?.answers?.length > 0
+        ? data.answerKey.answers.map((ans, i) => ({
           questionNumber: i + 1,
-          answer: offlineExam.answerKey?.answers?.[i] || "",
-        }),
-      );
+          answer: ans || "",
+        }))
+        : Array.from({ length: numItems }, (_, i) => ({
+          questionNumber: i + 1,
+          answer: "",
+        }));
 
       setAnswers(initialAnswers);
-      setAnswerKeyVersion(Number(offlineExam.version ?? 1));
-      setRemoteVersion(Number(offlineExam.version ?? 1));
+      setAnswerKeyVersion(data.answerKey?.version || 1);
+      setRemoteVersion(data.answerKey?.version || 1);
       setConflictDetected(false);
       setHasLocalChanges(false);
+
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
     } catch (error) {
       console.error("Error loading answer key:", error);
       setStatusModal({
@@ -362,7 +287,6 @@ export default function EditAnswerKeyScreen() {
     try {
       setSaving(true);
 
-      // Check for incomplete answers (warning, not blocking)
       const emptyAnswers = answers.filter((a) => !a.answer);
       if (emptyAnswers.length > 0) {
         const shouldContinue = await new Promise<boolean>((resolve) => {
@@ -377,139 +301,26 @@ export default function EditAnswerKeyScreen() {
         }
       }
 
-      // Check if we're offline
       const online = await NetworkService.isOnline();
+      const updatedAnswers = answers.map(a => a.answer);
 
-      if (!online) {
-        // Save offline - queue for sync
-        const offlineExam = await OfflineStorageService.getDownloadedExam(
-          examId as string,
-        );
-        if (offlineExam) {
-          // Update offline exam with new answer key
-          const updatedExam = {
-            ...offlineExam,
-            answerKey: {
-              answers: answers.map((a) => a.answer),
-              locked: false,
-            },
-            updatedAt: new Date(),
-            version: (offlineExam.version || 1) + 1,
-          };
+      await ExamService.updateAnswerKey(examId as string, updatedAnswers);
 
-          await OfflineStorageService.downloadExam(updatedExam);
-
-          // Queue update for sync
-          await OfflineStorageService.queueUpdate(examId as string, "update", {
-            answerKey: updatedExam.answerKey,
-          });
-
-          setStatusModal({
-            visible: true,
-            type: "success",
-            title: "Saved Offline",
-            message:
-              "Answer key saved offline. Changes will sync when you're back online.",
-            onClose: goToQuizzes,
-          });
-        }
-        return;
-      }
-
-      // Online - save to Firebase
-      if (conflictDetected || remoteVersion > answerKeyVersion) {
-        setStatusModal({
-          visible: true,
-          type: "error",
-          title: "Conflict Detected",
-          message:
-            "This answer key was updated on another device. We reloaded the latest version. Please review and save again.",
-          onClose: loadAnswerKey,
-        });
-        return;
-      }
-
-      let nextVersion = 1;
-      const examRef = doc(db, "exams", examId as string);
-      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
-
-      await runTransaction(db, async (transaction) => {
-        const [examSnap, answerKeySnap] = await Promise.all([
-          transaction.get(examRef),
-          transaction.get(answerKeyRef),
-        ]);
-
-        if (!examSnap.exists()) {
-          throw new Error("Exam not found");
-        }
-
-        const examData = examSnap.data();
-        if (examData.status !== "Draft") {
-          throw new Error(
-            `Cannot edit answer key. Exam status is "${examData.status}".`,
-          );
-        }
-
-        const serverVersion = Number(answerKeySnap.data()?.version ?? 1);
-        if (answerKeySnap.exists() && serverVersion !== answerKeyVersion) {
-          throw new Error(
-            `Answer key version conflict. Current version is ${serverVersion}.`,
-          );
-        }
-
-        nextVersion = answerKeySnap.exists() ? serverVersion + 1 : 1;
-
-        const answerKeyData: Record<string, any> = {
-          examId: examId as string,
-          id: answerKeyId,
-          createdBy:
-            answerKeySnap.data()?.createdBy || auth.currentUser?.uid || null,
-          createdAt: answerKeySnap.data()?.createdAt || serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          locked: false,
-          version: nextVersion,
-          questionSettings: answers.map((item) => ({
-            questionNumber: item.questionNumber,
-            correctAnswer: item.answer,
-            points: 1,
-            choiceLabels: {},
-          })),
-          numItems: answers.length,
-        };
-
-        answers.forEach((item, index) => {
-          answerKeyData[index.toString()] = item.answer;
-        });
-
-        transaction.set(answerKeyRef, answerKeyData, { merge: true });
-      });
-
-      setAnswerKeyVersion(nextVersion);
-      setRemoteVersion(nextVersion);
-      setConflictDetected(false);
       setHasLocalChanges(false);
-
       setStatusModal({
         visible: true,
         type: "success",
         title: "Success",
-        message: "Answer key saved successfully!",
+        message: online ? "Answer key saved successfully!" : "Answer key saved offline. It will sync when you are online.",
         onClose: goToQuizzes,
       });
     } catch (error) {
       console.error("Error saving answer key:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to save answer key";
-      const isConflict = /conflict/i.test(errorMessage);
-
       setStatusModal({
         visible: true,
-        type: isConflict ? "info" : "error",
-        title: isConflict ? "Conflict Detected" : "Error",
-        message: isConflict
-          ? "Another device saved newer answer key changes. We loaded the latest data. Please re-apply your edits and save again."
-          : "Failed to save answer key",
-        onClose: isConflict ? loadAnswerKey : undefined,
+        type: "error",
+        title: "Error",
+        message: "Failed to save answer key",
       });
     } finally {
       setSaving(false);
@@ -544,24 +355,24 @@ export default function EditAnswerKeyScreen() {
           {choices.map((choice) => (
             <TouchableOpacity
               key={choice}
-                style={[
-                  styles.choiceButton,
-                  darkModeEnabled && {
-                    backgroundColor: "#2a3a33",
-                    borderColor: "#34483f",
-                  },
-                  item.answer === choice && styles.choiceButtonSelected,
-                ]}
+              style={[
+                styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
+                item.answer === choice && styles.choiceButtonSelected,
+              ]}
               onPress={() => handleAnswerSelect(item.questionNumber, choice)}
               disabled={loading || saving}
             >
-                <Text
-                  style={[
-                    styles.choiceText,
-                    darkModeEnabled && { color: "#9db1a6" },
-                    item.answer === choice && styles.choiceTextSelected,
-                  ]}
-                >
+              <Text
+                style={[
+                  styles.choiceText,
+                  darkModeEnabled && { color: "#9db1a6" },
+                  item.answer === choice && styles.choiceTextSelected,
+                ]}
+              >
                 {choice}
               </Text>
             </TouchableOpacity>

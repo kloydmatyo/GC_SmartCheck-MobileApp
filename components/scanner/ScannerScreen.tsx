@@ -219,8 +219,10 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
   };
 
   const handleConfirmExam = async () => {
-    if (!examIdInput.trim()) return;
+    const code = examIdInput.trim();
+    if (!code) return;
     setIsValidatingExam(true);
+
     try {
       const { auth } = await import("../../config/firebase");
       if (!auth.currentUser) {
@@ -228,20 +230,63 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
         return;
       }
 
-      const examsRef = collection(db, "exams");
-      const q = query(examsRef, where("examCode", "==", examIdInput.trim()));
-      const snap = await getDocs(q);
+      let foundExamId: string | null = null;
+      let questionCount = 20;
 
-      if (!snap.empty) {
-        const data = snap.docs[0].data();
-        setExamQuestionCount(data.num_items || 20);
-        setActiveExamId(snap.docs[0].id);
+      // 1. Check Staging Realm (Offline creations)
+      const { RealmService, OfflineQuiz, QuizCache } = await import("../../services/realmService");
+      const stagingRealm = await RealmService.getStagingRealm();
+      const sQuizzes = stagingRealm.objects<any>("OfflineQuiz").filtered(`examCode == "${code}"`);
+      if (sQuizzes.length > 0) {
+        const sQuiz = sQuizzes[0];
+        foundExamId = `staging_${sQuiz._id.toHexString()}`;
+        questionCount = sQuiz.questionCount || 20;
+      }
+
+      // 2. Check Cache Realm (Downloaded/Synced exams)
+      if (!foundExamId) {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cQuizzes = cacheRealm.objects<any>("QuizCache").filtered(`examCode == "${code}"`);
+        if (cQuizzes.length > 0) {
+          const cQuiz = cQuizzes[0];
+          foundExamId = cQuiz.id;
+          questionCount = cQuiz.questionCount || 20;
+        }
+      }
+
+      // 3. Check Firestore (Online)
+      if (!foundExamId) {
+        const netState = await NetInfo.fetch();
+        if (netState.isConnected && netState.isInternetReachable) {
+          try {
+            const examsRef = collection(db, "exams");
+            const q = query(examsRef, where("examCode", "==", code));
+            // Use withTimeout to prevent hanging if connection is flaky
+            const snap = await withTimeout(getDocs(q), 5000);
+
+            if (!snap.empty) {
+              const data = snap.docs[0].data();
+              foundExamId = snap.docs[0].id;
+              questionCount = data.num_items || 20;
+            }
+          } catch (firestoreErr) {
+            console.warn("[ScannerScreen] Firestore query failed:", firestoreErr);
+            // Ignore - we will handle the null foundExamId below
+          }
+        }
+      }
+
+      // Setup scanner or show error
+      if (foundExamId) {
+        setExamQuestionCount(questionCount);
+        setActiveExamId(foundExamId);
         setCurrentState("camera");
       } else {
-        Alert.alert("Error", "Exam not found.");
+        Alert.alert("Error", "Exam not found. Please check the code and try again.");
       }
     } catch (err) {
-      Alert.alert("Error", "Could not reach server.");
+      console.error("[ScannerScreen] Error validating exam code:", err);
+      Alert.alert("Error", "An unexpected error occurred while searching for the exam.");
     } finally {
       setIsValidatingExam(false);
     }

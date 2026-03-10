@@ -1,10 +1,15 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+<<<<<<< HEAD
+=======
+import { ExamService } from "@/services/examService";
+>>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 import { GradeStorageService } from "@/services/gradeStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
+<<<<<<< HEAD
 import {
   collection,
   onSnapshot,
@@ -13,6 +18,10 @@ import {
   where,
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+=======
+import { collection, getDocs, query, where } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+>>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 import {
   ActivityIndicator,
   Image,
@@ -20,7 +29,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import Toast from "react-native-toast-message";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
@@ -170,6 +179,7 @@ export default function HomeScreen() {
   // ── Real-time listener: classes (for student count) ───────────────────
   const subscribeClasses = useCallback(() => {
     const uid = auth.currentUser?.uid;
+<<<<<<< HEAD
     if (!uid) return;
 
     unsubClassesRef.current?.();
@@ -188,6 +198,25 @@ export default function HomeScreen() {
       },
       (err) => console.warn("[Dashboard] classes listener error:", err),
     );
+=======
+    if (!uid) {
+      setLoadingExams(false);
+      return;
+    }
+    setLoadingExams(true);
+    setExamsError(null);
+    try {
+      const exams = await ExamService.getExamsByUser();
+      // Service already prioritizes Firestore if online
+      setRecentExams(exams.slice(0, 5));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load exams.";
+      setExamsError(msg);
+    } finally {
+      setLoadingExams(false);
+      setRefreshing(false);
+    }
+>>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
   }, []);
 
   // ── Mount: start both listeners ───────────────────────────────────────
@@ -251,14 +280,26 @@ export default function HomeScreen() {
         return;
       }
 
-      await GradeStorageService.syncOfflineQueue();
-      Toast.show({
-        type: "success",
-        text1: "Sync Complete",
-        text2: `Successfully synced ${count} items.`,
-      });
-      onRefresh(); // Refresh stats/exams since we've added new records
+      const { SyncService } = await import("@/services/syncService");
+      const result = await SyncService.syncPendingUpdates();
+
+      if (result.success) {
+        Toast.show({
+          type: "success",
+          text1: "Sync Complete",
+          text2: `Successfully synced data to cloud.`,
+        });
+        loadDashboard();
+        loadRecentExams();
+      } else {
+        Toast.show({
+          type: "info",
+          text1: "Up to Date",
+          text2: "No pending data to sync.",
+        });
+      }
     } catch (e) {
+      console.error("Sync Error:", e);
       Toast.show({
         type: "error",
         text1: "Sync Failed",
@@ -290,25 +331,26 @@ export default function HomeScreen() {
 
   const colors = darkModeEnabled
     ? {
-        screenBg: "#111815",
-        headerBg: "#1a2520",
-        headerBorder: "#2b3b34",
-        title: "#e7f1eb",
-        subtitle: "#9db1a6",
-        icon: "#dce8e1",
-        primary: "#3f6b54",
-        cardBg: "#1f2b26",
-        cardBorder: "#34483f",
-        cardIconBg: "#2a3a33",
-        value: "#8fd1ad",
-        examTitle: "#e3eee8",
-        examMeta: "#a3b6ab",
-        surfaceAccent: "#2f8a74",
-        quickActionBg: "#1f3a2f",
-        quickActionBorder: "#4f7a67",
-        quickActionText: "#e8f6ee",
-      }
+      screenBg: "#111815",
+      headerBg: "#1a2520",
+      headerBorder: "#2b3b34",
+      title: "#e7f1eb",
+      subtitle: "#9db1a6",
+      icon: "#dce8e1",
+      primary: "#3f6b54",
+      cardBg: "#1f2b26",
+      cardBorder: "#34483f",
+      cardIconBg: "#2a3a33",
+      value: "#8fd1ad",
+      examTitle: "#e3eee8",
+      examMeta: "#a3b6ab",
+      surfaceAccent: "#2f8a74",
+      quickActionBg: "#1f3a2f",
+      quickActionBorder: "#4f7a67",
+      quickActionText: "#e8f6ee",
+    }
     : {
+<<<<<<< HEAD
         screenBg: "#eef1ef",
         headerBg: "#fff",
         headerBorder: "#d8dfda",
@@ -327,6 +369,26 @@ export default function HomeScreen() {
         quickActionBorder: "#3d5a3d",
         quickActionText: "#ffffff",
       };
+=======
+      screenBg: "#eef1ef",
+      headerBg: "#fff",
+      headerBorder: "#d8dfda",
+      title: "#24362f",
+      subtitle: "#6c7d74",
+      icon: "#24362f",
+      primary: "#3d5a3d",
+      cardBg: "#f0ead6",
+      cardBorder: "#8cb09a",
+      cardIconBg: "#dbe7df",
+      value: "#2f6a50",
+      examTitle: "#333",
+      examMeta: "#666",
+      surfaceAccent: "#2f8a74",
+      quickActionBg: "#3d5a3d",
+      quickActionBorder: "#3d5a3d",
+      quickActionText: "#ffffff",
+    };
+>>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 
   return (
     <View style={[styles.container, { backgroundColor: colors.screenBg }]}>

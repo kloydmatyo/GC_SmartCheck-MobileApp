@@ -11,59 +11,11 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-// @ts-ignore
-import Realm from "realm";
 import { GradeStorageRecord, GradingResult } from "../types/scanning";
 import { LogService } from "./logService";
+import { OfflineGrade, RealmService } from "./realmService";
 
 const GRADE_RESULTS_COLLECTION = "scannedResults";
-
-export class OfflineGrade extends Realm.Object<OfflineGrade> {
-  _id!: Realm.BSON.ObjectId;
-  studentId!: string;
-  examId!: string;
-  score!: number;
-  totalPoints!: number;
-  percentage!: number;
-  gradeEquivalent!: string;
-  correctAnswers!: number;
-  totalQuestions!: number;
-  dateScanned!: string;
-  status!: string;
-  scannedBy!: string;
-  createdAt!: Date;
-
-  static schema: Realm.ObjectSchema = {
-    name: "OfflineGrade",
-    primaryKey: "_id",
-    properties: {
-      _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
-      studentId: "string",
-      examId: "string",
-      score: "int",
-      totalPoints: "int",
-      percentage: "double",
-      gradeEquivalent: "string",
-      correctAnswers: "int",
-      totalQuestions: "int",
-      dateScanned: "string",
-      status: "string",
-      scannedBy: "string",
-      createdAt: "date",
-    },
-  };
-}
-
-let realmInstance: Realm | null = null;
-async function getRealm(): Promise<Realm> {
-  if (!realmInstance) {
-    realmInstance = await Realm.open({
-      schema: [OfflineGrade],
-      schemaVersion: 1,
-    });
-  }
-  return realmInstance;
-}
 
 export interface SaveResult {
   success: boolean;
@@ -186,30 +138,45 @@ export class GradeStorageService {
       LogService.warn("EXAM_ID_INVALID", "Empty exam ID provided");
       return false;
     }
+
+    // Check staging first if it's a staging ID
+    if (examId.startsWith("staging_")) {
+      try {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey("OfflineQuiz", new Realm.BSON.ObjectId(hexId));
+        return !!sQuiz;
+      } catch (e) {
+        console.error("Error validating staging exam:", e);
+        return false;
+      }
+    }
+
     try {
+      // 1. Try Firestore
       const snap = await getDoc(doc(db, "exams", examId));
-      if (!snap.exists()) {
-        LogService.warn("EXAM_ID_INVALID", `Exam ID not found: ${examId}`, {
-          examId,
-        });
-        return false;
+      if (snap.exists()) {
+        const status = snap.data()?.status as string | undefined;
+        return !status || status === "Active";
       }
-      const status = snap.data()?.status as string | undefined;
-      if (status && status !== "Active") {
-        LogService.warn(
-          "EXAM_ID_INVALID",
-          `Exam is not active (status: ${status})`,
-          { examId, status },
-        );
-        return false;
-      }
-      return true;
+
+      // 2. Fallback to local cache if Firestore record not found or offline
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey("QuizCache", examId);
+      return !!cached;
     } catch (error) {
-      LogService.error("EXAM_ID_INVALID", "Failed to validate exam ID", {
-        examId,
-        error,
-      });
-      return true;
+      // If we're offline, try cache before giving up
+      try {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cached = cacheRealm.objectForPrimaryKey("QuizCache", examId);
+        return !!cached;
+      } catch (cacheError) {
+        LogService.error("EXAM_ID_INVALID", "Failed to validate exam ID anywhere", {
+          examId,
+          error,
+        });
+        return true; // Allow as a last resort if everything fails
+      }
     }
   }
   static async isDuplicate(
@@ -434,7 +401,7 @@ export class GradeStorageService {
   ): Promise<SaveResult> {
     try {
       console.log(`[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`);
-      const realm = await getRealm();
+      const realm = await RealmService.getStagingRealm();
 
       realm.write(() => {
         realm.create("OfflineGrade", {
@@ -494,7 +461,7 @@ export class GradeStorageService {
 
   static async getOfflineItemCount(): Promise<number> {
     try {
-      const realm = await getRealm();
+      const realm = await RealmService.getStagingRealm();
       return realm.objects<OfflineGrade>("OfflineGrade").length;
     } catch (error) {
       console.error("[GradeStorageService] Failed to get offline item count", error);
@@ -519,7 +486,7 @@ export class GradeStorageService {
         return;
       }
 
-      const realm = await getRealm();
+      const realm = await RealmService.getStagingRealm();
       const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade");
 
       if (offlineGrades.length === 0) {

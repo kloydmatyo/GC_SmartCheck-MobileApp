@@ -1,22 +1,21 @@
 import StatusManager from "@/components/exam/StatusManager";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
-import { OfflineStorageService } from "@/services/offlineStorageService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Clipboard,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Clipboard,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth } from "../../config/firebase";
@@ -65,27 +64,27 @@ export default function ExamPreviewScreen() {
 
   const colors = darkModeEnabled
     ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        border: "#34483f",
-        cardBg: "#1f2b26",
-        cardSoft: "#2a3a33",
-        title: "#e7f1eb",
-        text: "#b9c9c0",
-        icon: "#8fd1ad",
-        accent: "#9bd8b8",
-      }
+      bg: "#111815",
+      headerBg: "#1a2520",
+      border: "#34483f",
+      cardBg: "#1f2b26",
+      cardSoft: "#2a3a33",
+      title: "#e7f1eb",
+      text: "#b9c9c0",
+      icon: "#8fd1ad",
+      accent: "#9bd8b8",
+    }
     : {
-        bg: "#eef1ef",
-        headerBg: "#3d5a3d",
-        border: "#2f4a38",
-        cardBg: "#3d5a3d",
-        cardSoft: "#2d4a2d",
-        title: "#e8f6ee",
-        text: "#b8d4b8",
-        icon: "#8fd1ad",
-        accent: "#8fd1ad",
-      };
+      bg: "#eef1ef",
+      headerBg: "#3d5a3d",
+      border: "#2f4a38",
+      cardBg: "#3d5a3d",
+      cardSoft: "#2d4a2d",
+      title: "#e8f6ee",
+      text: "#b8d4b8",
+      icon: "#8fd1ad",
+      accent: "#8fd1ad",
+    };
 
   useEffect(() => {
     loadExamData();
@@ -111,84 +110,26 @@ export default function ExamPreviewScreen() {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setIsOffline(!online);
 
-      // Prefer live data when online so recent edits are immediately reflected.
-      if (online) {
-        try {
-          const authorized = await ExamService.isAuthorized(
-            currentUser.uid,
-            examId,
-          );
-          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-          if (!authorized) {
-            setError("You are not authorized to view this exam.");
-            return;
-          }
+      // Fetch exam data (getExamById handles online/offline and cache/staging logic)
+      const examData = await ExamService.getExamById(examId);
 
-          const examData = await ExamService.getExamById(examId);
-          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-          if (!examData) {
-            setError("Exam not found. Please check the exam ID.");
-            return;
-          }
-
-          setExam(examData);
-          return;
-        } catch (liveError) {
-          console.warn(
-            "Failed to fetch live exam data, attempting offline fallback:",
-            liveError,
-          );
-        }
-      }
-
-      // Offline fallback
-      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      if (!offlineExam) {
-        setError(
-          "This exam is not available offline. Please connect to the internet.",
-        );
+
+      if (!examData) {
+        setError("Exam not found or not available offline.");
         return;
       }
 
-      const examData: ExamPreviewData = {
-        metadata: {
-          examId,
-          examCode: examId,
-          title: offlineExam.title,
-          subject: "",
-          section: "",
-          date: offlineExam.createdAt.toISOString(),
-          status: "Active",
-          version: offlineExam.version,
-          createdAt: offlineExam.createdAt,
-          updatedAt: offlineExam.updatedAt,
-          createdBy: offlineExam.createdBy || "",
-        },
-        totalQuestions: offlineExam.questions?.length || 0,
-        choiceFormat: "A-D",
-        answerKey: {
-          id: `ak_${examId}_offline`,
-          examId,
-          answers: offlineExam.answerKey?.answers || [],
-          questionSettings: [],
-          locked: true,
-          createdAt: offlineExam.createdAt,
-          updatedAt: offlineExam.updatedAt,
-          createdBy: offlineExam.createdBy || "",
-          version: offlineExam.version || 1,
-        },
-        lastModified: offlineExam.updatedAt,
-      };
-
       setExam(examData);
     } catch (err) {
-      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      setError("Failed to load exam data. Please try again.");
-      console.error(err);
+      console.error("Error loading exam preview:", err);
+      if (mountedRef.current && requestId === loadRequestRef.current) {
+        setError("Failed to load exam data. Please try again.");
+      }
     } finally {
-      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      setLoading(false);
+      if (mountedRef.current && requestId === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 

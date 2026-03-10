@@ -1,21 +1,21 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import StatusModal from "@/components/common/StatusModal";
 import { auth } from "@/config/firebase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import React from "react";
 import {
-    DeviceEventEmitter,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  DeviceEventEmitter,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 export default function SettingsScreen() {
@@ -78,47 +78,47 @@ export default function SettingsScreen() {
 
   const colors = darkModeEnabled
     ? {
-        background: "#111815",
-        header: "#1a2520",
-        headerText: "#e7f1eb",
-        card: "#1f2b26",
-        itemBg: "#22302a",
-        border: "#34483f",
-        itemBorder: "#2b3b34",
-        text: "#e7f1eb",
-        itemText: "#e7f1eb",
-        textSecondary: "#d0ddd7",
-        itemMuted: "#c8d6d0",
-        muted: "#c1d0c9",
-        accent: "#8fd1ad",
-        iconBg: "#2a3a33",
-        switchOff: "#4b6358",
-        destructiveBg: "#2a1d1d",
-        sectionChipBg: "#22302a",
-        sectionChipBorder: "#34483f",
-        sectionChipText: "#d0ddd7",
-      }
+      background: "#111815",
+      header: "#1a2520",
+      headerText: "#e7f1eb",
+      card: "#1f2b26",
+      itemBg: "#22302a",
+      border: "#34483f",
+      itemBorder: "#2b3b34",
+      text: "#e7f1eb",
+      itemText: "#e7f1eb",
+      textSecondary: "#d0ddd7",
+      itemMuted: "#c8d6d0",
+      muted: "#c1d0c9",
+      accent: "#8fd1ad",
+      iconBg: "#2a3a33",
+      switchOff: "#4b6358",
+      destructiveBg: "#2a1d1d",
+      sectionChipBg: "#22302a",
+      sectionChipBorder: "#34483f",
+      sectionChipText: "#d0ddd7",
+    }
     : {
-        background: "#eef1ef",
-        header: "#fff",
-        headerText: "#24362f",
-        card: "#3d5a3d",
-        itemBg: "#3d5a3d",
-        border: "#8cb09a",
-        itemBorder: "#2f4a38",
-        text: "#e8f5e9",
-        itemText: "#e8f5e9",
-        textSecondary: "#b8d4b8",
-        itemMuted: "#b8d4b8",
-        muted: "#b8d4b8",
-        accent: "#3d5a3d",
-        iconBg: "#dbe7df",
-        switchOff: "#95bba6",
-        destructiveBg: "#f8efe3",
-        sectionChipBg: "#dbe7df",
-        sectionChipBorder: "#8cb09a",
-        sectionChipText: "#5e7268",
-      };
+      background: "#eef1ef",
+      header: "#fff",
+      headerText: "#24362f",
+      card: "#3d5a3d",
+      itemBg: "#3d5a3d",
+      border: "#8cb09a",
+      itemBorder: "#2f4a38",
+      text: "#e8f5e9",
+      itemText: "#e8f5e9",
+      textSecondary: "#b8d4b8",
+      itemMuted: "#b8d4b8",
+      muted: "#b8d4b8",
+      accent: "#3d5a3d",
+      iconBg: "#dbe7df",
+      switchOff: "#95bba6",
+      destructiveBg: "#f8efe3",
+      sectionChipBg: "#dbe7df",
+      sectionChipBorder: "#8cb09a",
+      sectionChipText: "#5e7268",
+    };
 
   const handleLogout = () => {
     setLogoutConfirmVisible(true);
@@ -126,6 +126,13 @@ export default function SettingsScreen() {
 
   const confirmLogout = async () => {
     try {
+      const { RealmService } = await import("@/services/realmService");
+      const { OfflineStorageService } = await import("@/services/offlineStorageService");
+
+      // Clear all local data on logout
+      await RealmService.clearCache();
+      await OfflineStorageService.clearAllData();
+
       await signOut(auth);
       setLogoutConfirmVisible(false);
       router.replace("/sign-in");
