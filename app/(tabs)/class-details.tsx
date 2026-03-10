@@ -129,6 +129,8 @@ export default function ClassDetailsScreen() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [examMenuVisible, setExamMenuVisible] = useState(false);
   const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
+  const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] = useState(false);
+  const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
   const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
   const [deleteExamConfirmVisible, setDeleteExamConfirmVisible] = useState(false);
   const [examRows, setExamRows] = useState<ExamRow[]>([]);
@@ -253,6 +255,7 @@ export default function ClassDetailsScreen() {
 
     try {
       await ClassService.updateClass(classData.id, { isArchived: true });
+      setArchiveClassConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({
         type: "success",
@@ -423,6 +426,39 @@ export default function ClassDetailsScreen() {
         text2: "Failed to delete exam",
       });
     }
+  };
+
+  const handleDeleteClass = async () => {
+    if (!classData) return;
+
+    try {
+      await ClassService.deleteClass(classData.id);
+      setDeleteClassConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: `${classData.class_name} deleted successfully`,
+      });
+      router.replace("/(tabs)/classes");
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
+    }
+  };
+
+  const requestArchiveClass = () => {
+    setSettingsMenuVisible(false);
+    setArchiveClassConfirmVisible(true);
+  };
+
+  const requestDeleteClass = () => {
+    setSettingsMenuVisible(false);
+    setDeleteClassConfirmVisible(true);
   };
 
   const requestArchiveExam = () => {
@@ -825,7 +861,7 @@ export default function ClassDetailsScreen() {
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
-                handleArchiveClass();
+                requestArchiveClass();
               }}
             >
               <Text style={[styles.menuItemText, styles.menuArchiveText]}>
@@ -835,12 +871,7 @@ export default function ClassDetailsScreen() {
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
-                setSettingsMenuVisible(false);
-                Toast.show({
-                  type: "info",
-                  text1: "Delete",
-                  text2: "Delete Class is not wired yet.",
-                });
+                requestDeleteClass();
               }}
             >
               <Text style={[styles.menuItemText, styles.menuDeleteText]}>
@@ -850,6 +881,28 @@ export default function ClassDetailsScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmationModal
+        visible={archiveClassConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${classData?.class_name ?? "this class"}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveClassConfirmVisible(false)}
+        onConfirm={handleArchiveClass}
+      />
+
+      <ConfirmationModal
+        visible={deleteClassConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${classData?.class_name ?? "this class"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteClassConfirmVisible(false)}
+        onConfirm={handleDeleteClass}
+      />
 
       <Modal
         visible={examMenuVisible}
