@@ -485,19 +485,10 @@ export class ExamService {
           answerKeyId = selected.id;
           console.log("[ExamService] Found latest answer key via query:", answerKeyId);
         } else {
-<<<<<<< HEAD
-          console.log("[ExamService] No answer key found for exam:", examId);
-
-          // Strategy 3: Try to find by ID pattern (for web app compatibility)
-          console.log("[ExamService] Trying Strategy 3: Search by ID pattern");
-          const allAnswerKeysSnapshot = await getDocs(
-            collection(db, "answerKeys"),
-=======
           // Strategy 2: Query for answer key by examId
           console.log(
             "[ExamService] Timestamp-based ID not found, querying by examId:",
             examId,
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
           );
           const { collection, query, where, getDocs } =
             await import("firebase/firestore");
@@ -632,46 +623,6 @@ export class ExamService {
           }
         }
 
-<<<<<<< HEAD
-      // Transform to ExamPreviewData format
-      return {
-        metadata: {
-          examId: examSnap.id,
-          title: examData.title || "Untitled Exam",
-          subject: examData.subject,
-          section: examData.section,
-          date: examData.created_at,
-          examCode: examData.examCode || examData.room || "N/A",
-          status: examData.status || "Draft",
-          createdAt: examData.createdAt?.toDate() || new Date(),
-          updatedAt: examData.updatedAt?.toDate() || new Date(),
-          createdBy: examData.createdBy || "",
-          version: examData.version || 1,
-        },
-        answerKey: answerKeyData
-          ? {
-            id: answerKeyId || "",
-            examId: examData.examId || examSnap.id,
-            answers: extractedAnswers, // Use extracted answers
-            questionSettings: answerKeyData.questionSettings || [],
-            locked: answerKeyData.locked || false,
-            createdAt: answerKeyData.createdAt?.toDate() || new Date(),
-            updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
-            createdBy: answerKeyData.createdBy || "",
-            version: answerKeyData.version || 1,
-          }
-          : {
-            id: "",
-            examId: examSnap.id,
-            answers: extractedAnswers, // Use extracted answers (empty)
-            questionSettings: [],
-            locked: false,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            createdBy: "",
-            version: 1,
-          },
-=======
         // Transform to ExamPreviewData format
         return {
           metadata: {
@@ -781,7 +732,6 @@ export class ExamService {
           createdBy: "",
           version: 1,
         },
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
         templateLayout: {
           name: "Standard Template",
           totalQuestions: totalQuestions,

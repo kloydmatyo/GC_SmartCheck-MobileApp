@@ -1,27 +1,18 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-<<<<<<< HEAD
-=======
 import { ExamService } from "@/services/examService";
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 import { GradeStorageService } from "@/services/gradeStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
-<<<<<<< HEAD
 import {
   collection,
-  onSnapshot,
-  orderBy,
+  getDocs,
   query,
-  where,
+  where
 } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-=======
-import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 import {
   ActivityIndicator,
   Image,
@@ -108,125 +99,108 @@ export default function HomeScreen() {
     })();
   }, []);
 
-  // ── Real-time listener: exams ─────────────────────────────────────────
-  const subscribeExams = useCallback(() => {
+  // ── Listener Replacement: exams ─────────────────────────────────────────
+  const subscribeExams = useCallback(async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    unsubExamsRef.current?.();
     setLoadingExams(true);
     setExamsError(null);
 
-    const q = query(
-      collection(db, "exams"),
-      where("createdBy", "==", uid),
-      orderBy("created_at", "desc"),
-    );
+    try {
+      const exams = await ExamService.getExamsByUser();
+      // Sort exams by date descending
+      exams.sort((a, b) => new Date(b.date || b.createdAt || 0).getTime() < new Date(a.date || a.createdAt || 0).getTime() ? 1 : -1);
 
-    unsubExamsRef.current = onSnapshot(
-      q,
-      (snap) => {
-        const exams = snap.docs
-          .map((d) => {
-            const data = d.data();
-            const createdDate = toDate(data.created_at || data.createdAt);
-            return {
-              id: d.id,
-              title: data.title ?? "Untitled Exam",
-              subject: data.subject ?? data.course_subject ?? "—",
-              date: formatDate(data.created_at || data.createdAt),
-              papers: data.scanned_papers ?? null,
-              status: normalizeStatus(data.status),
-              isArchived: data.isArchived || false,
-              createdAtTs: createdDate ? createdDate.getTime() : 0,
-              generated_sheets: data.generated_sheets || [],
-            };
-          })
-          .filter((e) => !e.isArchived);
+      const totalSheets = exams.reduce((sum, exam) => {
+        if (Array.isArray(exam.generated_sheets)) {
+          return (
+            sum +
+            exam.generated_sheets.reduce(
+              (s: number, sheet: any) => s + (sheet.sheet_count || 0),
+              0,
+            )
+          );
+        }
+        return sum;
+      }, 0);
 
-        const totalSheets = exams.reduce((sum, exam) => {
-          if (Array.isArray(exam.generated_sheets)) {
-            return (
-              sum +
-              exam.generated_sheets.reduce(
-                (s: number, sheet: any) => s + (sheet.sheet_count || 0),
-                0,
-              )
-            );
-          }
-          return sum;
-        }, 0);
-
-        setStats((prev) => ({
-          ...prev,
-          totalExams: exams.length,
-          totalSheets,
-        }));
-        setRecentExams(exams);
-        setLoadingExams(false);
-        setLoading(false);
-        setRefreshing(false);
-      },
-      (err) => {
-        setExamsError(err.message ?? "Failed to load exams.");
-        setLoadingExams(false);
-        setLoading(false);
-        setRefreshing(false);
-      },
-    );
+      setStats((prev) => ({
+        ...prev,
+        totalExams: exams.length,
+        totalSheets,
+      }));
+      setRecentExams(exams.slice(0, 5).map((e: any) => ({
+        id: e.id,
+        title: e.title ?? "Untitled Exam",
+        subject: e.class ?? e.subject ?? "—",
+        date: formatDate(e.date || e.createdAt),
+        papers: e.papers ?? null,
+        status: normalizeStatus(e.status),
+      })));
+    } catch (err: any) {
+      setExamsError(err.message ?? "Failed to load exams.");
+    } finally {
+      setLoadingExams(false);
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  // ── Real-time listener: classes (for student count) ───────────────────
-  const subscribeClasses = useCallback(() => {
+  // ── Listener Replacement: classes (for student count) ───────────────────
+  const subscribeClasses = useCallback(async () => {
     const uid = auth.currentUser?.uid;
-<<<<<<< HEAD
     if (!uid) return;
 
-    unsubClassesRef.current?.();
+    try {
+      const { NetworkService } = await import("@/services/networkService");
+      const isOnline = await NetworkService.isOnline();
+      let totalStudents = 0;
 
-    const q = query(collection(db, "classes"), where("createdBy", "==", uid));
+      if (isOnline) {
+        const q = query(collection(db, "classes"), where("createdBy", "==", uid));
+        const snap = await Promise.race([
+          getDocs(q),
+          new Promise<any>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000))
+        ]).catch(() => ({ docs: [] }));
 
-    unsubClassesRef.current = onSnapshot(
-      q,
-      (snap) => {
-        const totalStudents = snap.docs.reduce((sum, d) => {
+        totalStudents = snap.docs.reduce((sum: number, d: any) => {
           const data = d.data();
           if (data.isArchived) return sum;
           return sum + (data.students?.length || 0);
         }, 0);
-        setStats((prev) => ({ ...prev, totalStudents }));
-      },
-      (err) => console.warn("[Dashboard] classes listener error:", err),
-    );
-=======
-    if (!uid) {
-      setLoadingExams(false);
-      return;
+      }
+
+      // Add local students from Staging and Cache if offline
+      const { RealmService } = await import("@/services/realmService");
+      const stagingRealm = await RealmService.getStagingRealm();
+      const sClasses = stagingRealm.objects<any>("OfflineClass");
+      let sStudents = 0;
+      sClasses.forEach(c => {
+        const students = typeof c.students === 'string' ? JSON.parse(c.students || "[]") : (c.students || []);
+        sStudents += students.length;
+      });
+
+      if (!isOnline) {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cClasses = cacheRealm.objects<any>("ClassCache").filtered(`createdBy == "${uid}"`);
+        cClasses.forEach((c: any) => {
+          if (c.isArchived) return;
+          const students = typeof c.students === 'string' ? JSON.parse(c.students || "[]") : (c.students || []);
+          sStudents += students.length;
+        });
+      }
+
+      setStats((prev) => ({ ...prev, totalStudents: isOnline ? totalStudents + sStudents : sStudents }));
+    } catch (err) {
+      console.warn("[Dashboard] classes listener error:", err);
     }
-    setLoadingExams(true);
-    setExamsError(null);
-    try {
-      const exams = await ExamService.getExamsByUser();
-      // Service already prioritizes Firestore if online
-      setRecentExams(exams.slice(0, 5));
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load exams.";
-      setExamsError(msg);
-    } finally {
-      setLoadingExams(false);
-      setRefreshing(false);
-    }
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
   }, []);
 
-  // ── Mount: start both listeners ───────────────────────────────────────
+  // ── Mount: start listeners ─────────────────────────────────────────
   useEffect(() => {
     subscribeExams();
     subscribeClasses();
-    return () => {
-      unsubExamsRef.current?.();
-      unsubClassesRef.current?.();
-    };
   }, [subscribeExams, subscribeClasses]);
 
   // ── Deprecated helpers kept so pull-to-refresh still works ───────────
@@ -350,26 +324,6 @@ export default function HomeScreen() {
       quickActionText: "#e8f6ee",
     }
     : {
-<<<<<<< HEAD
-        screenBg: "#eef1ef",
-        headerBg: "#fff",
-        headerBorder: "#d8dfda",
-        title: "#24362f",
-        subtitle: "#6c7d74",
-        icon: "#24362f",
-        primary: "#3d5a3d",
-        cardBg: "#f0ead6",
-        cardBorder: "#8cb09a",
-        cardIconBg: "#b8cfbe",
-        value: "#2f6a50",
-        examTitle: "#333",
-        examMeta: "#666",
-        surfaceAccent: "#2f8a74",
-        quickActionBg: "#3d5a3d",
-        quickActionBorder: "#3d5a3d",
-        quickActionText: "#ffffff",
-      };
-=======
       screenBg: "#eef1ef",
       headerBg: "#fff",
       headerBorder: "#d8dfda",
@@ -379,7 +333,7 @@ export default function HomeScreen() {
       primary: "#3d5a3d",
       cardBg: "#f0ead6",
       cardBorder: "#8cb09a",
-      cardIconBg: "#dbe7df",
+      cardIconBg: "#b8cfbe",
       value: "#2f6a50",
       examTitle: "#333",
       examMeta: "#666",
@@ -388,7 +342,6 @@ export default function HomeScreen() {
       quickActionBorder: "#3d5a3d",
       quickActionText: "#ffffff",
     };
->>>>>>> 22747b7 (implemented the offline mode adding new classes and exams now saved to realmdb)
 
   return (
     <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
