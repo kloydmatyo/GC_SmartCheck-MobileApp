@@ -746,28 +746,7 @@ export default function CreateQuizScreen() {
           )}
         </View>
 
-        {/* Folder / Subject (Optional) */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>FOLDER / SUBJECT (OPTIONAL)</Text>
-          <TextInput
-            style={[
-              styles.input,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderWidth: 1,
-                borderColor: "#34483f",
-                color: "#e7f1eb",
-              },
-            ]}
-            placeholder="e.g., Mathematics, Science"
-            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#8B9D8B"}
-            value={subject}
-            onChangeText={setSubject}
-            editable={!loading}
-          />
-        </View>
-
-        {/* Manual Editing Section */}
+       {/* Manual Editing Section */}
         <View
           style={[
             styles.manualSection,
@@ -805,34 +784,6 @@ export default function CreateQuizScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Answer Key Section */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>ANSWER KEY</Text>
-          <TouchableOpacity
-            style={[
-              styles.scanButton,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderWidth: 1,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={handleScanAnswerKey}
-            disabled={loading}
-          >
-            <Ionicons
-              name="camera-outline"
-              size={32}
-              color={darkModeEnabled ? colors.accent : "#E8F5E9"}
-            />
-            <View style={styles.scanTextContainer}>
-              <Text style={[styles.scanTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Scan Answer Key</Text>
-              <Text style={[styles.scanSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
-                Use the camera scanner to scan the answer key
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
       {/* Save Button */}

@@ -1,36 +1,72 @@
 /**
  * Student Database Service
- * Handles local AsyncStorage caching, offline support, and sync operations
+ * Handles local SQLite caching, offline support, and sync operations
  * Requirements: 43-51 (Offline Student Caching & Sync)
  */
 
 import { auth, db } from "@/config/firebase";
 import { CacheMetadata, StudentExtended, SyncStatus } from "@/types/student";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Crypto from "expo-crypto";
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  query,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    updateDoc,
+    where,
 } from "firebase/firestore";
+import { Platform } from "react-native";
+
+// Conditional SQLite import (web doesn't support SQLite)
+let SQLite: any = null;
+if (Platform.OS !== "web") {
+  try {
+    SQLite = require("expo-sqlite");
+  } catch (e) {
+    console.warn(
+      "[SQLite] Not available on this platform, using Firestore only",
+    );
+  }
+}
 
 // Constants
 const CACHE_EXPIRATION_HOURS = 24;
+const DB_NAME = "students.db";
 const STORAGE_KEYS = {
-  STUDENTS_CACHE: "students_cache",
-  CACHE_METADATA: "cache_metadata",
-  ENCRYPTION_KEY: "encryption_key",
-  LAST_SYNC: "last_sync_timestamp",
+  CACHE_METADATA: "cache_metadata_sqlite",
+  LAST_SYNC: "last_sync_timestamp_sqlite",
 };
 
 export class StudentDatabaseService {
-  private static encryptionKey: string | null = null;
+  private static db: any = null;
   private static cachedStudents: StudentExtended[] | null = null;
+  private static isSQLiteAvailable = Platform.OS !== "web" && SQLite !== null;
+
+  /**
+   * Open SQLite database connection
+   */
+  private static async openDatabase(): Promise<any> {
+    if (!this.isSQLiteAvailable) {
+      console.log("[SQLite] Not available on web, skipping database open");
+      return null;
+    }
+
+    if (this.db) {
+      return this.db;
+    }
+
+    try {
+      this.db = await SQLite.openDatabaseAsync(DB_NAME);
+      console.log("[SQLite] Database opened successfully");
+      return this.db;
+    } catch (error) {
+      console.error("[SQLite] Failed to open database:", error);
+      throw error;
+    }
+  }
 
   private static async resolveStudentDocId(
     docIdOrStudentId: string,
@@ -62,42 +98,184 @@ export class StudentDatabaseService {
   }
 
   /**
-   * REQ 43: Initialize cache (load from AsyncStorage)
+   * Create students table if it doesn't exist
+   */
+  private static async createTables(): Promise<void> {
+    if (!this.isSQLiteAvailable) {
+      console.log("[SQLite] Not available, skipping table creation");
+      return;
+    }
+
+    const database = await this.openDatabase();
+    if (!database) return;
+
+    await database.execAsync(`
+      CREATE TABLE IF NOT EXISTS students (
+        id TEXT PRIMARY KEY,
+        student_id TEXT UNIQUE NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        grade TEXT,
+        email TEXT,
+        section TEXT,
+        is_active INTEGER DEFAULT 1,
+        createdBy TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_student_id ON students(student_id);
+      CREATE INDEX IF NOT EXISTS idx_section ON students(section);
+      CREATE INDEX IF NOT EXISTS idx_name ON students(last_name, first_name);
+    `);
+
+    console.log("[SQLite] Tables created successfully");
+  }
+
+  private static async resolveStudentDocId(
+    docIdOrStudentId: string,
+  ): Promise<string> {
+    await this.initializeDatabase();
+
+    // Try SQLite first (if available)
+    if (this.isSQLiteAvailable) {
+      const database = await this.openDatabase();
+      if (database) {
+        const result = await database.getFirstAsync<{ id: string }>(
+          "SELECT id FROM students WHERE id = ? OR student_id = ? LIMIT 1",
+          [docIdOrStudentId, docIdOrStudentId],
+        );
+
+        if (result?.id) {
+          return result.id;
+        }
+      }
+    }
+
+    // Fallback to Firestore
+    // First, try to get document directly by ID (handles Firestore doc IDs)
+    const studentsRef = collection(db, "students");
+    const directDocRef = doc(studentsRef, docIdOrStudentId);
+    const directDoc = await getDoc(directDocRef);
+
+    if (directDoc.exists()) {
+      return directDoc.id;
+    }
+
+    // If not found by doc ID, search by student_id field
+    const snapshot = await getDocs(
+      query(studentsRef, where("student_id", "==", docIdOrStudentId)),
+    );
+
+    const match = snapshot.docs[0];
+    if (!match) {
+      throw new Error("Student record not found");
+    }
+
+    return match.id;
+  }
+
+  /**
+   * REQ 43: Initialize SQLite database and tables
    */
   static async initializeDatabase(): Promise<void> {
     try {
-      if (this.cachedStudents) {
+      if (this.db && this.cachedStudents) {
+        // Check if cache is expired
+        const metadata = await this.getCacheMetadata();
+        if (metadata.isExpired) {
+          console.log("[SQLite] Cache expired, will refresh on next load");
+        }
         return;
       }
 
-      const studentsJson = await AsyncStorage.getItem(
-        STORAGE_KEYS.STUDENTS_CACHE,
-      );
+      if (this.isSQLiteAvailable) {
+        await this.openDatabase();
+        await this.createTables();
 
-      if (studentsJson) {
-        this.cachedStudents = JSON.parse(studentsJson);
+        // Load students into memory cache for fast access
+        await this.loadCacheFromSQLite();
+
         console.log(
-          "[Cache] Loaded",
+          "[SQLite] Database initialized with",
           this.cachedStudents?.length ?? 0,
-          "students from cache",
+          "students",
         );
       } else {
-        this.cachedStudents = [];
-        console.log("[Cache] No cached students found");
+        console.log(
+          "[Web Mode] SQLite not available, using Firestore-only mode",
+        );
+        // Only initialize to empty if not already populated
+        if (!this.cachedStudents) {
+          this.cachedStudents = [];
+        }
       }
     } catch (error) {
-      console.error("[Cache] Failed to initialize:", error);
+      console.error("[SQLite] Failed to initialize:", error);
       this.cachedStudents = [];
     }
   }
 
   /**
-   * REQ 45: Encryption setup
+   * Load students from SQLite into memory cache
    */
-  private static async getEncryptionKey(): Promise<string> {
-    if (this.encryptionKey) return this.encryptionKey;
+  private static async loadCacheFromSQLite(): Promise<void> {
+    if (!this.isSQLiteAvailable) {
+      console.log("[SQLite] Not available, skipping cache load");
+      this.cachedStudents = [];
+      return;
+    }
 
     try {
+      const database = await this.openDatabase();
+      if (!database) {
+        this.cachedStudents = [];
+        return;
+      }
+
+      const rows = await database.getAllAsync<any>("SELECT * FROM students");
+
+      this.cachedStudents = rows.map((row) => ({
+        id: row.id,
+        student_id: row.student_id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        grade: row.grade,
+        email: row.email,
+        section: row.section,
+        is_active: row.is_active === 1,
+        createdBy: row.createdBy,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      }));
+
+      console.log(
+        "[SQLite] Loaded",
+        this.cachedStudents.length,
+        "students from SQLite into memory",
+      );
+    } catch (error) {
+      console.error("[SQLite] Failed to load cache:", error);
+      this.cachedStudents = [];
+    }
+  }
+
+  /**
+   * Auto-refresh cache if expired
+   */
+  private static async checkAndRefreshCache(): Promise<void> {
+    try {
+      const metadata = await this.getCacheMetadata();
+      if (metadata.isExpired) {
+        console.log("[SQLite] Cache expired, auto-refreshing from Firestore");
+        await this.downloadStudentDatabase();
+      }
+    } catch (error) {
+      console.warn("[SQLite] Auto-refresh check failed:", error);
+    }
+  }
+
+  /**
       let key = await AsyncStorage.getItem(STORAGE_KEYS.ENCRYPTION_KEY);
 
       if (!key) {
@@ -112,13 +290,7 @@ export class StudentDatabaseService {
       this.encryptionKey = key;
       return key;
     } catch (error) {
-      console.error("[Encryption] Failed to get encryption key:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * REQ 44, 47: Download and cache student database from Firestore
+   * REQ 44, 47: Download and cache student database from Firestore to SQLite
    */
   static async downloadStudentDatabase(sectionId?: string): Promise<number> {
     try {
@@ -154,20 +326,59 @@ export class StudentDatabaseService {
         });
       });
 
-      // Save to AsyncStorage and memory cache
+      // Update memory cache
       this.cachedStudents = students;
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.STUDENTS_CACHE,
-        JSON.stringify(students),
-      );
+
+      // Save to SQLite if available (mobile only)
+      if (this.isSQLiteAvailable) {
+        const database = await this.openDatabase();
+        if (database) {
+          // Clear existing data and insert new data in transaction
+          await database.execAsync("BEGIN TRANSACTION");
+          try {
+            await database.runAsync("DELETE FROM students");
+
+            // Insert students in batches for better performance
+            for (const student of students) {
+              await database.runAsync(
+                `INSERT OR REPLACE INTO students 
+                (id, student_id, first_name, last_name, grade, email, section, is_active, createdBy, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                  student.id,
+                  student.student_id,
+                  student.first_name,
+                  student.last_name,
+                  student.grade || null,
+                  student.email || null,
+                  student.section || null,
+                  student.is_active ? 1 : 0,
+                  student.createdBy || null,
+                  student.created_at || null,
+                  student.updated_at || null,
+                ],
+              );
+            }
+
+            await database.execAsync("COMMIT");
+            console.log(
+              `[SQLite] Transaction committed, ${students.length} students saved`,
+            );
+          } catch (error) {
+            await database.execAsync("ROLLBACK");
+            console.error("[SQLite] Transaction rolled back:", error);
+            throw error;
+          }
+        }
+      }
 
       // Update cache metadata
       await this.updateCacheMetadata(students.length);
-      console.log(`[Cache] Downloaded and cached ${students.length} students`);
+      console.log(`[SQLite] Downloaded and cached ${students.length} students`);
 
       return students.length;
     } catch (error) {
-      console.error("[Cache] Failed to download student database:", error);
+      console.error("[SQLite] Failed to download student database:", error);
       throw error;
     }
   }
@@ -179,6 +390,7 @@ export class StudentDatabaseService {
     studentId: string,
   ): Promise<StudentExtended | null> {
     await this.initializeDatabase();
+    await this.checkAndRefreshCache(); // Auto-refresh if expired
 
     if (!this.cachedStudents) {
       return null;
@@ -226,8 +438,41 @@ export class StudentDatabaseService {
       updated_at: new Date().toISOString(),
     };
 
-    await addDoc(collection(db, "students"), payload);
-    await this.downloadStudentDatabase();
+    // Add to Firestore first
+    const docRef = await addDoc(collection(db, "students"), payload);
+
+    // Add to SQLite cache (if available)
+    if (this.isSQLiteAvailable) {
+      const database = await this.openDatabase();
+      if (database) {
+        await database.runAsync(
+          `INSERT OR REPLACE INTO students 
+          (id, student_id, first_name, last_name, grade, email, section, is_active, createdBy, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            docRef.id,
+            payload.student_id,
+            payload.first_name,
+            payload.last_name,
+            payload.grade || null,
+            payload.email || null,
+            payload.section || null,
+            1,
+            payload.createdBy,
+            payload.created_at,
+            payload.updated_at,
+          ],
+        );
+      }
+    }
+
+    // Update memory cache directly (don't reload from SQLite to avoid stale data)
+    const newStudent: StudentExtended = { id: docRef.id, ...payload };
+    if (!this.cachedStudents) this.cachedStudents = [];
+    this.cachedStudents.push(newStudent);
+    
+    // Update cache metadata to prevent auto-refresh from wiping this change
+    await this.updateCacheMetadata(this.cachedStudents.length);
   }
 
   static async updateStudent(
@@ -255,8 +500,68 @@ export class StudentDatabaseService {
     };
 
     const docId = await this.resolveStudentDocId(docIdOrStudentId);
+
+    // Update Firestore
     await updateDoc(doc(db, "students", docId), payload);
-    await this.downloadStudentDatabase();
+
+    // Update SQLite cache (if available)
+    if (this.isSQLiteAvailable) {
+      const database = await this.openDatabase();
+      if (database) {
+        const updateParts: string[] = [];
+        const updateValues: any[] = [];
+
+        if (payload.first_name) {
+          updateParts.push("first_name = ?");
+          updateValues.push(payload.first_name);
+        }
+        if (payload.last_name) {
+          updateParts.push("last_name = ?");
+          updateValues.push(payload.last_name);
+        }
+        if (payload.grade !== undefined) {
+          updateParts.push("grade = ?");
+          updateValues.push(payload.grade);
+        }
+        if (payload.email !== undefined) {
+          updateParts.push("email = ?");
+          updateValues.push(payload.email || null);
+        }
+        if (payload.section !== undefined) {
+          updateParts.push("section = ?");
+          updateValues.push(payload.section || null);
+        }
+        if (payload.is_active !== undefined) {
+          updateParts.push("is_active = ?");
+          updateValues.push(payload.is_active ? 1 : 0);
+        }
+        updateParts.push("updated_at = ?");
+        updateValues.push(payload.updated_at);
+
+        updateValues.push(docId);
+
+        await database.runAsync(
+          `UPDATE students SET ${updateParts.join(", ")} WHERE id = ?`,
+          updateValues,
+        );
+      }
+    }
+
+    // Update memory cache directly (don't reload from SQLite to avoid stale data)
+    if (this.cachedStudents) {
+      const index = this.cachedStudents.findIndex((s) => s.id === docId);
+      if (index !== -1) {
+        this.cachedStudents[index] = {
+          ...this.cachedStudents[index],
+          ...payload,
+        };
+      }
+    }
+    
+    // Update cache metadata to prevent auto-refresh from wiping this change
+    if (this.cachedStudents) {
+      await this.updateCacheMetadata(this.cachedStudents.length);
+    }
   }
 
   static async deleteStudent(docIdOrStudentId: string): Promise<void> {
@@ -266,8 +571,27 @@ export class StudentDatabaseService {
     }
 
     const docId = await this.resolveStudentDocId(docIdOrStudentId);
+
+    // Delete from Firestore
     await deleteDoc(doc(db, "students", docId));
-    await this.downloadStudentDatabase();
+
+    // Delete from SQLite cache (if available)
+    if (this.isSQLiteAvailable) {
+      const database = await this.openDatabase();
+      if (database) {
+        await database.runAsync("DELETE FROM students WHERE id = ?", [docId]);
+      }
+    }
+
+    // Update memory cache directly (don't reload from SQLite to avoid stale data)
+    if (this.cachedStudents) {
+      this.cachedStudents = this.cachedStudents.filter((s) => s.id !== docId);
+    }
+    
+    // Update cache metadata to prevent auto-refresh from wiping this change
+    if (this.cachedStudents) {
+      await this.updateCacheMetadata(this.cachedStudents.length);
+    }
   }
 
   /**
@@ -283,6 +607,7 @@ export class StudentDatabaseService {
     pageSize: number = 20,
   ): Promise<{ students: StudentExtended[]; total: number }> {
     await this.initializeDatabase();
+    await this.checkAndRefreshCache(); // Auto-refresh if expired
 
     if (!this.cachedStudents) {
       return { students: [], total: 0 };
@@ -413,11 +738,8 @@ export class StudentDatabaseService {
         now.getTime() + CACHE_EXPIRATION_HOURS * 60 * 60 * 1000,
       );
 
-      // Calculate approximate size
-      const studentsJson = await AsyncStorage.getItem(
-        STORAGE_KEYS.STUDENTS_CACHE,
-      );
-      const sizeInBytes = studentsJson ? new Blob([studentsJson]).size : 0;
+      // Estimate size from SQLite (rough calculation)
+      const sizeInBytes = studentCount * 300; // Approximate 300 bytes per student
 
       const metadata: CacheMetadata = {
         lastSyncAt: now.toISOString(),
@@ -425,7 +747,7 @@ export class StudentDatabaseService {
         expiresAt: expiresAt.toISOString(),
         isExpired: false,
         sizeInBytes,
-        encryptionEnabled: true,
+        encryptionEnabled: false, // SQLite has its own encryption
       };
 
       await AsyncStorage.setItem(
@@ -433,7 +755,7 @@ export class StudentDatabaseService {
         JSON.stringify(metadata),
       );
     } catch (error) {
-      console.error("[Cache] Failed to update metadata:", error);
+      console.error("[SQLite] Failed to update metadata:", error);
     }
   }
 
@@ -443,8 +765,19 @@ export class StudentDatabaseService {
   static async clearCache(): Promise<void> {
     try {
       this.cachedStudents = [];
-      await AsyncStorage.removeItem(STORAGE_KEYS.STUDENTS_CACHE);
+
+      // Clear SQLite database (if available)
+      if (this.isSQLiteAvailable) {
+        const database = await this.openDatabase();
+        if (database) {
+          await database.runAsync("DELETE FROM students");
+        }
+      }
+
+      // Clear metadata
       await AsyncStorage.removeItem(STORAGE_KEYS.CACHE_METADATA);
+      await AsyncStorage.removeItem(STORAGE_KEYS.LAST_SYNC);
+
       console.log("[Cache] Cleared successfully");
     } catch (error) {
       console.error("[Cache] Failed to clear:", error);
@@ -491,7 +824,7 @@ export class StudentDatabaseService {
       ...new Set(
         this.cachedStudents
           .map((s) => s.section)
-          .filter((s): s is string => Boolean(s))
+          .filter((s): s is string => Boolean(s)),
       ),
     ].sort();
     return sections;

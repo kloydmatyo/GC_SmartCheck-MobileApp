@@ -1,6 +1,9 @@
+import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useRouter } from "expo-router";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,10 +20,15 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
+
+interface RecentQuiz {
+  id: string;
+  title: string;
+  date: string;
+}
 
 export default function ClassesScreen() {
   const router = useRouter();
@@ -34,6 +42,9 @@ export default function ClassesScreen() {
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [collapsedRecent, setCollapsedRecent] = useState<
     Record<string, boolean>
+  >({});
+  const [recentQuizzes, setRecentQuizzes] = useState<
+    Record<string, RecentQuiz[]>
   >({});
   const [blockPickerVisible, setBlockPickerVisible] = useState(false);
 
@@ -58,12 +69,61 @@ export default function ClassesScreen() {
     section_block: "",
   });
 
+  // Fetch recent quizzes for each class
+  const loadRecentQuizzes = async (classIds: string[]) => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser || classIds.length === 0) return;
+
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", currentUser.uid),
+      );
+      const snapshot = await getDocs(q);
+
+      const byClass: Record<string, RecentQuiz[]> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const cid: string | undefined = data.classId;
+        if (!cid || !classIds.includes(cid)) return;
+
+        const rawDate =
+          data.createdAt?.toDate?.() ||
+          (data.created_at ? new Date(data.created_at) : null);
+        const dateStr = rawDate
+          ? rawDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "";
+
+        if (!byClass[cid]) byClass[cid] = [];
+        byClass[cid].push({
+          id: docSnap.id,
+          title: data.title || "Untitled",
+          date: dateStr,
+        });
+      });
+
+      // Keep only 5 most recent per class (already sorted by Firestore insertion order)
+      Object.keys(byClass).forEach((cid) => {
+        byClass[cid] = byClass[cid].slice(0, 5);
+      });
+
+      setRecentQuizzes(byClass);
+    } catch (error) {
+      console.error("Error loading recent quizzes:", error);
+    }
+  };
+
   // Load classes from Firebase
   const loadClasses = async () => {
     try {
       setLoading(true);
       const fetchedClasses = await ClassService.getClassesByUser();
       setClasses(fetchedClasses);
+      await loadRecentQuizzes(fetchedClasses.map((c) => c.id));
     } catch (error) {
       console.error("Error loading classes:", error);
       Toast.show({
@@ -251,35 +311,26 @@ export default function ClassesScreen() {
         </View>
       </View>
 
-        <TouchableOpacity
-          style={[
-            styles.viewButton,
-            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
-          ]}
-          onPress={() => openClassList(item.id)}
-        >
-        <Ionicons name="people-outline" size={14} color={COLORS.white} />
+      <TouchableOpacity
+        style={styles.viewButton}
+        onPress={() => openClassList(item.id)}
+      >
+        <Ionicons name="people" size={15} color={COLORS.white} />
         <Text style={styles.viewButtonText}>View Class List</Text>
       </TouchableOpacity>
 
       <View
-        style={[
-          styles.recentRow,
-          { backgroundColor: colors.recentHeaderBg },
-        ]}
+        style={[styles.recentRow, { backgroundColor: colors.recentHeaderBg }]}
       >
-        <Text
-          style={[
-            styles.recentTitle,
-            { color: colors.recentHeaderText },
-          ]}
-        >
+        <Text style={[styles.recentTitle, { color: colors.recentHeaderText }]}>
           Recent Quizzes
         </Text>
         <TouchableOpacity
           style={styles.recentToggle}
           onPress={() => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            LayoutAnimation.configureNext(
+              LayoutAnimation.Presets.easeInEaseOut,
+            );
             setCollapsedRecent((prev) => ({
               ...prev,
               [item.id]: !prev[item.id],
@@ -295,60 +346,61 @@ export default function ClassesScreen() {
       </View>
       {!collapsedRecent[item.id] && (
         <>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={true}
-            contentContainerStyle={styles.quizCardsRow}
-          >
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
-            >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
-              </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 1
+          {(recentQuizzes[item.id] ?? []).length === 0 ? (
+            <View style={styles.noQuizzesRow}>
+              <Ionicons
+                name="document-text-outline"
+                size={16}
+                color={colors.recentQuizDate}
+              />
+              <Text
+                style={[styles.noQuizzesText, { color: colors.recentQuizDate }]}
+              >
+                No quizzes yet
               </Text>
             </View>
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quizCardsRow}
             >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
-              </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 2
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
-            >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
-              </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 3
-              </Text>
-            </View>
-          </ScrollView>
+              {(recentQuizzes[item.id] ?? []).map((quiz) => (
+                <TouchableOpacity
+                  key={quiz.id}
+                  style={[
+                    styles.quizMiniCard,
+                    {
+                      backgroundColor: colors.recentQuizCardBg,
+                      borderColor: colors.recentQuizCardBorder,
+                    },
+                  ]}
+                  onPress={() =>
+                    router.push(`/(tabs)/exam-preview?examId=${quiz.id}`)
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.quizMiniDate,
+                      { color: colors.recentQuizDate },
+                    ]}
+                  >
+                    {quiz.date}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.quizMiniTitle,
+                      { color: colors.recentQuizTitle },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {quiz.title}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </>
       )}
     </TouchableOpacity>
@@ -399,7 +451,9 @@ export default function ClassesScreen() {
         ]}
       >
         <View>
-          <Text style={[styles.headerTitle, { color: colors.title }]}>Classes</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            Classes
+          </Text>
         </View>
         <TouchableOpacity
           style={[styles.addButton, { backgroundColor: colors.primary }]}
@@ -409,7 +463,9 @@ export default function ClassesScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
+      <View
+        style={[styles.searchContainer, { backgroundColor: colors.primary }]}
+      >
         <Ionicons
           name="search"
           size={16}
@@ -454,15 +510,24 @@ export default function ClassesScreen() {
         transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={[styles.modalContent, { backgroundColor: modalColors.bg }]}>
-          <View style={[styles.modalHeader, { backgroundColor: modalColors.headerBg }]}>
+        <View
+          style={[styles.modalContent, { backgroundColor: modalColors.bg }]}
+        >
+          <View
+            style={[
+              styles.modalHeader,
+              { backgroundColor: modalColors.headerBg },
+            ]}
+          >
             <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setModalVisible(false)}
             >
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={[styles.modalTitle, { color: modalColors.text }]}>Create New Class</Text>
+            <Text style={[styles.modalTitle, { color: modalColors.text }]}>
+              Create New Class
+            </Text>
             <View style={styles.modalHeaderPlaceholder} />
           </View>
 
@@ -475,95 +540,128 @@ export default function ClassesScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Program *</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., CS 101"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.class_name}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, class_name: text })
-                }
-              />
+            <Text
+              style={[
+                styles.label,
+                { color: darkModeEnabled ? "#b9c9c0" : "#666" },
+              ]}
+            >
+              Program *
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.panelSoft,
+                  borderColor: modalColors.border,
+                  color: modalColors.text,
+                },
+              ]}
+              placeholder="e.g., CS 101"
+              placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
+              value={formData.class_name}
+              onChangeText={(text) =>
+                setFormData({ ...formData, class_name: text })
+              }
+            />
 
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Course Subject *</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., Computer Science"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.course_subject}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, course_subject: text })
-                }
-              />
+            <Text
+              style={[
+                styles.label,
+                { color: darkModeEnabled ? "#b9c9c0" : "#666" },
+              ]}
+            >
+              Course Subject *
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.panelSoft,
+                  borderColor: modalColors.border,
+                  color: modalColors.text,
+                },
+              ]}
+              placeholder="e.g., Computer Science"
+              placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
+              value={formData.course_subject}
+              onChangeText={(text) =>
+                setFormData({ ...formData, course_subject: text })
+              }
+            />
 
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Block</Text>
-              <TouchableOpacity
+            <Text
+              style={[
+                styles.label,
+                { color: darkModeEnabled ? "#b9c9c0" : "#666" },
+              ]}
+            >
+              Block
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.dropdownButton,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.panelSoft,
+                  borderColor: modalColors.border,
+                },
+              ]}
+              onPress={() => setBlockPickerVisible(true)}
+            >
+              <Text
                 style={[
-                  styles.dropdownButton,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                  },
+                  styles.dropdownButtonText,
+                  darkModeEnabled && { color: modalColors.text },
+                  !formData.section_block && styles.dropdownPlaceholder,
+                  !formData.section_block &&
+                    darkModeEnabled && { color: "#8fa39a" },
                 ]}
-                onPress={() => setBlockPickerVisible(true)}
               >
-                <Text
-                  style={[
-                    styles.dropdownButtonText,
-                    darkModeEnabled && { color: modalColors.text },
-                    !formData.section_block && styles.dropdownPlaceholder,
-                    !formData.section_block && darkModeEnabled && { color: "#8fa39a" },
-                  ]}
-                >
-                  {formData.section_block ? `Block ${formData.section_block}` : "Select a block..."}
-                </Text>
-                <Ionicons 
-                  name="chevron-down" 
-                  size={20} 
-                  color={darkModeEnabled ? modalColors.subtext : "#B8D4B8"} 
-                />
-              </TouchableOpacity>
-
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Room</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., 404"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.room}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, room: text })
-                }
+                {formData.section_block
+                  ? `Block ${formData.section_block}`
+                  : "Select a block..."}
+              </Text>
+              <Ionicons
+                name="chevron-down"
+                size={20}
+                color={darkModeEnabled ? modalColors.subtext : "#B8D4B8"}
               />
+            </TouchableOpacity>
+
+            <Text
+              style={[
+                styles.label,
+                { color: darkModeEnabled ? "#b9c9c0" : "#666" },
+              ]}
+            >
+              Room
+            </Text>
+            <TextInput
+              style={[
+                styles.input,
+                darkModeEnabled && {
+                  backgroundColor: modalColors.panelSoft,
+                  borderColor: modalColors.border,
+                  color: modalColors.text,
+                },
+              ]}
+              placeholder="e.g., 404"
+              placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
+              value={formData.room}
+              onChangeText={(text) => setFormData({ ...formData, room: text })}
+            />
           </ScrollView>
 
           <View
             style={[
               styles.modalFooter,
               {
-                backgroundColor: darkModeEnabled ? modalColors.bg : COLORS.white,
-                borderTopColor: darkModeEnabled ? modalColors.border : "#e4e8e6",
+                backgroundColor: darkModeEnabled
+                  ? modalColors.bg
+                  : COLORS.white,
+                borderTopColor: darkModeEnabled
+                  ? modalColors.border
+                  : "#e4e8e6",
               },
             ]}
           >
@@ -578,7 +676,14 @@ export default function ClassesScreen() {
               onPress={() => setModalVisible(false)}
               disabled={creating}
             >
-              <Text style={[styles.cancelButtonText, darkModeEnabled && { color: "#b9c9c0" }]}>Cancel</Text>
+              <Text
+                style={[
+                  styles.cancelButtonText,
+                  darkModeEnabled && { color: "#b9c9c0" },
+                ]}
+              >
+                Cancel
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
@@ -662,26 +767,51 @@ export default function ClassesScreen() {
           activeOpacity={1}
           onPress={() => setBlockPickerVisible(false)}
         >
-          <View style={[styles.pickerContainer, darkModeEnabled && { backgroundColor: modalColors.bg }]}>
-            <View style={[styles.pickerHeader, darkModeEnabled && { borderBottomColor: modalColors.border }]}>
-              <Text style={[styles.pickerTitle, darkModeEnabled && { color: modalColors.text }]}>
+          <View
+            style={[
+              styles.pickerContainer,
+              darkModeEnabled && { backgroundColor: modalColors.bg },
+            ]}
+          >
+            <View
+              style={[
+                styles.pickerHeader,
+                darkModeEnabled && { borderBottomColor: modalColors.border },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.pickerTitle,
+                  darkModeEnabled && { color: modalColors.text },
+                ]}
+              >
                 Select a block...
               </Text>
               <TouchableOpacity onPress={() => setBlockPickerVisible(false)}>
-                <Ionicons name="close" size={24} color={darkModeEnabled ? modalColors.text : "#333"} />
+                <Ionicons
+                  name="close"
+                  size={24}
+                  color={darkModeEnabled ? modalColors.text : "#333"}
+                />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.pickerList}>
-              {Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)).map((letter) => (
+              {Array.from({ length: 26 }, (_, i) =>
+                String.fromCharCode(65 + i),
+              ).map((letter) => (
                 <TouchableOpacity
                   key={letter}
                   style={[
                     styles.pickerItem,
-                    darkModeEnabled && { borderBottomColor: modalColors.border },
-                    formData.section_block === letter && styles.pickerItemSelected,
-                    darkModeEnabled && formData.section_block === letter && {
-                      backgroundColor: modalColors.accent,
+                    darkModeEnabled && {
+                      borderBottomColor: modalColors.border,
                     },
+                    formData.section_block === letter &&
+                      styles.pickerItemSelected,
+                    darkModeEnabled &&
+                      formData.section_block === letter && {
+                        backgroundColor: modalColors.accent,
+                      },
                   ]}
                   onPress={() => {
                     setFormData({ ...formData, section_block: letter });
@@ -692,19 +822,23 @@ export default function ClassesScreen() {
                     style={[
                       styles.pickerItemText,
                       darkModeEnabled && { color: modalColors.text },
-                      formData.section_block === letter && styles.pickerItemTextSelected,
-                      darkModeEnabled && formData.section_block === letter && {
-                        color: modalColors.accentStrong,
-                      },
+                      formData.section_block === letter &&
+                        styles.pickerItemTextSelected,
+                      darkModeEnabled &&
+                        formData.section_block === letter && {
+                          color: modalColors.accentStrong,
+                        },
                     ]}
                   >
                     {letter}
                   </Text>
                   {formData.section_block === letter && (
-                    <Ionicons 
-                      name="checkmark" 
-                      size={20} 
-                      color={darkModeEnabled ? modalColors.accentStrong : "#4CAF50"} 
+                    <Ionicons
+                      name="checkmark"
+                      size={20}
+                      color={
+                        darkModeEnabled ? modalColors.accentStrong : "#4CAF50"
+                      }
                     />
                   )}
                 </TouchableOpacity>
@@ -849,17 +983,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#3d5a3d",
-    paddingVertical: 10,
+    backgroundColor: "#2e8b5c",
+    paddingVertical: 11,
     borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f4a38",
+    borderWidth: 1.5,
+    borderColor: "#1f6b43",
     marginBottom: 12,
+    shadowColor: "#1a5c38",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    elevation: 3,
   },
   viewButtonText: {
-    color: COLORS.white,
+    color: "#e8fff3",
     fontSize: 14,
     fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  noQuizzesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  noQuizzesText: {
+    fontSize: 12,
+    fontStyle: "italic",
   },
   recentRow: {
     flexDirection: "row",

@@ -3,6 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import {
     ActivityIndicator,
@@ -20,6 +22,7 @@ import {
 import Toast from "react-native-toast-message";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
+import { StudentImportService } from "../../services/studentImportService";
 import { Class, Student } from "../../types/class";
 
 export default function ClassDetailsScreen() {
@@ -45,6 +48,8 @@ export default function ClassDetailsScreen() {
     studentId: string;
     studentName: string;
   } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
   // Student form state
@@ -231,6 +236,160 @@ export default function ClassDetailsScreen() {
   const handleRemoveStudent = (studentId: string, studentName: string) => {
     setStudentToRemove({ studentId, studentName });
     setRemoveStudentConfirmVisible(true);
+  };
+
+  const handleBulkImport = async () => {
+    try {
+      // Pick document
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const file = result.assets[0];
+      
+      setImporting(true);
+      setImportProgress(0);
+
+      // Read file content
+      let fileContent: string;
+      const isExcel = file.mimeType?.includes('spreadsheet') || 
+                      file.mimeType?.includes('excel') || 
+                      file.name.endsWith('.xlsx') ||
+                      file.name.endsWith('.xls');
+      
+      if (isExcel) {
+        // For XLSX, read as base64
+        try {
+          fileContent = await FileSystem.readAsStringAsync(file.uri, {
+            encoding: 'base64',
+          });
+        } catch (error) {
+          console.error('Error reading XLSX file:', error);
+          Toast.show({
+            type: 'error',
+            text1: 'File Read Error',
+            text2: 'Unable to read Excel file. Please try a CSV file instead.',
+          });
+          setImporting(false);
+          return;
+        }
+      } else {
+        // For CSV, read as UTF8
+        fileContent = await FileSystem.readAsStringAsync(file.uri, {
+          encoding: 'utf8',
+        });
+      }
+
+      // Parse the file directly without using the full import service
+      // to avoid global duplicate checks
+      const isExcelFile = isExcel;
+      let rows;
+      
+      if (isExcelFile) {
+        rows = StudentImportService.parseXLSX(fileContent);
+      } else {
+        rows = StudentImportService.parseCSV(fileContent);
+      }
+
+      setImportProgress(30);
+
+      // Validate rows
+      const validStudents = [];
+      const errors = [];
+      
+      for (const row of rows) {
+        const rowErrors = StudentImportService.validateRow(row);
+        if (rowErrors.length === 0) {
+          validStudents.push({
+            student_id: row.studentId,
+            first_name: row.firstName,
+            last_name: row.lastName,
+            email: row.email || '',
+          });
+        } else {
+          errors.push(...rowErrors);
+        }
+      }
+
+      setImportProgress(60);
+
+      // Check for duplicates within the current class only
+      const existingStudentIds = new Set(
+        classData.students.map(s => s.student_id)
+      );
+
+      // Add students to the class
+      let successCount = 0;
+      for (const student of validStudents) {
+        // Check if student already exists in THIS class
+        if (existingStudentIds.has(student.student_id)) {
+          errors.push({
+            rowNumber: 0,
+            field: 'student_id',
+            value: student.student_id,
+            error: 'Student already exists in this class',
+            severity: 'warning' as const,
+          });
+          continue;
+        }
+
+        try {
+          await ClassService.addStudent(classId, student);
+          existingStudentIds.add(student.student_id); // Track added students
+          successCount++;
+        } catch (error) {
+          console.error('Error adding student to class:', error);
+          errors.push({
+            rowNumber: 0,
+            field: 'student_id',
+            value: student.student_id,
+            error: error instanceof Error ? error.message : 'Failed to add student',
+            severity: 'error' as const,
+          });
+        }
+      }
+
+      setImportProgress(100);
+
+      // Show results
+      if (errors.length > 0) {
+        console.log('[Import] Errors:', JSON.stringify(errors, null, 2));
+        
+        Toast.show({
+          type: successCount > 0 ? 'warning' : 'error',
+          text1: successCount > 0 ? 'Import Completed with Errors' : 'Import Failed',
+          text2: successCount > 0 
+            ? `${successCount} students added, ${errors.length} errors`
+            : `${errors.length} errors found`,
+          visibilityTime: 5000,
+        });
+      } else {
+        Toast.show({
+          type: 'success',
+          text1: 'Import Successful',
+          text2: `${successCount} students added successfully`,
+        });
+      }
+
+      // Reload class data
+      await loadClassData();
+      
+    } catch (error) {
+      console.error('Import error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Import Failed',
+        text2: error instanceof Error ? error.message : 'Failed to import students',
+      });
+    } finally {
+      setImporting(false);
+      setImportProgress(0);
+    }
   };
 
   const filteredStudents = (classData?.students ?? []).filter((student) => {
@@ -592,23 +751,34 @@ export default function ClassDetailsScreen() {
                 },
           ]}
         >
-          {showClassDetails && (
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, styles.sectionTitleOnDark]}>
-                {activeTab === "students"
-                  ? `Students (${filteredStudents.length})`
-                  : "Recent Quizzes"}
-              </Text>
-              {activeTab === "students" && (
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, styles.sectionTitleOnDark]}>
+              {activeTab === "students"
+                ? `Students (${filteredStudents.length})`
+                : "Recent Quizzes"}
+            </Text>
+            {activeTab === "students" && (
+              <View style={styles.headerActions}>
+                <TouchableOpacity
+                  style={styles.importButton}
+                  onPress={handleBulkImport}
+                  disabled={importing}
+                >
+                  {importing ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.addStudentButton}
                   onPress={() => setAddStudentModalVisible(true)}
                 >
                   <Ionicons name="add" size={18} color="#fff" />
                 </TouchableOpacity>
-              )}
-            </View>
-          )}
+              </View>
+            )}
+          </View>
 
           {activeTab === "students" && classData.students.length === 0 ? (
             <View style={styles.emptyStudents}>
@@ -1132,6 +1302,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     color: "#214132",
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  importButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#2d7a5f",
+    alignItems: "center",
+    justifyContent: "center",
   },
   addStudentButton: {
     width: 28,
