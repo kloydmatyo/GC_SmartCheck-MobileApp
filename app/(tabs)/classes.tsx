@@ -322,12 +322,12 @@ export default function ClassesScreen() {
 
     return (
       <TouchableOpacity
-        style={styles.classCard}
+        style={styles.classCardWrap}
         onPress={() => openClassList(item.id)}
         activeOpacity={0.9}
       >
         <View style={[styles.cardAccent, { backgroundColor: accentColor }]} />
-        <View style={styles.classCardBody}>
+        <View style={styles.classCardSurface}>
           <View style={styles.classHeader}>
             <View style={styles.classHeaderLeft}>
               <Text style={styles.className}>{item.class_name}</Text>
@@ -848,22 +848,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingBottom: 120,
   },
-  classCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#E7EBF0",
-    overflow: "hidden",
+  classCardWrap: {
     flexDirection: "row",
+    marginBottom: 16,
     minHeight: 96,
   },
   cardAccent: {
     width: 6,
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
   },
-  classCardBody: {
+  classCardSurface: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E7EBF0",
+    borderLeftWidth: 0,
     flex: 1,
     paddingHorizontal: 18,
     paddingVertical: 18,
@@ -916,13 +915,13 @@ const styles = StyleSheet.create({
   },
   scoreTrack: {
     height: 4,
-    borderRadius: 999,
+    borderRadius: 0,
     backgroundColor: "#E6ECE8",
     overflow: "hidden",
   },
   scoreBar: {
     height: "100%",
-    borderRadius: 999,
+    borderRadius: 0,
   },
   loadingContainer: {
     flex: 1,
