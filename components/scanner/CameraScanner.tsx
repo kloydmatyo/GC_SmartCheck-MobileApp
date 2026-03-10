@@ -78,8 +78,16 @@ export default function CameraScanner({
     const { width, height } = frameDimensions;
 
     if (questionCount <= 20) {
-      // 20q: 2 columns side-by-side
+      // 20q: 2 columns side-by-side + Student ID region
       return [
+        {
+          x: 0.10,
+          xEnd: 0.90,
+          y: 0.23,
+          yEnd: 0.32,
+          label: "Student ID",
+          color: "rgba(0,150,255,0.4)",
+        },
         {
           x: 0.08,
           xEnd: 0.48,
@@ -98,8 +106,16 @@ export default function CameraScanner({
         },
       ];
     } else if (questionCount <= 50) {
-      // 50q: LEFT and RIGHT columns
+      // 50q: LEFT and RIGHT columns + Student ID region
       return [
+        {
+          x: 0.15,
+          xEnd: 0.85,
+          y: 0.09,
+          yEnd: 0.18,
+          label: "Student ID",
+          color: "rgba(0,150,255,0.4)",
+        },
         {
           x: 0.25,
           xEnd: 0.52,
@@ -310,12 +326,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.5)",
     borderRadius: 20,
   },
-  overlay: {
-    flex: 1,
-    backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
-  },
   camera: {
     flex: 1,
   },
@@ -324,14 +334,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "transparent",
-  },
-  bottomControls: {
-    position: "absolute",
-    bottom: 20,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-    justifyContent: "center",
   },
   tipText: {
     color: "white",
