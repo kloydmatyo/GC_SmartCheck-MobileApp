@@ -2,7 +2,7 @@ import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
@@ -22,7 +22,35 @@ export default function CameraScanner({
   const cameraRef = useRef<CameraView>(null);
 
   if (!permission) {
-    return <View />;
+    // Camera permissions are still loading
+    return <View style={styles.container} />;
+  }
+
+  if (!permission.granted) {
+    // Camera permissions are not granted yet
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Ionicons name="camera-outline" size={64} color="white" style={{ marginBottom: 20 }} />
+        <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+          We need your permission
+        </Text>
+        <Text style={{ color: '#aaa', fontSize: 16, marginBottom: 30, textAlign: 'center' }}>
+          GCSC needs access to your camera to scan Zipgrade answer sheets.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, width: '100%', alignItems: 'center' }}
+          onPress={requestPermission}
+        >
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Grant Camera Access</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ marginTop: 20, padding: 10 }}
+          onPress={onCancel}
+        >
+          <Text style={{ color: '#ff4444', fontSize: 16 }}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   // Calculate frame dimensions based on template aspect ratio
@@ -178,76 +206,92 @@ export default function CameraScanner({
     <View style={styles.container}>
       <CameraView
         ref={cameraRef}
-        style={styles.camera}
+        style={StyleSheet.absoluteFillObject}
         facing="back"
         enableTorch={torch}
+        flash={torch ? "on" : "off"}
+      />
+
+      <TouchableOpacity
+        style={styles.torchButton}
+        onPress={() => setTorch(!torch)}
       >
-        {/* Overlay for Zipgrade answer sheet alignment */}
-        <View style={styles.overlay}>
-          <View
-            style={[
-              styles.scanFrame,
-              {
-                width: frameDimensions.width,
-                height: frameDimensions.height,
-              },
-            ]}
-          >
-            {/* Debug regions overlay - shows where scanner looks for bubbles */}
-            {debugRegions.map((region, idx) => (
-              <View
-                key={idx}
+        <Ionicons
+          name={torch ? "flash" : "flash-off"}
+          size={24}
+          color="white"
+        />
+      </TouchableOpacity>
+
+      {/* Overlay for Zipgrade answer sheet alignment */}
+      <View style={styles.overlay}>
+        <View
+          style={[
+            styles.scanFrame,
+            {
+              width: frameDimensions.width,
+              height: frameDimensions.height,
+            },
+          ]}
+        >
+          {/* Debug regions overlay - shows where scanner looks for bubbles */}
+          {debugRegions.map((region, idx) => (
+            <View
+              key={idx}
+              style={{
+                position: "absolute",
+                left: region.x * frameDimensions.width,
+                top: region.y * frameDimensions.height,
+                width: (region.xEnd - region.x) * frameDimensions.width,
+                height: (region.yEnd - region.y) * frameDimensions.height,
+                backgroundColor: region.color,
+                borderWidth: 1,
+                borderColor: region.color.replace("0.3", "0.8"),
+                justifyContent: "center",
+                alignItems: "center",
+              }}
+            >
+              <Text
                 style={{
-                  position: "absolute",
-                  left: region.x * frameDimensions.width,
-                  top: region.y * frameDimensions.height,
-                  width: (region.xEnd - region.x) * frameDimensions.width,
-                  height: (region.yEnd - region.y) * frameDimensions.height,
-                  backgroundColor: region.color,
-                  borderWidth: 1,
-                  borderColor: region.color.replace("0.3", "0.8"),
-                  justifyContent: "center",
-                  alignItems: "center",
+                  color: "white",
+                  fontSize: 10,
+                  fontWeight: "bold",
+                  backgroundColor: "rgba(0,0,0,0.7)",
+                  paddingHorizontal: 4,
+                  paddingVertical: 2,
+                  borderRadius: 3,
                 }}
               >
-                <Text
-                  style={{
-                    color: "white",
-                    fontSize: 10,
-                    fontWeight: "bold",
-                    backgroundColor: "rgba(0,0,0,0.7)",
-                    paddingHorizontal: 4,
-                    paddingVertical: 2,
-                    borderRadius: 3,
-                  }}
-                >
-                  {region.label}
-                </Text>
-              </View>
-            ))}
-          </View>
-          <Text style={styles.instructionText}>
-            Align Zipgrade answer sheet within the frame
-          </Text>
-          <Text style={styles.tipText}>
-            Colored boxes show scanning regions for {questionCount} questions
-          </Text>
+                {region.label}
+              </Text>
+            </View>
+          ))}
         </View>
+        <Text style={styles.instructionText}>
+          Align answer sheet within the frame
+        </Text>
+      </View>
 
-        <View style={styles.bottomControls}>
-          <TouchableOpacity
-            style={styles.captureButton}
-            onPress={takePicture}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <Text style={{ color: "white", fontWeight: "bold" }}>...</Text>
-            ) : (
-              <Ionicons name="camera" size={40} color="white" />
-            )}
-          </TouchableOpacity>
-        </View>
-      </CameraView>
+      <View style={styles.bottomControls}>
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.captureButton,
+            isProcessing && styles.captureButtonDisabled,
+          ]}
+          onPress={takePicture}
+          disabled={isProcessing}
+        >
+          {isProcessing ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <Ionicons name="camera" size={32} color="white" />
+          )}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -255,7 +299,22 @@ export default function CameraScanner({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "black",
+  },
+  torchButton: {
+    position: "absolute",
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    padding: 10,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 20,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "transparent",
+    justifyContent: "center",
+    alignItems: "center",
   },
   camera: {
     flex: 1,
@@ -292,11 +351,10 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   scanFrame: {
-    // Base dimensions - will be overridden by inline styles
     borderWidth: 2,
     borderColor: "#00ff00",
-    borderRadius: 10,
     backgroundColor: "transparent",
+    borderStyle: "dashed",
   },
   instructionText: {
     color: "white",
@@ -304,20 +362,43 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
     textAlign: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  bottomControls: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 40,
+    paddingBottom: 40,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingTop: 20,
+  },
+  cancelButton: {
+    padding: 12,
+  },
+  cancelButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "600",
   },
   captureButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: "#22c55e",
     justifyContent: "center",
     alignItems: "center",
-    padding: 18,
-    marginBottom: 30,
-    shadowColor: "#007AFF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    borderWidth: 4,
+    borderColor: "rgba(255,255,255,0.4)",
+  },
+  captureButtonDisabled: {
+    backgroundColor: "#888",
   },
 });

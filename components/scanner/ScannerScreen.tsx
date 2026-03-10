@@ -308,14 +308,14 @@ export default function ScannerScreen({ onClose }: ScannerScreenProps) {
             </Text>
 
             <TextInput
-              style={styles.input}
+              style={styles.examInput}
               placeholder="e.g. MATH-101"
               value={examIdInput}
               onChangeText={setExamIdInput}
               autoCapitalize="characters"
             />
-            <TouchableOpacity style={styles.btn} onPress={handleConfirmExam}>
-              {isValidatingExam ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Start Scanning</Text>}
+            <TouchableOpacity style={styles.confirmButton} onPress={handleConfirmExam}>
+              {isValidatingExam ? <ActivityIndicator color="white" /> : <Text style={styles.confirmButtonText}>Start Scanning</Text>}
             </TouchableOpacity>
           </View>
         </View>
