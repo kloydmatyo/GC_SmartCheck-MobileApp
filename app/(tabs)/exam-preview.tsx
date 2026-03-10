@@ -9,15 +9,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
+  ActivityIndicator,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
   TouchableOpacity,
   View,
+  Clipboard,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { deleteDoc, doc, updateDoc } from "firebase/firestore";
@@ -51,7 +52,6 @@ export default function ExamPreviewScreen() {
   const [viewCodeVisible, setViewCodeVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
-  const [loadedExamId, setLoadedExamId] = useState("");
   const loadRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
 
@@ -124,7 +124,6 @@ export default function ExamPreviewScreen() {
     setError(null);
     setLoading(true);
     setResultsLoading(true);
-    setLoadedExamId("");
     setSettingsMenuVisible(false);
     setViewCodeVisible(false);
     setArchiveConfirmVisible(false);
@@ -181,7 +180,6 @@ export default function ExamPreviewScreen() {
 
         setIsOffline(false);
         setExam(examData);
-        setLoadedExamId(String(examId));
         setExamResults(resultRows);
         return;
       } catch (liveError) {
@@ -241,7 +239,6 @@ export default function ExamPreviewScreen() {
       };
 
       setExam(examData);
-      setLoadedExamId(String(examId));
 
       try {
         const resultRows = await ResultsService.getExamResults(examId);
@@ -457,7 +454,7 @@ export default function ExamPreviewScreen() {
     );
   };
 
-  if (loading || (!error && loadedExamId !== String(examId))) {
+  if (loading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
@@ -691,9 +688,26 @@ export default function ExamPreviewScreen() {
                 <Ionicons name="close" size={18} color="#98A2B3" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.codeValue}>
-              {exam.metadata.examCode || "No exam code available"}
-            </Text>
+            <View style={styles.codeRow}>
+              <Text style={styles.codeValue}>
+                {exam.metadata.examCode || "No exam code available"}
+              </Text>
+              {exam.metadata.examCode ? (
+                <TouchableOpacity
+                  style={styles.copyButton}
+                  onPress={() => {
+                    Clipboard.setString(exam.metadata.examCode);
+                    Toast.show({
+                      type: "success",
+                      text1: "Copied",
+                      text2: "Exam code copied to clipboard",
+                    });
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={18} color="#20BE7B" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </TouchableOpacity>
         </TouchableOpacity>
       ) : null}
@@ -875,11 +889,25 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#F7F8FA",
   },
+  codeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
   codeValue: {
     fontSize: 18,
     fontWeight: "700",
     color: "#20BE7B",
     textAlign: "center",
+  },
+  copyButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E9F8F1",
   },
   tabSwitcher: {
     flexDirection: "row",

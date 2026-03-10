@@ -39,6 +39,7 @@ type ArchivedExam = {
   title: string;
   subtitle: string;
   dateLabel: string;
+  questions: number;
 };
 
 type RestoreTarget =
@@ -138,11 +139,20 @@ export default function ArchivedScreen() {
         setArchivedExams(
           examSnapshot.docs.map((item) => {
             const data = item.data();
+            const questions =
+              Number(data.num_items || data.totalQuestions || 0) ||
+              (Array.isArray(data.questions) ? data.questions.length : 0) ||
+              (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0) ||
+              0;
+            const subject = String(data.subject || "Exam").trim();
+            const className = String(data.className || "").trim();
+            const subtitleParts = [subject, className].filter(Boolean);
             return {
               id: item.id,
               title: data.title || "Archived Exam",
-              subtitle: data.subject || data.className || "Exam",
+              subtitle: subtitleParts.join(" - ") || "Exam",
               dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
+              questions,
             };
           }),
         );
@@ -353,13 +363,9 @@ export default function ArchivedScreen() {
               ))
             : filteredExams.map((item) => (
                 <View key={item.id} style={styles.card}>
-                  <View style={styles.cardAccent} />
                   <View style={styles.cardBody}>
                     <View style={styles.cardHeader}>
                       <Text style={styles.cardTitle}>{item.title}</Text>
-                      <View style={styles.archivedBadge}>
-                        <Text style={styles.archivedBadgeText}>Archived</Text>
-                      </View>
                       <TouchableOpacity
                         style={styles.menuTrigger}
                         onPress={(event) => {
@@ -380,14 +386,15 @@ export default function ArchivedScreen() {
                         <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.examSubtitle}>{item.subtitle}</Text>
+                    <Text style={styles.examSubtitle}>
+                      {item.subtitle} - {item.questions} Qs
+                    </Text>
                     <View style={styles.metaRow}>
                       <View style={styles.metaItem}>
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
                       </View>
                     </View>
-                    <View style={styles.grayBar} />
                   </View>
                 </View>
               ))}
@@ -596,7 +603,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 12,
+    marginBottom: 6,
   },
   cardTitle: {
     flex: 1,
@@ -710,9 +717,9 @@ const styles = StyleSheet.create({
     color: "#8E97A6",
   },
   examSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#6B7280",
-    marginBottom: 10,
+    marginBottom: 6,
   },
   grayBar: {
     height: 6,

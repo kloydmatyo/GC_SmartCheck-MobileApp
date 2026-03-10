@@ -517,7 +517,7 @@ export default function HomeScreen() {
                 ) : (
                   <Text style={styles.statValue}>
                     {card.key === "averageScore"
-                      ? `${stats.averageScore} %`
+                      ? `${stats.averageScore}%`
                       : stats[card.key as keyof SummaryStats]}
                   </Text>
                 )}

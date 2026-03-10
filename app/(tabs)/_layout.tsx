@@ -147,7 +147,7 @@ export default function TabLayout() {
           title: "Classes",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? "school" : "school-outline"}
+              name={focused ? "book" : "book-outline"}
               size={24}
               color={color}
             />
