@@ -1,10 +1,9 @@
 import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
-import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { ScanResult } from "../../types/scanning";
-import HistoryList from "./HistoryList";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
@@ -26,16 +25,36 @@ export default function CameraScanner({
   const cameraRef = useRef<CameraView>(null);
 
   if (!permission) {
-    return <View />;
+    // Camera permissions are still loading
+    return <View style={styles.container} />;
   }
 
-  if (showHistory) {
-    return <HistoryList onClose={() => setShowHistory(false)} />;
+  if (!permission.granted) {
+    // Camera permissions are not granted yet
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Ionicons name="camera-outline" size={64} color="white" style={{ marginBottom: 20 }} />
+        <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+          We need your permission
+        </Text>
+        <Text style={{ color: '#aaa', fontSize: 16, marginBottom: 30, textAlign: 'center' }}>
+          GCSC needs access to your camera to scan Zipgrade answer sheets.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, width: '100%', alignItems: 'center' }}
+          onPress={requestPermission}
+        >
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Grant Camera Access</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={{ marginTop: 20, padding: 10 }}
+          onPress={onCancel}
+        >
+          <Text style={{ color: '#ff4444', fontSize: 16 }}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
-
-  const toggleCameraFacing = () => {
-    setFacing((current) => (current === "back" ? "front" : "back"));
-  };
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
@@ -114,9 +133,15 @@ export default function CameraScanner({
     <View style={styles.container}>
       <CameraView
         ref={cameraRef}
-        style={styles.camera}
-        facing={facing}
+        style={StyleSheet.absoluteFillObject}
+        facing="back"
         enableTorch={torch}
+        flash={torch ? "on" : "off"}
+      />
+
+      <TouchableOpacity
+        style={styles.torchButton}
+        onPress={() => setTorch(!torch)}
       >
         {/* Precise Mask (Dims everything outside the border tightly) */}
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -137,6 +162,10 @@ export default function CameraScanner({
           {/* Bottom Mask - flex: 1 for perfect vertical centering */}
           <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
         </View>
+        <Text style={styles.instructionText}>
+          Align answer sheet within the frame
+        </Text>
+      </View>
 
         {/* UI Overlay Layer (Frame and Controls) */}
         <View style={StyleSheet.absoluteFill}>

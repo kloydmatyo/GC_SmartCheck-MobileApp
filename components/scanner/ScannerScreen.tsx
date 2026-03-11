@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState, useEffect } from "react";
 import {
@@ -20,12 +21,23 @@ import {
   DuplicateScoreDetectionService,
   DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
+import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
 import { GradingResult, ScanResult } from "../../types/scanning";
 import { DuplicateScoreWarningModal } from "../modals/DuplicateScoreWarningModal";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
+
+// Helper for fast-failing Firestore calls
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ]);
+}
 
 type ScannerState = "exam-select" | "camera" | "results";
 
@@ -82,7 +94,20 @@ export default function ScannerScreen({
   const [pendingResult, setPendingResult] = useState<GradingResult | null>(
     null,
   );
-  const [scanCount, setScanCount] = useState(0); // Track scan count to force camera remount
+  const [scanCount, setScanCount] = useState(0);
+
+  // ── Manual student ID entry (fallback when OMR can't read bubbles) ──────
+  const [manualIdModal, setManualIdModal] = useState<{
+    visible: boolean;
+    pendingScan: ScanResult | null;
+    pendingImage: string;
+    input: string;
+  }>({
+    visible: false,
+    pendingScan: null,
+    pendingImage: "",
+    input: "",
+  });
 
   // ----- new behaviour for class/exam selection UI -----
   // load classes for teacher
@@ -160,228 +185,141 @@ export default function ScannerScreen({
       const studentId = scanResult.studentId;
 
       // Ensure that a valid student ID was parsed
-      if (!studentId || studentId === "0000000" || studentId === "Unknown") {
+      const isInvalidId =
+        !studentId ||
+        studentId === "Unknown" ||
+        /^0+$/.test(studentId); // catches 0000000, 00000000, etc.
+
+      if (isInvalidId) {
         console.warn(
-          `[ScannerScreen] Invalid student ID detected: "${studentId}"`,
+          `[ScannerScreen] Unreadable student ID ("${studentId}") — prompting manual entry`,
         );
-        Alert.alert(
-          "Invalid ID",
-          "Could not detect a valid student ID from the scanned sheet. Please ensure the ID bubbles are properly filled.",
-        );
+        // Show manual entry modal instead of hard-blocking
+        setManualIdModal({
+          visible: true,
+          pendingScan: { ...scanResult, studentId: "" },
+          pendingImage: imageUri,
+          input: "",
+        });
         return;
       }
 
       console.log(`[ScannerScreen] Detected student ID: ${studentId}`);
 
-      // Verify the student account with Firestore
-      console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+      // ── 1. Fast Student Verification ──
+      let isValidId = false;
+      const netState = await NetInfo.fetch();
 
-      // First, check the students collection
-      const studentsRef = collection(db, "students");
-      const q = query(studentsRef, where("studentId", "==", studentId));
+      if (netState.isConnected && netState.isInternetReachable) {
+        console.log(`[Firestore] Verifying student ID: ${studentId}...`);
+        try {
+          const q = query(collection(db, "students"), where("studentId", "==", studentId));
+          const snap = await withTimeout(getDocs(q), 2000);
+          isValidId = !snap.empty;
 
-      const startTime = Date.now();
-      const querySnapshot = await getDocs(q);
-      let duration = Date.now() - startTime;
-
-      let isValidId = !querySnapshot.empty;
-
-      if (isValidId) {
-        const studentData = querySnapshot.docs[0].data();
-        console.log(
-          `[Firestore] Verification complete for ${studentId}: MATCH FOUND in students collection (${duration}ms)`,
-        );
-        console.log(`[Firestore] Student data:`, studentData);
-      } else {
-        // Fallback: Check if student exists in any class's students array
-        console.log(
-          `[Firestore] Not found in students collection, checking classes...`,
-        );
-
-        const classesRef = collection(db, "classes");
-        const classesSnapshot = await getDocs(classesRef);
-        duration = Date.now() - startTime;
-
-        for (const classDoc of classesSnapshot.docs) {
-          const classData = classDoc.data();
-          if (classData.students && Array.isArray(classData.students)) {
-            const foundStudent = classData.students.find(
-              (s: any) => s.student_id === studentId,
-            );
-            if (foundStudent) {
-              isValidId = true;
-              console.log(
-                `[Firestore] Verification complete for ${studentId}: MATCH FOUND in class ${classData.class_name} (${duration}ms)`,
-              );
-              console.log(`[Firestore] Student data:`, foundStudent);
-              break;
+          if (!isValidId) {
+            // Fallback to class check
+            const classesSnapshot = await withTimeout(getDocs(collection(db, "classes")), 2500);
+            for (const classDoc of classesSnapshot.docs) {
+              if (classDoc.data().students?.some((s: any) => s.student_id === studentId)) {
+                isValidId = true;
+                break;
+              }
             }
           }
+        } catch (err) {
+          console.warn("[ScannerScreen] Student verification timed out. Assuming valid.");
+          isValidId = true;
         }
-
-        if (!isValidId) {
-          console.warn(
-            `[Firestore] Student ID ${studentId} not found in students collection or any class (${duration}ms)`,
-          );
-          Alert.alert(
-            "Unrecognized ID",
-            `Student ID ${studentId} is not registered in any class, but it was still scored.`,
-          );
-        }
+      } else {
+        console.log("[ScannerScreen] Offline - Skipping network validation.");
+        isValidId = true; // Trust ID while offline
       }
 
-      // Fetch the actual answer key from Firebase
-      console.log(
-        `[ScannerScreen] Fetching answer key for exam: ${activeExamId}`,
-      );
+      if (!isValidId) {
+        Alert.alert("Unregistered student", `ID ${studentId} not found, but it will be scored anyway.`);
+      }
+
+      // ── 2. Fetch Answer Key (Fast Timeout) ──
       const rawCount = scanResult.answers?.length || 20;
       let answerKey: string[] = [];
 
       try {
-        // Import ExamService dynamically to avoid circular dependencies
         const { ExamService } = await import("../../services/examService");
-        const examData = await ExamService.getExamById(activeExamId);
-
-        if (examData && examData.answerKey && examData.answerKey.answers) {
+        const examData = await withTimeout(ExamService.getExamById(activeExamId), 2500);
+        if (examData?.answerKey?.answers) {
           answerKey = examData.answerKey.answers;
-          console.log(
-            `[ScannerScreen] Loaded answer key from exam: ${answerKey.length} questions`,
-          );
-          console.log(
-            `[ScannerScreen] First 5 answers:`,
-            answerKey.slice(0, 5),
-          );
         } else {
-          console.warn(
-            `[ScannerScreen] No answer key found for exam ${activeExamId}, using default`,
-          );
-          // Fallback to default pattern
-          answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-            (ak) => ak.correctAnswer,
-          );
+          throw new Error("Missing key");
         }
       } catch (error) {
-        console.error(`[ScannerScreen] Error fetching answer key:`, error);
-        // Fallback to default pattern
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.correctAnswer,
-        );
+        console.warn("[ScannerScreen] Answer key fetch failed/timed out. using default key.");
+        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(ak => ak.correctAnswer);
       }
 
-      // Convert string array to AnswerKey format
       const answerKeyFormatted = answerKey.map((answer, index) => ({
         questionNumber: index + 1,
         correctAnswer: answer,
         points: 1,
       }));
 
-      console.log(
-        `[ScannerScreen] Using answer key with ${answerKeyFormatted.length} questions`,
-      );
-      console.log(
-        `[ScannerScreen] First 3 formatted keys:`,
-        answerKeyFormatted.slice(0, 3),
-      );
-
-      // Grade the answers
-      const result = GradingService.gradeAnswers(
-        scanResult,
-        answerKeyFormatted,
-      );
+      // ── 3. Grade & Duplicate Check ──
+      const result = GradingService.gradeAnswers(scanResult, answerKeyFormatted);
       result.metadata = { ...result.metadata, isValidId: isValidId } as any;
 
-      console.log(
-        `[ScannerScreen] Scanned student ID: ${result.studentId} (Valid: ${isValidId})`,
-      );
-      console.log(`[ScannerScreen] Extracted answers count: ${rawCount}`);
-
-      // Check for duplicates
       let duplicateCheck = null;
       try {
-        duplicateCheck =
-          await DuplicateScoreDetectionService.checkForDuplicates(
-            result,
-            activeExamId,
-          );
-      } catch (error) {
-        console.error("[ScannerScreen] Duplicate check failed:", error);
-        // Continue without duplicate check
-      }
-
-      if (duplicateCheck) {
-        console.log(
-          `[ScannerScreen] Duplicate detected: ${duplicateCheck.matchType} (${Math.round(duplicateCheck.similarity * 100)}%)`,
+        duplicateCheck = await withTimeout(
+          DuplicateScoreDetectionService.checkForDuplicates(result, activeExamId),
+          2000
         );
+      } catch (err) { /* proceed if check hangs */ }
 
-        // If exact duplicate, show warning modal
-        if (
-          duplicateCheck.matchType === "exact" ||
-          duplicateCheck.matchType === "high"
-        ) {
-          setPendingResult(result);
-          setDuplicateMatch(duplicateCheck);
-          setShowDuplicateModal(true);
-          return;
-        }
-
-        // For moderate duplicates, just show a toast warning
-        Toast.show({
-          type: "info",
-          text1: "Similar Scan Detected",
-          text2:
-            DuplicateScoreDetectionService.getDuplicateWarningMessage(
-              duplicateCheck,
-            ),
-          visibilityTime: 5000,
-        });
+      if (duplicateCheck && (duplicateCheck.matchType === "exact" || duplicateCheck.matchType === "high")) {
+        setPendingResult(result);
+        setDuplicateMatch(duplicateCheck);
+        setShowDuplicateModal(true);
+        return;
       }
 
-      // Store result and image
+      // ── 4. Save Pipeline ──
       const savedResult = await StorageService.saveScanResult(result, imageUri);
 
-      // Show success toast
-      Toast.show({
-        type: "success",
-        text1: `Sheet Scanned: ${rawCount} Questions`,
-        text2: `Student ${result.studentId || "00000000"}: ${result.score}/${result.totalPoints}`,
-        visibilityTime: 4000,
+      // Async Firestore/Realm save
+      GradeStorageService.saveGradingResult(result, activeExamId).then(saveResult => {
+        if (saveResult.status === "saved") {
+          Toast.show({ type: "success", text1: "Saved", text2: `Score: ${result.score}/${result.totalPoints}` });
+        } else if (saveResult.status === "pending") {
+          Toast.show({ type: "info", text1: "Queued Offline", text2: "Data saved in RealmDB for later sync." });
+        }
       });
 
       setGradingResult(savedResult);
       setScannedImage(imageUri);
       setCurrentState("results");
+
     } catch (error) {
-      console.error("Error grading answers:", error);
-      Alert.alert("Error", "Failed to grade answers. Please try again.");
+      console.error("[ScannerScreen] Error:", error);
+      Alert.alert("Error", "Failed to process scan.");
     }
   };
 
-  // Retry save from results screen
-  const handleRetrySave = async () => {
-    if (!gradingResult || !scannedImage) return;
-    try {
-      await StorageService.saveScanResult(gradingResult, scannedImage);
-      Toast.show({
-        type: "success",
-        text1: "Saved Successfully",
-        text2: "Result has been saved",
-        visibilityTime: 4000,
-      });
-    } catch (error) {
-      Toast.show({
-        type: "error",
-        text1: "Save Failed",
-        text2: "Could not save result",
-        visibilityTime: 4000,
-      });
+  const handleRetrySave = () => handleFirestoreRetrySave(gradingResult!, activeExamId);
+
+  const handleFirestoreRetrySave = async (result: GradingResult, examId: string) => {
+    const saveResult = await GradeStorageService.saveGradingResult(result, examId);
+    if (saveResult.status === "saved") {
+      Toast.show({ type: "success", text1: "Saved Successfully" });
+    } else if (saveResult.status === "pending") {
+      Toast.show({ type: "info", text1: "Saved Locally (Realm)" });
+    } else {
+      Toast.show({ type: "error", text1: "Still Failing", text2: saveResult.message });
     }
   };
 
 
   const handleScanAnother = () => {
-    setGradingResult(null);
-    setScannedImage(undefined);
-    setScanCount((prev) => prev + 1); // Increment to force camera remount
+    setScanCount(prev => prev + 1);
     setCurrentState("camera");
   };
 
@@ -397,59 +335,34 @@ export default function ScannerScreen({
 
   const handleKeepNewScan = async () => {
     if (!pendingResult || !scannedImage) return;
-
-    try {
-      // Mark as override and save
-      const overriddenResult =
-        DuplicateScoreDetectionService.markAsOverride(pendingResult);
-      const savedResult = await StorageService.saveScanResult(
-        overriddenResult,
-        scannedImage,
-      );
-
-      Toast.show({
-        type: "success",
-        text1: "Scan Saved",
-        text2: "New scan saved successfully",
-        visibilityTime: 3000,
-      });
-
-      setGradingResult(savedResult);
-      setScannedImage(scannedImage);
-      setCurrentState("results");
-    } catch (error) {
-      Toast.show({
-        type: "error",
-        text1: "Save Failed",
-        text2: "Could not save scan result",
-        visibilityTime: 4000,
-      });
-    } finally {
-      setShowDuplicateModal(false);
-      setPendingResult(null);
-      setDuplicateMatch(null);
-    }
+    const overridden = DuplicateScoreDetectionService.markAsOverride(pendingResult);
+    const saved = await StorageService.saveScanResult(overridden, scannedImage);
+    GradeStorageService.saveGradingResult(overridden, activeExamId);
+    setGradingResult(saved);
+    setScannedImage(scannedImage);
+    setCurrentState("results");
+    setShowDuplicateModal(false);
   };
 
-  const handleKeepExistingScan = () => {
-    Toast.show({
-      type: "info",
-      text1: "Scan Discarded",
-      text2: "Keeping existing scan",
-      visibilityTime: 3000,
+  // ── Handler for manual ID submission ──
+  const handleConfirmManualId = () => {
+    const { pendingScan, pendingImage, input } = manualIdModal;
+    if (!input.trim() || !pendingScan) {
+      Alert.alert("Error", "Please enter a valid Student ID");
+      return;
+    }
+
+    // Hide manual modal
+    setManualIdModal({
+      visible: false,
+      pendingScan: null,
+      pendingImage: "",
+      input: "",
     });
 
-    setShowDuplicateModal(false);
-    setPendingResult(null);
-    setDuplicateMatch(null);
-    setCurrentState("camera");
-  };
-
-  const handleCancelDuplicate = () => {
-    setShowDuplicateModal(false);
-    setPendingResult(null);
-    setDuplicateMatch(null);
-    setCurrentState("camera");
+    // Resume the scan workflow with the manually entered ID
+    const correctedScan = { ...pendingScan, studentId: input.trim() };
+    handleScanComplete(correctedScan, pendingImage);
   };
 
   return (
@@ -458,7 +371,7 @@ export default function ScannerScreen({
       {/* ── Camera (Always Visible) ── */}
       {currentState !== "results" && (
         <CameraScanner
-          key={`camera-${scanCount}`}
+          key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
           onScanComplete={handleScanComplete}
           onCancel={handleClose}
@@ -607,27 +520,81 @@ export default function ScannerScreen({
         <ScanResults
           result={gradingResult}
           imageUri={scannedImage}
-          questionCount={gradingResult.totalQuestions}
           onClose={handleClose}
           onScanAnother={handleScanAnother}
           onRetrySave={handleRetrySave}
         />
       )}
 
-      {/* Duplicate Warning Modal */}
-      {showDuplicateModal && duplicateMatch && pendingResult && (
+      {showDuplicateModal && duplicateMatch && (
         <DuplicateScoreWarningModal
           visible={showDuplicateModal}
           match={duplicateMatch}
-          newResult={pendingResult}
+          newResult={pendingResult!}
           onKeepNew={handleKeepNewScan}
-          onKeepExisting={handleKeepExistingScan}
-          onCancel={handleCancelDuplicate}
+          onKeepExisting={() => setShowDuplicateModal(false)}
+          onCancel={() => setShowDuplicateModal(false)}
         />
       )}
+      {/* ── Manual Student ID Entry Modal ── */}
+      <Modal
+        visible={manualIdModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setManualIdModal({ ...manualIdModal, visible: false })
+        }
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.manualIdModalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={28} color="#f39c12" />
+              <Text style={styles.modalTitle}>Unreadable Student ID</Text>
+            </View>
 
-      <Toast />
-    </View>
+            <Text style={styles.modalMessage}>
+              The scanner could not read the student ID bubbles on this sheet.
+              Please type the correct Student ID below to continue saving.
+            </Text>
+
+            <TextInput
+              style={styles.manualIdInput}
+              placeholder="e.g. 202300109"
+              value={manualIdModal.input}
+              onChangeText={(text) =>
+                setManualIdModal({ ...manualIdModal, input: text })
+              }
+              keyboardType="number-pad"
+              autoFocus
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSummaryCancel]}
+                onPress={() => {
+                  setManualIdModal({
+                    visible: false,
+                    pendingScan: null,
+                    pendingImage: "",
+                    input: "",
+                  });
+                  setCurrentState("camera");
+                }}
+              >
+                <Text style={styles.modalCancelText}>Cancel Scan</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalVerifyConfirm]}
+                onPress={handleConfirmManualId}
+              >
+                <Text style={styles.modalConfirmText}>Confirm & Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View >
   );
 }
 
@@ -808,5 +775,89 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     letterSpacing: 0.3,
+  },
+  // ── Manual ID Modal Styles ──
+  manualIdModalContent: {
+    width: "90%",
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 24,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  manualIdInput: {
+    width: "100%",
+    backgroundColor: "#f5f5f5",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#333",
+    textAlign: "center",
+    marginBottom: 24,
+    letterSpacing: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: "#666",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  modalSummaryCancel: {
+    backgroundColor: "#f5f5f5",
+  },
+  modalCancelText: {
+    color: "#666",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalVerifyConfirm: {
+    backgroundColor: "#00a550",
+  },
+  modalConfirmText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });

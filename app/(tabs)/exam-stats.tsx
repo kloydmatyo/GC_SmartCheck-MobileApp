@@ -2,6 +2,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,6 +11,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Toast from "react-native-toast-message";
+
+import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
+import {
+  ExportDateFilter,
+  ExportFormat,
+  GradeExportService,
+} from "@/services/gradeExportService";
+import { ReportPdfService } from "@/services/reportPdfService";
 
 import {
   DashboardDateFilter,
@@ -112,6 +123,120 @@ export default function ExamStatsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<DashboardDateFilter>("all");
   const [sortByCount, setSortByCount] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportStage, setExportStage] = useState("");
+  const [exportPercent, setExportPercent] = useState(0);
+
+  // ── PDF report viewer state ───────────────────────────────────────────────
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportViewerVisible, setReportViewerVisible] = useState(false);
+  const [reportHtml, setReportHtml] = useState("");
+  const [reportViewerTitle, setReportViewerTitle] = useState("");
+
+  const handleExport = useCallback(() => {
+    if (!examId || exporting) return;
+
+    // Build subtitle showing which filter is currently active
+    const filterLabel =
+      dateFilter === "today"
+        ? "Today's records"
+        : dateFilter === "week"
+          ? "This week's records"
+          : "All records";
+
+    Alert.alert(
+      "Export Grades",
+      `Format? (Exporting: ${filterLabel})`,
+      [
+        { text: "CSV", onPress: () => doExport("csv") },
+        { text: "Excel", onPress: () => doExport("excel") },
+        { text: "PDF (with logo)", onPress: () => doExport("pdf") },
+        { text: "Cancel", style: "cancel" },
+      ],
+      { cancelable: true },
+    );
+  }, [examId, exporting, dateFilter]);
+
+  const doExport = async (format: ExportFormat) => {
+    setExporting(true);
+    setExportStage("Starting export…");
+    setExportPercent(0);
+
+    try {
+      const result = await GradeExportService.exportExamGrades(
+        examId as string,
+        {
+          format,
+          // Pass the active date filter so export scope matches the view (#9)
+          dateFilter: dateFilter as ExportDateFilter,
+          // Progress callback drives the overlay (#6)
+          onProgress: (stage, percent) => {
+            setExportStage(stage);
+            setExportPercent(percent);
+          },
+        },
+      );
+
+      if (result.success) {
+        Toast.show({
+          type: "success",
+          text1: "Export Complete",
+          text2: `${result.recordCount ?? 0} records exported as ${format.toUpperCase()}.`,
+          visibilityTime: 3500,
+        });
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Export Failed",
+          text2: result.message,
+          visibilityTime: 4000,
+        });
+      }
+    } catch (err: any) {
+      Toast.show({
+        type: "error",
+        text1: "Export Error",
+        text2: err.message ?? "Something went wrong.",
+        visibilityTime: 4000,
+      });
+    } finally {
+      setExporting(false);
+      setExportStage("");
+      setExportPercent(0);
+    }
+  };
+  const handleGenerateReport = useCallback(async () => {
+    if (!examId || reportGenerating) return;
+    setReportGenerating(true);
+    try {
+      const result = await ReportPdfService.generateClassSummaryReport(
+        examId as string,
+      );
+      if (result.success && result.previewHtml) {
+        const decoded = examTitle ? decodeURIComponent(examTitle) : "Exam";
+        setReportViewerTitle(`${decoded} — Class Summary`);
+        setReportHtml(result.previewHtml);
+        setReportViewerVisible(true);
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Report Failed",
+          text2: result.message,
+          visibilityTime: 4000,
+        });
+      }
+    } catch (err: any) {
+      Toast.show({
+        type: "error",
+        text1: "Report Error",
+        text2: err.message ?? "Something went wrong.",
+        visibilityTime: 4000,
+      });
+    } finally {
+      setReportGenerating(false);
+    }
+  }, [examId, examTitle, reportGenerating]);
+
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const subscribe = useCallback(
@@ -196,6 +321,32 @@ export default function ExamStatsScreen() {
 
   return (
     <View style={styles.container}>
+      {/* ── PDF Report Viewer Modal ───────────────────────────────────── */}
+      <ReportPdfViewer
+        visible={reportViewerVisible}
+        onClose={() => setReportViewerVisible(false)}
+        html={reportHtml}
+        title={reportViewerTitle}
+        fileName="GC_ClassSummary"
+      />
+
+      {/* ── Export progress overlay (#6) ─────────────────────── */}
+      {exporting && (
+        <View style={styles.exportOverlay}>
+          <View style={styles.exportCard}>
+            <ActivityIndicator size="large" color="#00a550" />
+            <Text style={styles.exportStageText}>{exportStage}</Text>
+            {/* Progress bar */}
+            <View style={styles.exportBarBg}>
+              <View
+                style={[styles.exportBarFill, { width: `${exportPercent}%` }]}
+              />
+            </View>
+            <Text style={styles.exportPercentText}>{exportPercent}%</Text>
+          </View>
+        </View>
+      )}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
@@ -204,7 +355,35 @@ export default function ExamStatsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        <View style={{ width: 36 }} />
+        {/* Right: Report + Export buttons */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={handleGenerateReport}
+            style={styles.backBtn}
+            disabled={reportGenerating || !stats || stats.totalGraded === 0}
+          >
+            {reportGenerating ? (
+              <ActivityIndicator size="small" color="#00a550" />
+            ) : (
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleExport}
+            style={styles.backBtn}
+            disabled={exporting || !stats || stats.totalGraded === 0}
+          >
+            <Ionicons
+              name={exporting ? "hourglass-outline" : "download-outline"}
+              size={24}
+              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Date filter chips */}
@@ -411,6 +590,10 @@ const styles = StyleSheet.create({
   backBtn: {
     padding: 4,
     width: 36,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   headerTitle: {
     flex: 1,
@@ -647,5 +830,55 @@ const styles = StyleSheet.create({
     color: "#aaa",
     textAlign: "center",
     marginTop: 4,
+  },
+
+  // ── Export progress overlay (#6) ────────────────────────────────────────
+  exportOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
+  },
+  exportCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 28,
+    paddingHorizontal: 32,
+    alignItems: "center",
+    gap: 14,
+    minWidth: 240,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  exportStageText: {
+    fontSize: 13,
+    color: "#444",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  exportBarBg: {
+    width: "100%",
+    height: 8,
+    backgroundColor: "#e0e0e0",
+    borderRadius: 4,
+    overflow: "hidden",
+  },
+  exportBarFill: {
+    height: 8,
+    backgroundColor: "#00a550",
+    borderRadius: 4,
+  },
+  exportPercentText: {
+    fontSize: 12,
+    color: "#00a550",
+    fontWeight: "700",
   },
 });

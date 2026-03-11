@@ -440,4 +440,64 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     textAlign: "center",
   },
+  deleteButton: {
+    backgroundColor: "#dc2626",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    borderRadius: 16,
+    padding: 24,
+    width: "100%",
+    maxWidth: 400,
+    alignItems: "center",
+  },
+  modalHeader: {
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  modalMessage: {
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 6,
+  },
+  modalButtonCancel: {
+    borderWidth: 1,
+  },
+  modalButtonDelete: {
+    backgroundColor: "#dc2626",
+  },
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  modalButtonDeleteText: {
+    color: "#fff",
+  },
 });
+

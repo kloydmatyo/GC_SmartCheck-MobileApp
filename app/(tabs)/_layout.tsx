@@ -126,6 +126,9 @@ export default function TabLayout() {
           fontWeight: "600",
           marginTop: 2,
         },
+        tabBarIconStyle: {
+          marginTop: 2,
+        },
       }}
     >
       <Tabs.Screen
@@ -135,7 +138,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "home" : "home-outline"}
-              size={24}
+              size={26}
               color={color}
             />
           ),
@@ -195,24 +198,28 @@ export default function TabLayout() {
         name="students"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen
         name="generator"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen
         name="demo"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           href: null,
+          tabBarStyle: { display: 'none' },
         }}
       />
       <Tabs.Screen

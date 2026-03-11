@@ -1,5 +1,6 @@
+import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -124,12 +125,56 @@ export default function ClassesScreen() {
     class_name: "",
     course_subject: "",
     room: "",
-    schedule_day: [] as string[], // Changed to array
-    schedule_time: "",
-    school_year: "2025*2026",
     section_block: "",
-    semester: "1st semester",
   });
+
+  // Fetch recent quizzes for each class
+  const loadRecentQuizzes = async (classIds: string[]) => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser || classIds.length === 0) return;
+
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", currentUser.uid),
+      );
+      const snapshot = await getDocs(q);
+
+      const byClass: Record<string, RecentQuiz[]> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const cid: string | undefined = data.classId;
+        if (!cid || !classIds.includes(cid)) return;
+
+        const rawDate =
+          data.createdAt?.toDate?.() ||
+          (data.created_at ? new Date(data.created_at) : null);
+        const dateStr = rawDate
+          ? rawDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "";
+
+        if (!byClass[cid]) byClass[cid] = [];
+        byClass[cid].push({
+          id: docSnap.id,
+          title: data.title || "Untitled",
+          date: dateStr,
+        });
+      });
+
+      // Keep only 5 most recent per class (already sorted by Firestore insertion order)
+      Object.keys(byClass).forEach((cid) => {
+        byClass[cid] = byClass[cid].slice(0, 5);
+      });
+
+      setRecentQuizzes(byClass);
+    } catch (error) {
+      console.error("Error loading recent quizzes:", error);
+    }
+  };
 
   // Load classes from Firebase
   const loadClasses = async () => {
@@ -137,6 +182,7 @@ export default function ClassesScreen() {
       setLoading(true);
       const fetchedClasses = await ClassService.getClassesByUser();
       setClasses(fetchedClasses);
+      await loadRecentQuizzes(fetchedClasses.map((c) => c.id));
     } catch (error) {
       console.error("Error loading classes:", error);
       Toast.show({
@@ -225,7 +271,7 @@ export default function ClassesScreen() {
       Toast.show({
         type: "error",
         text1: "Validation Error",
-        text2: "Class name is required",
+        text2: "Program is required",
       });
       return;
     }
@@ -287,11 +333,7 @@ export default function ClassesScreen() {
         class_name: "",
         course_subject: "",
         room: "",
-        schedule_day: [], // Reset to empty array
-        schedule_time: "",
-        school_year: "2025*2026",
         section_block: "",
-        semester: "1st semester",
       });
 
       setModalVisible(false);
@@ -1092,53 +1134,70 @@ const styles = StyleSheet.create({
     color: "#e8f5e9",
     backgroundColor: "#3d5a3d",
   },
-  dayButtons: {
+  dropdownButton: {
+    borderWidth: 1,
+    borderColor: "#2f6b49",
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    backgroundColor: "#3d5a3d",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  dayButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f6b49",
-    backgroundColor: "#3d5a3d",
+  dropdownButtonText: {
+    fontSize: 16,
+    color: "#e8f5e9",
   },
-  dayButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
+  dropdownPlaceholder: {
+    color: "#9ab79f",
   },
-  dayButtonText: {
-    fontSize: 14,
-    color: "#d0e5d6",
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
   },
-  dayButtonTextActive: {
-    color: COLORS.white,
+  pickerContainer: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: "70%",
+  },
+  pickerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e0e0e0",
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#2f433a",
+  },
+  pickerList: {
+    maxHeight: 400,
+  },
+  pickerItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  pickerItemSelected: {
+    backgroundColor: "#e8f5e9",
+  },
+  pickerItemText: {
+    fontSize: 16,
+    color: "#2f433a",
     fontWeight: "600",
   },
-  semesterButtons: {
-    gap: 8,
-  },
-  semesterButton: {
-    padding: 12,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f6b49",
-    backgroundColor: "#3d5a3d",
-  },
-  semesterButtonActive: {
-    backgroundColor: "#2d4a2d",
-    borderColor: "#4CAF50",
-  },
-  semesterButtonText: {
-    fontSize: 14,
-    color: "#d0e5d6",
-    textAlign: "center",
-  },
-  semesterButtonTextActive: {
-    color: "#fff",
-    fontWeight: "600",
+  pickerItemTextSelected: {
+    color: "#2d7a5f",
+    fontWeight: "700",
   },
   modalFooter: {
     flexDirection: "row",

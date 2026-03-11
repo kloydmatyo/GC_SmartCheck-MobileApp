@@ -377,7 +377,7 @@ export default function HomeScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [subscribeExams, subscribeClasses]);
 
   useFocusEffect(loadHome);
 

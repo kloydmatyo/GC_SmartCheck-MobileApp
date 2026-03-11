@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import React, { useState } from "react";
 import {
+  Alert,
   Image,
   Modal,
   Platform,
@@ -541,6 +545,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.95)",
     justifyContent: "center",
     alignItems: "center",
+    justifyContent: "center",
+  },
+  btnExport: {
+    flex: 1.2,
+    backgroundColor: "#2196F3",
+    padding: 16,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
   },
   modalClose: {
     position: "absolute",

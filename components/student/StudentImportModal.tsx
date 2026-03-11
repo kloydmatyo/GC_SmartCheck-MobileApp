@@ -88,7 +88,8 @@ export function StudentImportModal({
         }
       }
 
-      if (fileSize == null) {
+      // On web the File object always carries size; skip the hard-block
+      if (fileSize == null && Platform.OS !== "web") {
         Alert.alert(
           "File Error",
           "Could not determine file size. Please try a different file.",
