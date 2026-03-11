@@ -5,9 +5,11 @@
 
 import { CacheSyncIndicator } from "@/components/student/CacheSyncIndicator";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
-import { StudentExtended } from "@/types/student";
+import { ClassService } from "@/services/classService";
+import { ImportResult, StudentExtended } from "@/types/student";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
@@ -84,6 +86,12 @@ export default function StudentsScreen() {
 
   // REQ 22: Import modal state
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importClassOptions, setImportClassOptions] = useState<
+    { id: string; label: string }[]
+  >([]);
+  const [selectedImportClassId, setSelectedImportClassId] = useState<string | null>(
+    null,
+  );
   const [showStudentModal, setShowStudentModal] = useState(false);
   const [studentModalMode, setStudentModalMode] = useState<"add" | "edit">(
     "add",
@@ -265,6 +273,20 @@ export default function StudentsScreen() {
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
 
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
+      setSelectedImportClassId((current) =>
+        current && mappedClasses.some((item) => item.id === current)
+          ? current
+          : mappedClasses[0]?.id || null,
+      );
+
       await loadStudents();
     } catch (error) {
       console.error("Failed to initialize:", error);
@@ -401,6 +423,19 @@ export default function StudentsScreen() {
       await StudentDatabaseService.downloadStudentDatabase();
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
+      setSelectedImportClassId((current) =>
+        current && mappedClasses.some((item) => item.id === current)
+          ? current
+          : mappedClasses[0]?.id || null,
+      );
       await loadStudents();
     } catch (error) {
       console.error("Refresh failed:", error);
@@ -414,7 +449,33 @@ export default function StudentsScreen() {
     }
   };
 
-  const handleImportComplete = async () => {
+  const handleImportComplete = async (result: ImportResult) => {
+
+    if (selectedImportClassId && result.processedRows?.length) {
+      try {
+        const classData = await ClassService.getClassById(selectedImportClassId);
+        if (classData) {
+          const merged = [...classData.students];
+          const seen = new Set(merged.map((student) => student.student_id));
+
+          result.processedRows.forEach((row) => {
+            if (seen.has(row.studentId)) return;
+            seen.add(row.studentId);
+            merged.push({
+              student_id: row.studentId,
+              first_name: row.firstName,
+              last_name: row.lastName,
+              email: row.email,
+            });
+          });
+
+          await ClassService.updateClass(selectedImportClassId, { students: merged });
+        }
+      } catch (error) {
+        console.error("Failed to attach imported students to class:", error);
+      }
+    }
+
     setShowImportModal(false);
     // Refresh section list so newly imported sections appear in the filter immediately
     try {
@@ -422,6 +483,14 @@ export default function StudentsScreen() {
         await import("../../services/studentDatabaseService");
       const sections = await StudentDatabaseService.getUniqueSections();
       setAvailableSections(sections);
+      const classes = await ClassService.getClassesByUser();
+      const mappedClasses = classes
+        .filter((item) => !item.isArchived)
+        .map((item) => ({
+          id: item.id,
+          label: item.class_name,
+        }));
+      setImportClassOptions(mappedClasses);
     } catch {
       // non-critical — sections will update on next pull-to-refresh
     }
@@ -783,77 +852,16 @@ export default function StudentsScreen() {
   );
 
   const renderDeleteStudentModal = () => (
-    <Modal
+    <ConfirmationModal
       visible={Boolean(pendingDeleteStudent)}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={() => setPendingDeleteStudent(null)}
-    >
-      <View
-        style={[
-          styles.deleteModalOverlay,
-          { backgroundColor: colors.modalOverlay },
-        ]}
-      >
-        <View
-          style={[
-            styles.deleteModalCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: darkModeEnabled ? "#34483f" : "#d8dfda",
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.deleteModalIconWrap,
-              { backgroundColor: darkModeEnabled ? "#3f2a2a" : "#fde8e7" },
-            ]}
-          >
-            <Ionicons name="trash-outline" size={24} color="#d9534f" />
-          </View>
-
-          <Text style={[styles.deleteModalTitle, { color: colors.text }]}>
-            Delete student
-          </Text>
-          <Text
-            style={[styles.deleteModalMessage, { color: colors.textSecondary }]}
-          >
-            Delete {pendingDeleteStudent?.first_name} {pendingDeleteStudent?.last_name}?
-            This cannot be undone.
-          </Text>
-
-          <View style={styles.deleteModalActions}>
-            <TouchableOpacity
-              style={[
-                styles.deleteModalSecondaryButton,
-                {
-                  backgroundColor: darkModeEnabled ? "#22302a" : "#f3f7f4",
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={() => setPendingDeleteStudent(null)}
-            >
-              <Text
-                style={[
-                  styles.deleteModalSecondaryText,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                Cancel
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.deleteModalPrimaryButton}
-              onPress={confirmDeleteStudent}
-            >
-              <Text style={styles.deleteModalPrimaryText}>Delete</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
+      title="Delete Student"
+      message={`Delete ${pendingDeleteStudent?.first_name ?? ""} ${pendingDeleteStudent?.last_name ?? ""}? This cannot be undone.`.trim()}
+      cancelText="Cancel"
+      confirmText="Delete"
+      destructive
+      onCancel={() => setPendingDeleteStudent(null)}
+      onConfirm={confirmDeleteStudent}
+    />
   );
 
   // REQ 37: Pagination controls
@@ -1144,6 +1152,9 @@ export default function StudentsScreen() {
         visible={showImportModal}
         onClose={() => setShowImportModal(false)}
         onImportComplete={handleImportComplete}
+        classOptions={importClassOptions}
+        selectedClassId={selectedImportClassId}
+        onSelectClass={setSelectedImportClassId}
       />
 
       <Modal
@@ -1756,64 +1767,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingBottom: 40,
     borderTopWidth: 1,
-  },
-  deleteModalOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 24,
-  },
-  deleteModalCard: {
-    width: "100%",
-    maxWidth: 360,
-    borderRadius: 24,
-    padding: 24,
-    borderWidth: 1,
-  },
-  deleteModalIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 18,
-  },
-  deleteModalTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
-  deleteModalMessage: {
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  deleteModalActions: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 24,
-  },
-  deleteModalSecondaryButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  deleteModalSecondaryText: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  deleteModalPrimaryButton: {
-    flex: 1,
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: "center",
-    backgroundColor: "#d9534f",
-  },
-  deleteModalPrimaryText: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#fff",
   },
   studentModalContent: {
     flex: 1,

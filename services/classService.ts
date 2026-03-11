@@ -13,6 +13,29 @@ import {
 } from "firebase/firestore";
 import { Class, CreateClassData, Student } from "../types/class";
 
+function getClassSortTime(item: {
+  createdAt?: Date;
+  updatedAt?: Date;
+  created_at?: string;
+}) {
+  if (item.createdAt instanceof Date && !Number.isNaN(item.createdAt.getTime())) {
+    return item.createdAt.getTime();
+  }
+
+  if (item.updatedAt instanceof Date && !Number.isNaN(item.updatedAt.getTime())) {
+    return item.updatedAt.getTime();
+  }
+
+  if (item.created_at) {
+    const parsed = new Date(item.created_at);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.getTime();
+    }
+  }
+
+  return 0;
+}
+
 export class ClassService {
   private static COLLECTION = "classes";
 
@@ -29,6 +52,7 @@ export class ClassService {
       const newClass = {
         ...classData,
         students: classData.students || [],
+        isArchived: classData.isArchived || false,
         createdBy: currentUser.uid,
         created_at: new Date().toISOString(),
         createdAt: Timestamp.now(),
@@ -70,12 +94,15 @@ export class ClassService {
           room: data.room,
           section_block: data.section_block,
           students: data.students || [],
+          isArchived: data.isArchived || false,
           createdBy: data.createdBy,
           created_at: data.created_at,
           createdAt: data.createdAt?.toDate(),
           updatedAt: data.updatedAt?.toDate(),
         });
       });
+
+      classes.sort((a, b) => getClassSortTime(b) - getClassSortTime(a));
 
       return classes;
     } catch (error) {
@@ -104,6 +131,7 @@ export class ClassService {
         room: data.room,
         section_block: data.section_block,
         students: data.students || [],
+        isArchived: data.isArchived || false,
         createdBy: data.createdBy,
         created_at: data.created_at,
         createdAt: data.createdAt?.toDate(),

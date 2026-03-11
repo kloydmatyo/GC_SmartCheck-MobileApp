@@ -1,26 +1,28 @@
-import StatusManager from "@/components/exam/StatusManager";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
+import { ResultsService, type UnifiedResultRow } from "@/services/resultsService";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { ExamService as ExamApi } from "@/services/examService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Clipboard,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Clipboard,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { auth } from "../../config/firebase";
-import { ExamService } from "../../services/examService";
+import { deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { auth, db } from "../../config/firebase";
 import { ExamPreviewData } from "../../types/exam";
 
 export default function ExamPreviewScreen() {
@@ -28,16 +30,57 @@ export default function ExamPreviewScreen() {
   const params = useLocalSearchParams();
   const examId = params.examId as string;
   const refreshKey = params.refresh as string; // Add refresh trigger
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
+  const classId = params.classId as string | undefined;
+  const requestedTab = params.tab as "answerKey" | "results" | undefined;
+  const goToQuizzes = () =>
+    classId
+      ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
+      : router.replace("/(tabs)/quizzes");
 
   const [exam, setExam] = useState<ExamPreviewData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resultsLoading, setResultsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [headerTopPadding, setHeaderTopPadding] = useState(56);
+  const [activeTab, setActiveTab] = useState<"answerKey" | "results">(
+    requestedTab === "results" ? "results" : "answerKey",
+  );
+  const [examResults, setExamResults] = useState<UnifiedResultRow[]>([]);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [viewCodeVisible, setViewCodeVisible] = useState(false);
+  const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const loadRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
+
+  const resolvedAnswers = React.useMemo(() => {
+    if (!exam) return [];
+
+    const directAnswers = Array.isArray(exam.answerKey.answers)
+      ? exam.answerKey.answers.map((answer) => String(answer || ""))
+      : [];
+
+    if (directAnswers.some((answer) => answer.trim() !== "")) {
+      return directAnswers;
+    }
+
+    const settings = Array.isArray(exam.answerKey.questionSettings)
+      ? exam.answerKey.questionSettings
+      : [];
+
+    if (!settings.length) {
+      return directAnswers;
+    }
+
+    return Array.from({ length: exam.totalQuestions }, (_, index) => {
+      const match = settings.find(
+        (item) => Number(item.questionNumber) === index + 1,
+      );
+      return String(match?.correctAnswer || "");
+    });
+  }, [exam]);
 
   useEffect(() => {
     const top =
@@ -63,41 +106,45 @@ export default function ExamPreviewScreen() {
     }, []),
   );
 
-  const colors = darkModeEnabled
-    ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        border: "#34483f",
-        cardBg: "#1f2b26",
-        cardSoft: "#2a3a33",
-        title: "#e7f1eb",
-        text: "#b9c9c0",
-        icon: "#8fd1ad",
-        accent: "#9bd8b8",
-      }
-    : {
-        bg: "#eef1ef",
-        headerBg: "#3d5a3d",
-        border: "#2f4a38",
-        cardBg: "#3d5a3d",
-        cardSoft: "#2d4a2d",
-        title: "#e8f6ee",
-        text: "#b8d4b8",
-        icon: "#8fd1ad",
-        accent: "#8fd1ad",
-      };
+  const colors = {
+    bg: "#FFFFFF",
+    headerBg: "#FFFFFF",
+    border: "#ECEEF2",
+    cardBg: "#FFFFFF",
+    cardSoft: "#F7F8FA",
+    title: "#1F2937",
+    text: "#9AA3B2",
+    icon: "#667085",
+    accent: "#20BE7B",
+  };
 
   useEffect(() => {
+    setExam(null);
+    setExamResults([]);
+    setError(null);
+    setLoading(true);
+    setResultsLoading(true);
+    setSettingsMenuVisible(false);
+    setViewCodeVisible(false);
+    setArchiveConfirmVisible(false);
+    setDeleteConfirmVisible(false);
     loadExamData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId, refreshKey]); // Reload when refreshKey changes
+
+  useEffect(() => {
+    setActiveTab(requestedTab === "results" ? "results" : "answerKey");
+  }, [requestedTab]);
 
   const loadExamData = async () => {
     const requestId = ++loadRequestRef.current;
     try {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(true);
+      setResultsLoading(true);
       setError(null);
+      setExam(null);
+      setExamResults([]);
 
       const currentUser = auth.currentUser;
       if (!currentUser) {
@@ -106,55 +153,65 @@ export default function ExamPreviewScreen() {
         return;
       }
 
-      // Check if we're online
-      const online = await NetworkService.isOnline();
+      const online = await NetworkService.isOnline().catch(() => true);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setIsOffline(!online);
+      let liveLoadError: unknown = null;
 
-      // Prefer live data when online so recent edits are immediately reflected.
-      if (online) {
-        try {
-          const authorized = await ExamService.isAuthorized(
-            currentUser.uid,
-            examId,
-          );
-          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-          if (!authorized) {
-            setError("You are not authorized to view this exam.");
-            return;
-          }
-
-          const examData = await ExamService.getExamById(examId);
-          if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-          if (!examData) {
-            setError("Exam not found. Please check the exam ID.");
-            return;
-          }
-
-          setExam(examData);
+      try {
+        const authorized = await ExamApi.isAuthorized(
+          currentUser.uid,
+          examId,
+        );
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+        if (!authorized) {
+          setError("You are not authorized to view this exam.");
           return;
-        } catch (liveError) {
-          console.warn(
-            "Failed to fetch live exam data, attempting offline fallback:",
-            liveError,
-          );
         }
+
+        const [examData, resultRows] = await Promise.all([
+          ExamApi.getExamById(examId),
+          ResultsService.getExamResults(examId).catch(() => []),
+        ]);
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+        if (!examData) {
+          throw new Error("Exam not found in live data");
+        }
+
+        setIsOffline(false);
+        setExam(examData);
+        setExamResults(resultRows);
+        return;
+      } catch (liveError) {
+        liveLoadError = liveError;
+        console.warn(
+          "Failed to fetch live exam data, attempting offline fallback:",
+          liveError,
+        );
       }
 
       // Offline fallback
       const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       if (!offlineExam) {
-        setError(
-          "This exam is not available offline. Please connect to the internet.",
-        );
+        if (liveLoadError) {
+          const message =
+            liveLoadError instanceof Error && liveLoadError.message
+              ? liveLoadError.message
+              : "Failed to load exam data. Please try again.";
+          setError(message);
+        } else {
+          setError(
+            "This exam is not available offline. Please connect to the internet.",
+          );
+        }
         return;
       }
 
       const examData: ExamPreviewData = {
         metadata: {
           examId,
-          examCode: examId,
+          examCode: String((offlineExam as any).examCode || examId),
           title: offlineExam.title,
           subject: "",
           section: "",
@@ -182,6 +239,16 @@ export default function ExamPreviewScreen() {
       };
 
       setExam(examData);
+
+      try {
+        const resultRows = await ResultsService.getExamResults(examId);
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+        setExamResults(resultRows);
+      } catch (resultsError) {
+        console.warn("Failed to load exam results:", resultsError);
+        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+        setExamResults([]);
+      }
     } catch (err) {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setError("Failed to load exam data. Please try again.");
@@ -189,31 +256,67 @@ export default function ExamPreviewScreen() {
     } finally {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(false);
+      setResultsLoading(false);
     }
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    Clipboard.setString(text);
-    Toast.show({
-      type: "success",
-      text1: "Copied!",
-      text2: `${label} copied to clipboard`,
-      position: "bottom",
-      visibilityTime: 2000,
-    });
+  const closeSettingsMenu = () => {
+    setSettingsMenuVisible(false);
+  };
+
+  const handleArchiveExam = async () => {
+    try {
+      await updateDoc(doc(db, "exams", examId), { isArchived: true });
+      setArchiveConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Archived",
+        text2: `${exam?.metadata.title || "Exam"} moved to Archived`,
+      });
+      goToQuizzes();
+    } catch (error) {
+      console.error("Error archiving exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to archive exam",
+      });
+    }
+  };
+
+  const handleDeleteExam = async () => {
+    try {
+      await deleteDoc(doc(db, "exams", examId));
+      setDeleteConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Exam deleted successfully",
+      });
+      goToQuizzes();
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete exam",
+      });
+    }
   };
 
   const renderAnswerKeyGrid = () => {
     if (!exam) return null;
 
-    const columns = 2;
+    const columns = 5;
     const rows = Math.ceil(exam.totalQuestions / columns);
     const grid: number[][] = [];
 
     for (let i = 0; i < rows; i++) {
       const row: number[] = [];
       for (let j = 0; j < columns; j++) {
-        const questionNum = i + j * rows + 1;
+        const questionNum = i * columns + j + 1;
         if (questionNum <= exam.totalQuestions) {
           row.push(questionNum);
         }
@@ -222,25 +325,17 @@ export default function ExamPreviewScreen() {
     }
 
     // Check if there are any answers
-    const hasAnswers = exam.answerKey.answers.some(
+    const hasAnswers = resolvedAnswers.some(
       (answer) => answer && answer.trim() !== "",
     );
 
     if (!hasAnswers) {
       return (
-        <View
-          style={[
-            styles.noAnswersContainer,
-            darkModeEnabled && {
-              backgroundColor: "#3a3120",
-              borderColor: "#8c6b2f",
-            },
-          ]}
-        >
-          <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
-          <Text style={[styles.noAnswersText, darkModeEnabled && { color: "#ffd88a" }]}>No answers set yet</Text>
-          <Text style={[styles.noAnswersSubtext, darkModeEnabled && { color: "#ffd88a" }]}>
-            Click Edit Answer Key below to set the correct answers
+        <View style={styles.emptyPanel}>
+          <Ionicons name="alert-circle-outline" size={40} color="#F59E0B" />
+          <Text style={styles.emptyPanelTitle}>No answers set yet</Text>
+          <Text style={styles.emptyPanelText}>
+            Set the correct answers to show the answer key here.
           </Text>
         </View>
       );
@@ -251,35 +346,21 @@ export default function ExamPreviewScreen() {
         {grid.map((row, rowIndex) => (
           <View key={rowIndex} style={styles.answerKeyRow}>
             {row.map((questionNum) => {
-              const answer = exam.answerKey.answers[questionNum - 1] || "";
+              const answer = resolvedAnswers[questionNum - 1] || "";
               const hasAnswer = answer && answer.trim() !== "";
               return (
                 <View
                   key={questionNum}
-                  style={[
-                    styles.answerKeyItem,
-                    {
-                      backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft,
-                    },
-                  ]}
+                  style={styles.answerKeyItem}
                 >
-                  <Text
-                    style={[
-                      styles.questionNumber,
-                      darkModeEnabled && { color: "#b9c9c0" },
-                    ]}
-                  >
-                    {questionNum}.
-                  </Text>
+                  <Text style={styles.questionNumber}>{questionNum}</Text>
                   <View
                     style={[
                       styles.answerBubble,
-                      darkModeEnabled && { backgroundColor: "#2f6d58" },
                       !hasAnswer && styles.answerBubbleEmpty,
-                      darkModeEnabled && !hasAnswer && { backgroundColor: "#46514c" },
                     ]}
                   >
-                    <Text style={styles.answerText}>
+                    <Text style={[styles.answerText, !hasAnswer && styles.answerTextEmpty]}>
                       {hasAnswer ? answer : "?"}
                     </Text>
                   </View>
@@ -288,6 +369,87 @@ export default function ExamPreviewScreen() {
             })}
           </View>
         ))}
+      </View>
+    );
+  };
+
+  const renderResultsList = () => {
+    if (resultsLoading) {
+      return (
+        <View style={styles.resultsState}>
+          <ActivityIndicator size="small" color={colors.accent} />
+          <Text style={[styles.resultsStateText, { color: colors.text }]}>
+            Loading results...
+          </Text>
+        </View>
+      );
+    }
+
+    if (!examResults.length) {
+      return (
+        <View style={styles.emptyPanel}>
+          <Ionicons name="people-outline" size={36} color="#98A2B3" />
+          <Text style={styles.emptyPanelTitle}>No results yet</Text>
+          <Text style={styles.emptyPanelText}>
+            Student scores will appear here after scanning or grading.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.resultsList}>
+        {examResults.map((result) => {
+          const initials = result.studentName
+            .split(" ")
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part.charAt(0).toUpperCase())
+            .join("");
+          const scoreColors =
+            result.percentage >= 85
+              ? { badge: "#D8F3E7", text: "#20A86B" }
+              : result.percentage >= 70
+                ? { badge: "#F5E8B8", text: "#D68B11" }
+                : { badge: "#F9D7D9", text: "#E24E5C" };
+
+          return (
+            <View
+              key={result.id}
+              style={[
+                styles.resultCard,
+                {
+                  backgroundColor: "#FFFFFF",
+                  borderColor: "#E8EBF0",
+                },
+              ]}
+            >
+              <View style={[styles.resultAvatar, { backgroundColor: scoreColors.badge }]}>
+                <Text style={[styles.resultAvatarText, { color: scoreColors.text }]}>
+                  {initials || "?"}
+                </Text>
+              </View>
+
+              <View style={styles.resultCardBody}>
+                <Text style={styles.resultStudentName}>{result.studentName}</Text>
+                <Text style={styles.resultStudentMeta}>
+                  ID: {result.studentId || "N/A"}
+                </Text>
+              </View>
+
+              <View style={styles.resultScoreWrap}>
+                <Text style={[styles.resultPercentage, { color: scoreColors.text }]}>
+                  {result.percentage}%
+                </Text>
+                <View style={[styles.resultCorrectBadge, { backgroundColor: scoreColors.badge }]}>
+                  <Text style={[styles.resultCorrectText, { color: scoreColors.text }]}>
+                    {result.correctLabel}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          );
+        })}
       </View>
     );
   };
@@ -332,13 +494,60 @@ export default function ExamPreviewScreen() {
         <TouchableOpacity style={styles.backIcon} onPress={goToQuizzes}>
           <Ionicons name="arrow-back" size={24} color={colors.title} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.title }]}>Exam Preview</Text>
-        {isOffline && (
-          <View style={styles.offlineBadge}>
-            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
-          </View>
-        )}
-        {!isOffline && <View style={styles.placeholder} />}
+        <View style={styles.headerCenter}>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            {exam.metadata.title}
+          </Text>
+          {exam.metadata.examCode ? (
+            <Text style={[styles.headerCode, { color: colors.text }]}>
+              {exam.metadata.examCode}
+            </Text>
+          ) : null}
+          <Text style={[styles.headerSubtitle, { color: colors.text }]}>
+            {exam.totalQuestions} Questions
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.headerAction}
+          onPress={() => setSettingsMenuVisible(true)}
+        >
+          <Ionicons
+            name={isOffline ? "cloud-offline-outline" : "settings-outline"}
+            size={20}
+            color={colors.title}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <View style={[styles.tabSwitcher, { backgroundColor: "#FFFFFF", borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === "answerKey" && styles.tabButtonActive]}
+          onPress={() => setActiveTab("answerKey")}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              { color: "#6B7280" },
+              activeTab === "answerKey" && styles.tabButtonTextActive,
+            ]}
+          >
+            Answer Key
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === "results" && styles.tabButtonActive]}
+          onPress={() => setActiveTab("results")}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              { color: "#6B7280" },
+              activeTab === "results" && styles.tabButtonTextActive,
+            ]}
+          >
+            Results
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -346,237 +555,212 @@ export default function ExamPreviewScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Status Badge */}
-        <View
-          style={[
-            styles.statusBadge,
-            {
-              backgroundColor: ExamService.getStatusColor(exam.metadata.status),
-            },
-          ]}
-        >
-          <Text style={styles.statusText}>{exam.metadata.status}</Text>
-        </View>
-
-        {/* Exam Metadata Section */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Exam Information</Text>
-
-          <View style={styles.infoRow}>
-            <Ionicons name="document-text-outline" size={20} color={colors.icon} />
-            <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.text }]}>Title</Text>
-              <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.title}</Text>
-            </View>
-          </View>
-
-          {exam.metadata.subject && (
-            <View style={styles.infoRow}>
-              <Ionicons name="book-outline" size={20} color={colors.icon} />
-              <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.text }]}>Subject</Text>
-                <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.subject}</Text>
-              </View>
-            </View>
-          )}
-
-          {exam.metadata.section && (
-            <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={20} color={colors.icon} />
-              <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.text }]}>Section</Text>
-                <Text style={[styles.infoValue, { color: colors.title }]}>{exam.metadata.section}</Text>
-              </View>
-            </View>
-          )}
-
-          {exam.metadata.date && (
-            <View style={styles.infoRow}>
-              <Ionicons name="calendar-outline" size={20} color={colors.icon} />
-              <View style={styles.infoContent}>
-                <Text style={[styles.infoLabel, { color: colors.text }]}>Date</Text>
-                <Text style={[styles.infoValue, { color: colors.title }]}>
-                  {ExamService.formatDate(new Date(exam.metadata.date))}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          <View style={styles.infoRow}>
-            <Ionicons name="code-outline" size={20} color={colors.icon} />
-            <View style={styles.infoContent}>
-              <Text style={[styles.infoLabel, { color: colors.text }]}>Exam Code</Text>
-              <View style={styles.codeContainer}>
-                <Text style={[styles.examCode, { color: colors.accent }]}>{exam.metadata.examCode}</Text>
+        {activeTab === "answerKey" ? (
+          <View
+            style={[
+              styles.section,
+              { backgroundColor: colors.cardBg, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>Answer Key</Text>
+              {exam.metadata.status === "Draft" ? (
                 <TouchableOpacity
+                  style={styles.inlineEditButton}
                   onPress={() =>
-                    copyToClipboard(exam.metadata.examCode, "Exam code")
+                    router.push(
+                      `/(tabs)/edit-answer-key?examId=${examId}${
+                        classId ? `&classId=${classId}` : ""
+                      }&tab=exams`,
+                    )
                   }
                 >
-                  <Ionicons name="copy-outline" size={18} color={colors.accent} />
+                  <Text style={styles.inlineEditButtonText}>Edit</Text>
                 </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-
-        {/* Exam Configuration Section */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Configuration</Text>
-
-          <View style={styles.configGrid}>
-            <View
-              style={[
-                styles.configItem,
-                { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
-              ]}
-            >
-              <Text style={[styles.configLabel, { color: colors.text }]}>Total Questions</Text>
-              <Text style={[styles.configValue, { color: colors.title }]}>{exam.totalQuestions}</Text>
-            </View>
-            <View
-              style={[
-                styles.configItem,
-                { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
-              ]}
-            >
-              <Text style={[styles.configLabel, { color: colors.text }]}>Choice Format</Text>
-              <Text style={[styles.configValue, { color: colors.title }]}>{exam.choiceFormat}</Text>
-            </View>
-          </View>
-
-          {exam.templateLayout && (
-            <>
-              <View style={styles.configGrid}>
-                <View
-                  style={[
-                    styles.configItem,
-                    { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
-                  ]}
+              ) : (
+                <TouchableOpacity
+                  style={styles.inlineEditButton}
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/edit-answer-key?examId=${examId}${
+                        classId ? `&classId=${classId}` : ""
+                      }&tab=exams`,
+                    )
+                  }
                 >
-                  <Text style={[styles.configLabel, { color: colors.text }]}>Columns</Text>
-                  <Text style={[styles.configValue, { color: colors.title }]}>
-                    {exam.templateLayout.columns}
+                  <Text style={styles.inlineEditButtonText}>Edit</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
+              {exam.totalQuestions} Questions • Multiple Choice
+            </Text>
+            <View style={styles.infoRow}>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Exam Code</Text>
+                <View style={styles.codeContainer}>
+                  <Text style={styles.examCode}>
+                    {exam.metadata.examCode || "Not available"}
                   </Text>
-                </View>
-                <View
-                  style={[
-                    styles.configItem,
-                    { backgroundColor: darkModeEnabled ? "#2a3a33" : colors.cardSoft },
-                  ]}
-                >
-                  <Text style={[styles.configLabel, { color: colors.text }]}>Questions Rows</Text>
-                  <Text style={[styles.configValue, { color: colors.title }]}>
-                    {exam.templateLayout.questionsPerColumn}
-                  </Text>
+                  {exam.metadata.examCode ? (
+                    <TouchableOpacity
+                      style={styles.copyButton}
+                      onPress={() => {
+                        Clipboard.setString(exam.metadata.examCode);
+                        Toast.show({
+                          type: "success",
+                          text1: "Copied",
+                          text2: "Exam code copied to clipboard",
+                        });
+                      }}
+                    >
+                      <Ionicons name="copy-outline" size={18} color="#20BE7B" />
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
-              <View style={[styles.templateInfo, { borderTopColor: colors.border }]}>
-                <Ionicons name="grid-outline" size={16} color={colors.text} />
-                <Text style={[styles.templateText, { color: colors.text }]}>
-                  Template: {exam.templateLayout.name}
-                </Text>
-              </View>
-            </>
-          )}
-        </View>
-
-        {/* Answer Key Preview Section */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.title }]}>Answer Key Preview</Text>
-            {exam.answerKey.locked && (
-              <View style={styles.lockedBadge}>
-                <Ionicons name="lock-closed" size={12} color="#fff" />
-                <Text style={styles.lockedText}>Locked</Text>
-              </View>
-            )}
+            </View>
+            {renderAnswerKeyGrid()}
           </View>
-          <Text style={[styles.sectionSubtitle, { color: colors.text }]}>Read-only view</Text>
-          {renderAnswerKeyGrid()}
-        </View>
-
-        {/* Status Management Section */}
-        <StatusManager
-          examId={examId}
-          currentStatus={exam.metadata.status}
-          darkModeEnabled={darkModeEnabled}
-          onStatusChanged={loadExamData}
-        />
-
-        {/* Version Information */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>Version Information</Text>
-
-          <View style={styles.versionInfo}>
-            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.versionLabel, { color: colors.text }]}>Version:</Text>
-              <Text style={[styles.versionValue, { color: colors.title }]}>v{exam.metadata.version}</Text>
-            </View>
-            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.versionLabel, { color: colors.text }]}>Last Modified:</Text>
-              <Text style={[styles.versionValue, { color: colors.title }]}>
-                {ExamService.formatTimestamp(exam.lastModified)}
-              </Text>
-            </View>
-            <View style={[styles.versionRow, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.versionLabel, { color: colors.text }]}>Created:</Text>
-              <Text style={[styles.versionValue, { color: colors.title }]}>
-                {ExamService.formatTimestamp(exam.metadata.createdAt)}
-              </Text>
-            </View>
+        ) : (
+          <View
+            style={[
+              styles.section,
+              { backgroundColor: colors.cardBg, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.title }]}>Results</Text>
+            {renderResultsList()}
           </View>
-        </View>
+        )}
       </ScrollView>
 
-      {/* Action Buttons */}
-      <View
-        style={[
-          styles.actionButtons,
-          { backgroundColor: darkModeEnabled ? "#1a2520" : "#e6efe8", borderTopColor: colors.border },
-        ]}
-      >
-        {exam.metadata.status === "Draft" && (
-          <TouchableOpacity
-            style={[
-              styles.editExamButton,
-              darkModeEnabled && { backgroundColor: "#5b4730", borderWidth: 1, borderColor: "#8a6d45" },
-            ]}
-            onPress={() => router.push(`/(tabs)/edit-exam?examId=${examId}`)}
-          >
-            <Ionicons name="pencil-outline" size={20} color="#fff" />
-            <Text style={styles.editExamButtonText}>Edit Exam</Text>
-          </TouchableOpacity>
-        )}
-        {exam.metadata.status === "Draft" && (
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              darkModeEnabled && { backgroundColor: "#204236", borderWidth: 1, borderColor: "#3a6c5a" },
-            ]}
-            onPress={() =>
-              router.push(`/(tabs)/edit-answer-key?examId=${examId}`)
-            }
-          >
-            <Ionicons name="create-outline" size={20} color="#fff" />
-            <Text style={styles.editButtonText}>Edit Answer Key</Text>
-          </TouchableOpacity>
-        )}
+      {settingsMenuVisible ? (
         <TouchableOpacity
-          style={[
-            styles.printButton,
-            darkModeEnabled && { backgroundColor: "#263f35", borderWidth: 1, borderColor: "#3e6657" },
-          ]}
-          onPress={() =>
-            router.push(`/(tabs)/print-answer-sheet?examId=${examId}`)
-          }
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={closeSettingsMenu}
         >
-          <Ionicons name="print-outline" size={20} color="#fff" />
-          <Text style={styles.printButtonText}>Print Sheets</Text>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.examMenuContent}
+          >
+            <View style={styles.examMenuHeader}>
+              <Text style={styles.examMenuTitle} numberOfLines={1}>
+                {exam.metadata.title}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={closeSettingsMenu}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setViewCodeVisible(true);
+              }}
+            >
+              <Text style={styles.menuItemText}>View Code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setArchiveConfirmVisible(true);
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuArchiveText]}>
+                Archive Exam
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setDeleteConfirmVisible(true);
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuDeleteText]}>
+                Delete Exam
+              </Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </View>
+      ) : null}
+
+      {viewCodeVisible ? (
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setViewCodeVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.codeCard}
+          >
+            <View style={styles.codeHeader}>
+              <Text style={styles.codeTitle}>Exam Code</Text>
+              <TouchableOpacity
+                style={styles.codeCloseButton}
+                onPress={() => setViewCodeVisible(false)}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.codeRow}>
+              <Text style={styles.codeValue}>
+                {exam.metadata.examCode || "No exam code available"}
+              </Text>
+              {exam.metadata.examCode ? (
+                <TouchableOpacity
+                  style={styles.copyButton}
+                  onPress={() => {
+                    Clipboard.setString(exam.metadata.examCode);
+                    Toast.show({
+                      type: "success",
+                      text1: "Copied",
+                      text2: "Exam code copied to clipboard",
+                    });
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={18} color="#20BE7B" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      ) : null}
+
+      <ConfirmationModal
+        visible={archiveConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${exam.metadata.title}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveConfirmVisible(false)}
+        onConfirm={handleArchiveExam}
+      />
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${exam.metadata.title}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteConfirmVisible(false)}
+        onConfirm={handleDeleteExam}
+      />
 
       <Toast />
+
     </SafeAreaView>
   );
 }
@@ -584,13 +768,13 @@ export default function ExamPreviewScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#edf3ee",
+    backgroundColor: "#FFFFFF",
   },
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#edf3ee",
+    backgroundColor: "#FFFFFF",
     padding: 20,
   },
   header: {
@@ -599,54 +783,194 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 12,
     paddingTop: 56,
-    paddingBottom: 10,
-    backgroundColor: "#3d5a3d",
+    paddingBottom: 12,
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#2f4a38",
+    borderBottomColor: "#ECEEF2",
   },
   backIcon: {
     padding: 4,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#eef7f0",
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1F2937",
+    textAlign: "center",
   },
-  placeholder: {
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    marginTop: 4,
+    color: "#98A2B3",
+  },
+  headerCode: {
+    fontSize: 11,
+    marginTop: 3,
+    color: "#7B8494",
+    fontWeight: "600",
+  },
+  headerAction: {
     width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  offlineBadge: {
-    backgroundColor: "#ff9800",
+  menuOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.18)",
+    justifyContent: "flex-start",
+    alignItems: "flex-end",
+    paddingTop: 112,
+    paddingHorizontal: 20,
+  },
+  examMenuContent: {
+    width: 196,
+    backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    padding: 6,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingVertical: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  examMenuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  examMenuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1F2937",
+    marginRight: 8,
+  },
+  menuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  menuItemText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  menuArchiveText: {
+    color: "#F59E0B",
+  },
+  menuDeleteText: {
+    color: "#E24E5C",
+  },
+  codeCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  codeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  codeTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+  codeCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  codeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  codeValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#20BE7B",
+    textAlign: "center",
+  },
+  copyButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E9F8F1",
+  },
+  tabSwitcher: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 14,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  tabButtonActive: {
+    borderBottomColor: "#20BE7B",
+  },
+  tabButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  tabButtonTextActive: {
+    color: "#20BE7B",
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 10,
-    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingTop: 18,
     paddingBottom: 40,
   },
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 12,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
   section: {
-    backgroundColor: "#f3f7f4",
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 0,
+    padding: 0,
     marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#cad9cf",
+    borderWidth: 0,
+    borderColor: "transparent",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -657,28 +981,27 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: "800",
-    color: "#2b4337",
+    color: "#1F2937",
     marginBottom: 10,
   },
   sectionSubtitle: {
     fontSize: 12,
-    color: "#5f7668",
-    marginBottom: 12,
-    fontStyle: "italic",
+    color: "#8E97A6",
+    marginBottom: 18,
   },
-  lockedBadge: {
-    flexDirection: "row",
+  inlineEditButton: {
+    minWidth: 54,
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
-    backgroundColor: "#e74c3c",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    justifyContent: "center",
   },
-  lockedText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "600",
+  inlineEditButtonText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#20BE7B",
   },
   infoRow: {
     flexDirection: "row",
@@ -745,82 +1068,123 @@ const styles = StyleSheet.create({
     color: "#4f6b5a",
   },
   answerKeyGrid: {
-    gap: 8,
+    gap: 14,
   },
   answerKeyRow: {
     flexDirection: "row",
-    gap: 8,
+    justifyContent: "space-between",
   },
   answerKeyItem: {
-    flex: 1,
-    flexDirection: "row",
+    width: 56,
     alignItems: "center",
-    backgroundColor: "#e6efe8",
-    padding: 9,
-    borderRadius: 8,
     gap: 8,
   },
   questionNumber: {
-    fontSize: 14,
-    color: "#4f6b5a",
+    fontSize: 12,
+    color: "#A4ACBA",
     fontWeight: "600",
-    minWidth: 24,
   },
   answerBubble: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#2d7a5f",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#D6F2DE",
+    borderWidth: 1,
+    borderColor: "#B7E8C6",
     justifyContent: "center",
     alignItems: "center",
   },
   answerBubbleEmpty: {
-    backgroundColor: "#ccc",
+    backgroundColor: "#F3F4F6",
+    borderColor: "#E5E7EB",
   },
   answerText: {
-    fontSize: 16,
-    color: "#fff",
-    fontWeight: "bold",
+    fontSize: 13,
+    color: "#16A34A",
+    fontWeight: "700",
   },
-  noAnswersContainer: {
+  answerTextEmpty: {
+    color: "#D0D5DD",
+  },
+  emptyPanel: {
     alignItems: "center",
-    padding: 32,
-    backgroundColor: "#fff3cd",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#ffc107",
+    justifyContent: "center",
+    paddingVertical: 48,
+    paddingHorizontal: 24,
   },
-  noAnswersText: {
+  emptyPanelTitle: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#856404",
+    color: "#1F2937",
     marginTop: 12,
     marginBottom: 8,
   },
-  noAnswersSubtext: {
+  emptyPanelText: {
     fontSize: 14,
-    color: "#856404",
+    color: "#8E97A6",
     textAlign: "center",
   },
-  versionInfo: {
+  resultsState: {
+    paddingVertical: 18,
+    alignItems: "center",
+    gap: 10,
+  },
+  resultsStateText: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  resultsList: {
+    gap: 12,
+  },
+  resultCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  resultAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resultAvatarText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  resultCardBody: {
+    flex: 1,
+    gap: 2,
+  },
+  resultStudentName: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  resultStudentMeta: {
+    fontSize: 11,
+    color: "#A4ACBA",
+  },
+  resultScoreWrap: {
+    alignItems: "flex-end",
     gap: 8,
   },
-  versionRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d7e4db",
+  resultPercentage: {
+    fontSize: 24,
+    fontWeight: "800",
   },
-  versionLabel: {
-    fontSize: 14,
-    color: "#4f6b5a",
+  resultCorrectBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
-  versionValue: {
-    fontSize: 14,
-    color: "#2b4337",
-    fontWeight: "500",
+  resultCorrectText: {
+    fontSize: 10,
+    fontWeight: "700",
   },
   loadingText: {
     marginTop: 12,
@@ -853,62 +1217,5 @@ const styles = StyleSheet.create({
   backButtonText: {
     color: "#3d5a3d",
     fontSize: 16,
-  },
-  actionButtons: {
-    flexDirection: "row",
-    padding: 12,
-    gap: 8,
-    backgroundColor: "#e5efe8",
-    borderTopWidth: 1,
-    borderTopColor: "#cad9cf",
-    flexWrap: "wrap",
-  },
-  editExamButton: {
-    flex: 1,
-    minWidth: "45%",
-    backgroundColor: "#ff9800",
-    borderRadius: 10,
-    padding: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  editExamButtonText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  editButton: {
-    flex: 1,
-    minWidth: "45%",
-    backgroundColor: "#2d7a5f",
-    borderRadius: 10,
-    padding: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  editButtonText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  printButton: {
-    flex: 1,
-    minWidth: "45%",
-    backgroundColor: "#2f6d58",
-    borderRadius: 10,
-    padding: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  printButtonText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "600",
   },
 });

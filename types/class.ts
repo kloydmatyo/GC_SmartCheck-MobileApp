@@ -16,6 +16,7 @@ export interface Class {
   created_at: string;
   createdAt: Date;
   updatedAt: Date;
+  isArchived?: boolean;
 }
 
 export interface CreateClassData {
@@ -24,4 +25,5 @@ export interface CreateClassData {
   room: string;
   section_block: string;
   students?: Student[];
+  isArchived?: boolean;
 }

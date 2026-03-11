@@ -111,7 +111,7 @@ export default function SettingsScreen() {
         textSecondary: "#b8d4b8",
         itemMuted: "#b8d4b8",
         muted: "#b8d4b8",
-        accent: "#3d5a3d",
+        accent: "#111827",
         iconBg: "#dbe7df",
         switchOff: "#95bba6",
         destructiveBg: "#f8efe3",

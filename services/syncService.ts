@@ -29,12 +29,18 @@ export type ConflictResolution = "use-local" | "use-server" | "merge";
 
 export class SyncService {
   private static isSyncing: boolean = false;
+  private static initialized: boolean = false;
   private static syncListeners: Array<(result: SyncResult) => void> = [];
 
   /**
    * Initialize sync service
    */
   static initialize(): void {
+    if (this.initialized) {
+      return;
+    }
+    this.initialized = true;
+
     // Listen for network changes
     NetworkService.addListener((isConnected) => {
       if (isConnected) {
