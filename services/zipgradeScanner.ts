@@ -1409,158 +1409,324 @@ export class ZipgradeScanner {
       // - Detects double-shading (2nd darkest also quite dark)
       //
       let studentId = "00000000";
-      
+
       if (detectedQ === 20 || detectedQ === 50) {
-        const idRegion = detectedQ === 20 
-          ? { yMin: 0.20, yMax: 0.32, numDigits: 10 }
-          : { yMin: 0.09, yMax: 0.18, numDigits: 10 };
-        
-        // Step 1: Cluster bubbles into columns (X-axis) to find column positions
+        // idRegionYMin/YMax define the declared section for diagnostic bubble
+        // filtering. Row spacing is computed from the ORIGINAL calibrated
+        // 20q section height (20%→32% / 9 = 45.7 px) regardless of filter bounds.
+        const idRegion =
+          detectedQ === 20
+            ? { yMin: 0.2, yMax: 0.37, numDigits: 10 }
+            : { yMin: 0.09, yMax: 0.18, numDigits: 10 };
+
+        // Fixed row-spacing based on the physical ZipGrade bubble pitch.
+        //   20q: (0.32 - 0.20) × paperH / 9  ≈ 45.7 px per row
+        //   50q: (0.18 - 0.09) × paperH / 9  ≈ 34.3 px per row
+        const idRowSpacing =
+          detectedQ === 20
+            ? ((0.32 - 0.2) * paperH) / 9 // ≈ 45.7 px
+            : ((0.18 - 0.09) * paperH) / 9; // ≈ 34.3 px
+
+        // ── Row spacing and corrected start position ────────────────────────
+        // Empirically verified (20q): digit rows 0-9 begin 3 row-spacings below
+        // the box top. The header/border area occupies ~3 row heights.
+        // Row 0 lands at ≈ 823 px; row 2 at ≈ 914 px (matches filled-bubble data).
+        // The 50q offset has not been re-calibrated; keep at 2.0 until verified.
+        const rowHeaderOffsetFactor = detectedQ === 20 ? 3.0 : 2.0;
+        const idRowStart =
+          idRegion.yMin * paperH + rowHeaderOffsetFactor * idRowSpacing;
+        const digitYPositions = Array.from(
+          { length: 10 },
+          (_, i) => idRowStart + i * idRowSpacing,
+        );
+
+        // ── Column detection: cluster actual ID bubbles ───────────────
+        // The student ID has 10 digit columns with smaller, tighter bubbles than
+        // the answer section. We cluster the actual detected ID bubbles by X position
+        // to find the column centroids.
+        //
+        // Filter bubbles in the ID region
         const idBubbles = bubbles.filter(
           (b) =>
             b.y >= idRegion.yMin * paperH &&
             b.y <= idRegion.yMax * paperH &&
-            b.x >= 0.10 * paperW &&
-            b.x <= 0.90 * paperW
+            b.x >= 0.15 * paperW &&
+            b.x <= 0.55 * paperW, // ID section is in left half only
         );
         
         console.log(
           `[OMR] Student ID region (${detectedQ}q): ${idBubbles.length} bubbles in y[${(idRegion.yMin * 100).toFixed(0)}%-${(idRegion.yMax * 100).toFixed(0)}%]`,
         );
         
-        if (idBubbles.length >= 1) {
-          // Cluster X-positions to find column centroids
-          const allXPositions = idBubbles.map(b => b.x).sort((a, b) => a - b);
-          const idColCentroids: number[] = [];
-          let currentCluster: number[] = [allXPositions[0]];
-          
-          for (let i = 1; i < allXPositions.length; i++) {
-            if (allXPositions[i] - currentCluster[currentCluster.length - 1] < medianW * 1.2) {
-              currentCluster.push(allXPositions[i]);
-            } else {
-              idColCentroids.push(currentCluster.reduce((a, b) => a + b, 0) / currentCluster.length);
-              currentCluster = [allXPositions[i]];
-            }
-          }
-          if (currentCluster.length > 0) {
-            idColCentroids.push(currentCluster.reduce((a, b) => a + b, 0) / currentCluster.length);
-          }
-          
-          console.log(
-            `[OMR] Student ID: ${idColCentroids.length} columns detected at x=${idColCentroids.map(c => Math.round(c)).join(',')}`,
+        let finalColCentroids: number[];
+        
+        // Cluster ID bubbles by X to find column positions
+        if (idBubbles.length >= 5) {
+          const xSorted = [...idBubbles].sort((a, b) => a.x - b.x);
+          const xClusters = clusterByY(
+            xSorted.map(b => ({ y: b.x, data: b })),
+            medianW * 0.5, // Tighter clustering for smaller ID bubbles
           );
           
-          if (idColCentroids.length >= 1) {
-            // Step 2: Calculate expected Y-positions for each digit (0-9)
-            const digitYPositions: number[] = [];
-            for (let digit = 0; digit < 10; digit++) {
-              const yFraction = digit / 9;
-              const expectedY = idRegion.yMin * paperH + (idRegion.yMax - idRegion.yMin) * paperH * yFraction;
-              digitYPositions.push(expectedY);
+          const detectedCols = xClusters
+            .map(cluster => {
+              const xVals = cluster.map(item => item.data.x);
+              return xVals.reduce((sum, x) => sum + x, 0) / xVals.length;
+            })
+            .sort((a, b) => a - b);
+          
+          // If we have 8-10 columns detected, use them
+          if (detectedCols.length >= 8 && detectedCols.length <= 12) {
+            // Take the first 10 or interpolate to get exactly 10
+            if (detectedCols.length === 10) {
+              finalColCentroids = detectedCols;
+            } else {
+              // Interpolate to get 10 evenly-spaced columns
+              const firstCol = detectedCols[0];
+              const lastCol = detectedCols[Math.min(9, detectedCols.length - 1)];
+              const spacing = (lastCol - firstCol) / 9;
+              finalColCentroids = Array.from(
+                { length: 10 },
+                (_, i) => firstCol + i * spacing,
+              );
             }
-            
-            console.log(
-              `[OMR] Student ID: Expected Y positions for digits 0-9: ${digitYPositions.map(y => Math.round(y)).join(', ')}`,
+          }
+          // If we have fewer columns, use answer region as reference
+          else {
+            // Get answer columns from left region
+            const leftRegion = regions[0];
+            const leftAnswerBubbles = bubbles.filter(
+              (b) =>
+                b.x >= leftRegion.xMin * paperW &&
+                b.x <= leftRegion.xMax * paperW &&
+                b.y >= leftRegion.yMin * paperH &&
+                b.y <= leftRegion.yMax * paperH,
             );
             
-            // Step 3: For each column, sample brightness at each digit row and find darkest
-            const digits: string[] = [];
-            const numCols = Math.min(idColCentroids.length, idRegion.numDigits);
-            const doubleShadeColumns: number[] = [];
+            const ansXSorted = [...leftAnswerBubbles].sort((a, b) => a.x - b.x);
+            const ansXClusters = clusterByY(
+              ansXSorted.map(b => ({ y: b.x, data: b })),
+              medianW * 0.6,
+            );
             
-            for (let col = 0; col < numCols; col++) {
-              const colX = idColCentroids[col];
-              const fills: number[] = []; // brightness values (lower = darker = filled)
+            const answerColCentroids = ansXClusters
+              .map(cluster => {
+                const xVals = cluster.map(item => item.data.x);
+                return xVals.reduce((sum, x) => sum + x, 0) / xVals.length;
+              })
+              .sort((a, b) => a - b);
+            
+            if (answerColCentroids.length >= 5) {
+              // ID columns are narrower: they fit within the first 3 answer columns
+              // Empirically: ID section spans ~60% of answer section width
+              const answerSpan = answerColCentroids[4] - answerColCentroids[0];
+              const idSpan = answerSpan * 0.6;
+              const idColSpacing = idSpan / 9;
+              const idFirstCol = answerColCentroids[0];
               
-              // Sample brightness at each digit row
-              for (let row = 0; row < 10; row++) {
-                const expectedY = digitYPositions[row];
-                
-                // Find the bubble closest to this position
-                const nearbyBubbles = idBubbles.filter(
-                  (b) => Math.abs(b.x - colX) < medianW * 0.8 && Math.abs(b.y - expectedY) < medianH * 1.5
-                );
-                
-                if (nearbyBubbles.length > 0) {
-                  // Use fill value as brightness (inverted: higher fill = darker = lower brightness)
-                  // Convert fill (0-1) to brightness (0-255): brightness = (1 - fill) * 255
-                  const brightness = (1 - nearbyBubbles[0].fill) * 255;
-                  fills.push(brightness);
-                } else {
-                  // No bubble found at this position, assume unfilled (bright)
-                  fills.push(255);
-                }
-              }
-              
-              // Sort to find darkest and brightest
-              const sorted = [...fills].sort((a, b) => a - b);
-              const darkest = sorted[0];      // most filled (lowest brightness)
-              const secondDark = sorted[1];   // second most filled
-              const upperQ = sorted[7];       // upper quartile (unfilled reference)
-              
-              let detectedDigit: number | null = null;
-              let hasDetection = false;
-              
-              // Tiered detection thresholds (synchronized with web version)
-              const darkRatio = upperQ > 20 ? darkest / upperQ : 1;
-              const gapFromSecond = secondDark - darkest;
-              const gapRatio = upperQ > 20 ? gapFromSecond / upperQ : 0;
-              
-              // Tier 1: Strong fill (clear dark mark)
-              if (darkRatio < 0.68) {
-                detectedDigit = fills.indexOf(darkest);
-                hasDetection = true;
-              }
-              // Tier 2: Light fill (light pencil / faded ink)
-              else if (darkRatio < 0.82 && gapRatio > 0.12) {
-                detectedDigit = fills.indexOf(darkest);
-                hasDetection = true;
-              }
-              
-              // Check for double-shading
-              if (hasDetection && detectedDigit !== null) {
-                const secondRatio = upperQ > 20 ? secondDark / upperQ : 1;
-                const gapBetweenTopTwo = upperQ > 20 ? gapFromSecond / upperQ : 1;
-                if (secondRatio < 0.76 && gapBetweenTopTwo < 0.09) {
-                  doubleShadeColumns.push(col + 1);
-                  console.log(
-                    `[OMR] Student ID col ${col + 1}: ⚠️ DOUBLE SHADE (darkest=${darkest.toFixed(0)} 2nd=${secondDark.toFixed(0)} upperQ=${upperQ.toFixed(0)})`,
-                  );
-                  digits.push('?');
-                  continue;
-                }
-              }
-              
-              if (hasDetection && detectedDigit !== null) {
-                digits.push(String(detectedDigit));
-                console.log(
-                  `[OMR] Student ID col ${col + 1}: digit=${detectedDigit} (darkest=${darkest.toFixed(0)} upperQ=${upperQ.toFixed(0)} ratio=${darkRatio.toFixed(2)} gap=${gapRatio.toFixed(2)})`,
-                );
-              } else {
-                digits.push('_');
-                console.log(
-                  `[OMR] Student ID col ${col + 1}: unshaded (darkest=${darkest.toFixed(0)} upperQ=${upperQ.toFixed(0)} ratio=${darkRatio.toFixed(2)})`,
-                );
-              }
+              finalColCentroids = Array.from(
+                { length: 10 },
+                (_, i) => idFirstCol + i * idColSpacing,
+              );
+            } else {
+              // Last resort fallback
+              const leftRegionWidth = (leftRegion.xMax - leftRegion.xMin) * paperW;
+              const colSpacing = (leftRegionWidth * 0.6) / 9;
+              const firstColX = leftRegion.xMin * paperW;
+              finalColCentroids = Array.from(
+                { length: 10 },
+                (_, i) => firstColX + i * colSpacing,
+              );
             }
+          }
+        } else {
+          // Not enough ID bubbles, use answer region reference
+          const leftRegion = regions[0];
+          const leftAnswerBubbles = bubbles.filter(
+            (b) =>
+              b.x >= leftRegion.xMin * paperW &&
+              b.x <= leftRegion.xMax * paperW &&
+              b.y >= leftRegion.yMin * paperH &&
+              b.y <= leftRegion.yMax * paperH,
+          );
+          
+          const ansXSorted = [...leftAnswerBubbles].sort((a, b) => a.x - b.x);
+          const ansXClusters = clusterByY(
+            ansXSorted.map(b => ({ y: b.x, data: b })),
+            medianW * 0.6,
+          );
+          
+          const answerColCentroids = ansXClusters
+            .map(cluster => {
+              const xVals = cluster.map(item => item.data.x);
+              return xVals.reduce((sum, x) => sum + x, 0) / xVals.length;
+            })
+            .sort((a, b) => a - b);
+          
+          if (answerColCentroids.length >= 5) {
+            const answerSpan = answerColCentroids[4] - answerColCentroids[0];
+            const idSpan = answerSpan * 0.6;
+            const idColSpacing = idSpan / 9;
+            const idFirstCol = answerColCentroids[0];
             
-            // Convert to final ID, excluding unshaded (_) and double-shaded (?) columns
-            const cleanDigits = digits.filter(d => d !== '_' && d !== '?');
-            studentId = cleanDigits.join('').padEnd(8, '0').slice(0, 8);
-            
-            console.log(`[OMR] Student ID raw: ${digits.join('')}`);
-            console.log(`[OMR] Student ID extracted: ${studentId} (from ${cleanDigits.length} clean digits)`);
-            if (doubleShadeColumns.length > 0) {
-              console.log(`[OMR] Student ID double-shaded columns: ${doubleShadeColumns.join(',')}`);
-            }
+            finalColCentroids = Array.from(
+              { length: 10 },
+              (_, i) => idFirstCol + i * idColSpacing,
+            );
           } else {
+            const leftRegionWidth = (leftRegion.xMax - leftRegion.xMin) * paperW;
+            const colSpacing = (leftRegionWidth * 0.6) / 9;
+            const firstColX = leftRegion.xMin * paperW;
+            finalColCentroids = Array.from(
+              { length: 10 },
+              (_, i) => firstColX + i * colSpacing,
+            );
+          }
+        }
+
+        console.log(
+          `[OMR] Student ID: row start=${Math.round(idRowStart)}px spacing=${Math.round(idRowSpacing)}px → digit positions: ${digitYPositions.map((y) => Math.round(y)).join(",")}`,
+        );
+        console.log(
+          `[OMR] Student ID: detected ${idBubbles.length} bubbles, derived columns at x=${finalColCentroids.map((c) => Math.round(c)).join(",")}`,
+        );
+
+        if (finalColCentroids.length >= 1) {
+          // ── Direct pixel sampling from bestThreshMat ──────────────────────
+          // Instead of looking up pre-detected bubbles (unreliable for small ID
+          // bubbles), we directly crop bestThreshMat at each expected (col, row)
+          // position and use countNonZero to compute fill — the exact same method
+          // used to compute bubble.fill during contour detection.
+          //
+          // In the adaptive-inverted threshold image:
+          //   Filled (dark) bubbles → mostly white → high countNonZero → high fill
+          //   Empty bubbles → thin ring → low countNonZero → low fill
+          //
+          // brightness = (1 - fill) * 255  → low brightness = filled = marked
+
+          const sampleW = Math.round(medianW * 0.85); // slightly narrower for precision
+          const sampleH = medianH; // full bubble height → zero dead-zones
+
+          const digits: string[] = [];
+          const numCols = Math.min(
+            finalColCentroids.length,
+            idRegion.numDigits,
+          );
+          const doubleShadeColumns: number[] = [];
+
+          for (let col = 0; col < numCols; col++) {
+            const colX = finalColCentroids[col];
+            const fills: number[] = [];
+
+            for (let row = 0; row < 10; row++) {
+              const centerY = digitYPositions[row];
+
+              // Convert paper-space coords → original image coords (+paperLeft/Top)
+              const imgX = Math.round(colX + paperLeft - sampleW / 2);
+              const imgY = Math.round(centerY + paperTop - sampleH / 2);
+              const cW = Math.min(sampleW, Math.max(0, imgWidth - imgX));
+              const cH = Math.min(sampleH, Math.max(0, imgHeight - imgY));
+
+              if (imgX < 0 || imgY < 0 || cW <= 0 || cH <= 0) {
+                fills.push(255);
+                continue;
+              }
+
+              try {
+                const crop = OpenCV.createObject(
+                  ObjectType.Mat,
+                  0,
+                  0,
+                  DataTypes.CV_8U,
+                );
+                OpenCV.invoke(
+                  "crop",
+                  bestThreshMat,
+                  crop,
+                  OpenCV.createObject(ObjectType.Rect, imgX, imgY, cW, cH),
+                );
+                const nonZero = (OpenCV.invoke("countNonZero", crop) as any)
+                  .value;
+                const fill = nonZero / (cW * cH);
+                fills.push((1 - fill) * 255); // brightness: low = filled
+              } catch (_) {
+                fills.push(255);
+              }
+            }
+
+            // Sort to find darkest and brightest
+            const sorted = [...fills].sort((a, b) => a - b);
+            const darkest = sorted[0]; // most filled (lowest brightness)
+            const secondDark = sorted[1]; // second most filled
+            const upperQ = sorted[7]; // upper quartile (unfilled reference)
+
+            let detectedDigit: number | null = null;
+            let hasDetection = false;
+
+            // Tiered detection thresholds (synchronized with web version)
+            const darkRatio = upperQ > 20 ? darkest / upperQ : 1;
+            const gapFromSecond = secondDark - darkest;
+            const gapRatio = upperQ > 20 ? gapFromSecond / upperQ : 0;
+
+            // Tier 1: Strong fill (clear dark mark)
+            if (darkRatio < 0.68) {
+              detectedDigit = fills.indexOf(darkest);
+              hasDetection = true;
+            }
+            // Tier 2: Light fill (light pencil / faded ink)
+            else if (darkRatio < 0.82 && gapRatio > 0.12) {
+              detectedDigit = fills.indexOf(darkest);
+              hasDetection = true;
+            }
+
+            // Check for double-shading
+            if (hasDetection && detectedDigit !== null) {
+              const secondRatio = upperQ > 20 ? secondDark / upperQ : 1;
+              const gapBetweenTopTwo = upperQ > 20 ? gapFromSecond / upperQ : 1;
+              if (secondRatio < 0.76 && gapBetweenTopTwo < 0.09) {
+                doubleShadeColumns.push(col + 1);
+                console.log(
+                  `[OMR] Student ID col ${col + 1}: ⚠️ DOUBLE SHADE (darkest=${darkest.toFixed(0)} 2nd=${secondDark.toFixed(0)} upperQ=${upperQ.toFixed(0)})`,
+                );
+                digits.push("?");
+                continue;
+              }
+            }
+
+            if (hasDetection && detectedDigit !== null) {
+              digits.push(String(detectedDigit));
+              console.log(
+                `[OMR] Student ID col ${col + 1}: digit=${detectedDigit} (darkest=${darkest.toFixed(0)} upperQ=${upperQ.toFixed(0)} ratio=${darkRatio.toFixed(2)} gap=${gapRatio.toFixed(2)})`,
+              );
+            } else {
+              digits.push("_");
+              console.log(
+                `[OMR] Student ID col ${col + 1}: unshaded (darkest=${darkest.toFixed(0)} upperQ=${upperQ.toFixed(0)} ratio=${darkRatio.toFixed(2)})`,
+              );
+            }
+          }
+
+          // Convert to final ID, excluding unshaded (_) and double-shaded (?) columns
+          const cleanDigits = digits.filter((d) => d !== "_" && d !== "?");
+          // Preserve full ID — GC student IDs are 9 digits; do not truncate.
+          const rawJoined = cleanDigits.join("");
+          studentId =
+            rawJoined.length >= 9
+              ? rawJoined.slice(0, 10) // cap at 10 (template max)
+              : rawJoined.padEnd(8, "0"); // short IDs: pad to 8
+
+          console.log(`[OMR] Student ID raw: ${digits.join("")}`);
+          console.log(
+            `[OMR] Student ID extracted: ${studentId} (from ${cleanDigits.length} clean digits)`,
+          );
+          if (doubleShadeColumns.length > 0) {
             console.log(
-              `[OMR] Student ID: insufficient columns (${idColCentroids.length}/1 minimum)`,
+              `[OMR] Student ID double-shaded columns: ${doubleShadeColumns.join(",")}`,
             );
           }
         } else {
           console.log(
-            `[OMR] Student ID: insufficient bubbles (${idBubbles.length}/1 minimum)`,
+            `[OMR] Student ID: insufficient columns (${finalColCentroids.length}/1 minimum)`,
           );
         }
       } else {
@@ -1569,11 +1735,8 @@ export class ZipgradeScanner {
         );
       }
 
-      // Ensure numeric
-      const numericId = studentId
-        .replace(/[^0-9]/g, "")
-        .padStart(8, "0")
-        .slice(0, 8);
+      // Ensure numeric — preserve full length (up to 10 digits).
+      const numericId = studentId.replace(/[^0-9]/g, "").padStart(8, "0"); // guarantee at least 8 digits; longer IDs kept as-is
       console.log(`[OMR] Final studentId: ${numericId}`);
       console.log("--- OPENCV EXTRACTED ANSWERS ---");
       console.log(JSON.stringify(finalAnswers, null, 2));

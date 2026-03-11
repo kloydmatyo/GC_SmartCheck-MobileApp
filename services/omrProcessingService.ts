@@ -367,7 +367,7 @@ export class OMRProcessingService {
         }
       }
 
-      const studentId = digits.join("").padStart(8, "0").slice(0, 8);
+      const studentId = digits.join("").padStart(8, "0"); // preserve 9+ digit IDs
       console.log(`[OMR Enhanced] Extracted student ID: ${studentId}`);
 
       return studentId;
