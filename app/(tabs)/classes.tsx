@@ -1,7 +1,10 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useRouter } from "expo-router";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
@@ -21,8 +24,6 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
@@ -31,6 +32,12 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const CLASS_MENU_WIDTH = 190;
 const CLASS_MENU_HEIGHT = 116;
 const MAX_FIELD_LENGTH = 50;
+
+type RecentQuiz = {
+  id: string;
+  title: string;
+  date: string;
+};
 
 function AnimatedFillBar({
   progress,
@@ -77,6 +84,9 @@ export default function ClassesScreen() {
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
+  const [recentQuizzes, setRecentQuizzes] = useState<
+    Record<string, RecentQuiz[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -84,7 +94,10 @@ export default function ClassesScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
-  const [classMenuPosition, setClassMenuPosition] = useState({ top: 0, left: 0 });
+  const [classMenuPosition, setClassMenuPosition] = useState({
+    top: 0,
+    left: 0,
+  });
 
   useEffect(() => {
     if (
@@ -177,7 +190,7 @@ export default function ClassesScreen() {
   };
 
   // Load classes from Firebase
-  const loadClasses = async () => {
+  const loadClasses = useCallback(async () => {
     try {
       setLoading(true);
       const fetchedClasses = await ClassService.getClassesByUser();
@@ -193,7 +206,7 @@ export default function ClassesScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Reload classes when screen comes into focus
   useFocusEffect(
@@ -209,7 +222,7 @@ export default function ClassesScreen() {
           console.warn("Failed to load dark mode preference:", error);
         }
       })();
-    }, []),
+    }, [loadClasses]),
   );
 
   const colors = darkModeEnabled
@@ -261,7 +274,9 @@ export default function ClassesScreen() {
     trimmedForm.room,
   ];
   const hasMissingRequired = requiredFields.some((value) => !value);
-  const hasTooLong = requiredFields.some((value) => value.length > MAX_FIELD_LENGTH);
+  const hasTooLong = requiredFields.some(
+    (value) => value.length > MAX_FIELD_LENGTH,
+  );
   const canCreateClass = !hasMissingRequired && !hasTooLong && !creating;
 
   // Create new class
@@ -383,11 +398,7 @@ export default function ClassesScreen() {
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 onPress={(event) => openClassMenu(event, item)}
               >
-                <Ionicons
-                  name="ellipsis-vertical"
-                  size={18}
-                  color="#99A1B2"
-                />
+                <Ionicons name="ellipsis-vertical" size={18} color="#99A1B2" />
               </TouchableOpacity>
             </View>
           </View>
@@ -395,11 +406,15 @@ export default function ClassesScreen() {
           <View style={styles.classMetaRow}>
             <View style={styles.metaItem}>
               <Ionicons name="people-outline" size={14} color="#7E8798" />
-              <Text style={styles.metaText}>{item.students.length} students</Text>
+              <Text style={styles.metaText}>
+                {item.students.length} students
+              </Text>
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="calendar-outline" size={14} color="#7E8798" />
-              <Text style={styles.metaText}>{formatShortDate(item.createdAt)}</Text>
+              <Text style={styles.metaText}>
+                {formatShortDate(item.createdAt)}
+              </Text>
             </View>
           </View>
 
@@ -542,7 +557,9 @@ export default function ClassesScreen() {
         ]}
       >
         <View>
-          <Text style={[styles.headerTitle, { color: colors.title }]}>My Classes</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            My Classes
+          </Text>
         </View>
         <TouchableOpacity
           style={[

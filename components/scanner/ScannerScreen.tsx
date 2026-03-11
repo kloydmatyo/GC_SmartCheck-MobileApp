@@ -1,25 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
-import { ClassService } from "../../services/classService";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
+import { ClassService } from "../../services/classService";
 import {
-  DuplicateScoreDetectionService,
-  DuplicateScoreMatch,
+    DuplicateScoreDetectionService,
+    DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
@@ -34,7 +34,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("timeout")), ms)
+      setTimeout(() => reject(new Error("timeout")), ms),
     ),
   ]);
 }
@@ -62,9 +62,14 @@ export default function ScannerScreen({
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
 
   // class/exam dropdown state
-  const [classesList, setClassesList] = useState<Array<{ id: string; class_name?: string }>>([]);
-  const [selectedClass, setSelectedClass] = useState<{ id: string; class_name?: string } | null>(null);
-  const [examsList, setExamsList] = useState<Array<any>>([]);
+  const [classesList, setClassesList] = useState<
+    { id: string; class_name?: string }[]
+  >([]);
+  const [selectedClass, setSelectedClass] = useState<{
+    id: string;
+    class_name?: string;
+  } | null>(null);
+  const [examsList, setExamsList] = useState<any[]>([]);
   const [selectedExam, setSelectedExam] = useState<any | null>(null);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
   const [examDropdownOpen, setExamDropdownOpen] = useState(false);
@@ -116,10 +121,10 @@ export default function ScannerScreen({
       try {
         const cls = await ClassService.getClassesByUser();
         setClassesList(cls);
-        
+
         // Handle pre-selection if initialClassId is provided
         if (initialClassId) {
-          const matched = cls.find(c => c.id === initialClassId);
+          const matched = cls.find((c) => c.id === initialClassId);
           if (matched) {
             setSelectedClass(matched);
           }
@@ -141,9 +146,8 @@ export default function ScannerScreen({
 
     const fetchExams = async () => {
       try {
-        const { collection, query, where, getDocs } = await import(
-          "firebase/firestore"
-        );
+        const { collection, query, where, getDocs } =
+          await import("firebase/firestore");
         const examsRef = collection(db, "exams");
         const examsQuery = query(
           examsRef,
@@ -155,7 +159,7 @@ export default function ScannerScreen({
 
         // Handle pre-selection of exam if initialExamId is provided
         if (initialExamId) {
-          const matched = list.find(ex => ex.id === initialExamId);
+          const matched = list.find((ex) => ex.id === initialExamId);
           if (matched) {
             setSelectedExam(matched);
           }
@@ -165,7 +169,7 @@ export default function ScannerScreen({
       }
     };
     fetchExams();
-  }, [selectedClass]);
+  }, [initialExamId, selectedClass]);
 
   // when an exam is chosen, set up camera parameters
   React.useEffect(() => {
@@ -186,9 +190,7 @@ export default function ScannerScreen({
 
       // Ensure that a valid student ID was parsed
       const isInvalidId =
-        !studentId ||
-        studentId === "Unknown" ||
-        /^0+$/.test(studentId); // catches 0000000, 00000000, etc.
+        !studentId || studentId === "Unknown" || /^0+$/.test(studentId); // catches 0000000, 00000000, etc.
 
       if (isInvalidId) {
         console.warn(
@@ -213,22 +215,34 @@ export default function ScannerScreen({
       if (netState.isConnected && netState.isInternetReachable) {
         console.log(`[Firestore] Verifying student ID: ${studentId}...`);
         try {
-          const q = query(collection(db, "students"), where("studentId", "==", studentId));
+          const q = query(
+            collection(db, "students"),
+            where("studentId", "==", studentId),
+          );
           const snap = await withTimeout(getDocs(q), 2000);
           isValidId = !snap.empty;
 
           if (!isValidId) {
             // Fallback to class check
-            const classesSnapshot = await withTimeout(getDocs(collection(db, "classes")), 2500);
+            const classesSnapshot = await withTimeout(
+              getDocs(collection(db, "classes")),
+              2500,
+            );
             for (const classDoc of classesSnapshot.docs) {
-              if (classDoc.data().students?.some((s: any) => s.student_id === studentId)) {
+              if (
+                classDoc
+                  .data()
+                  .students?.some((s: any) => s.student_id === studentId)
+              ) {
                 isValidId = true;
                 break;
               }
             }
           }
         } catch (err) {
-          console.warn("[ScannerScreen] Student verification timed out. Assuming valid.");
+          console.warn(
+            "[ScannerScreen] Student verification timed out. Assuming valid.",
+          );
           isValidId = true;
         }
       } else {
@@ -237,7 +251,10 @@ export default function ScannerScreen({
       }
 
       if (!isValidId) {
-        Alert.alert("Unregistered student", `ID ${studentId} not found, but it will be scored anyway.`);
+        Alert.alert(
+          "Unregistered student",
+          `ID ${studentId} not found, but it will be scored anyway.`,
+        );
       }
 
       // ── 2. Fetch Answer Key (Fast Timeout) ──
@@ -246,15 +263,22 @@ export default function ScannerScreen({
 
       try {
         const { ExamService } = await import("../../services/examService");
-        const examData = await withTimeout(ExamService.getExamById(activeExamId), 2500);
+        const examData = await withTimeout(
+          ExamService.getExamById(activeExamId),
+          2500,
+        );
         if (examData?.answerKey?.answers) {
           answerKey = examData.answerKey.answers;
         } else {
           throw new Error("Missing key");
         }
       } catch (error) {
-        console.warn("[ScannerScreen] Answer key fetch failed/timed out. using default key.");
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(ak => ak.correctAnswer);
+        console.warn(
+          "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
+        );
+        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
+          (ak) => ak.correctAnswer,
+        );
       }
 
       const answerKeyFormatted = answerKey.map((answer, index) => ({
@@ -264,18 +288,30 @@ export default function ScannerScreen({
       }));
 
       // ── 3. Grade & Duplicate Check ──
-      const result = GradingService.gradeAnswers(scanResult, answerKeyFormatted);
+      const result = GradingService.gradeAnswers(
+        scanResult,
+        answerKeyFormatted,
+      );
       result.metadata = { ...result.metadata, isValidId: isValidId } as any;
 
       let duplicateCheck = null;
       try {
         duplicateCheck = await withTimeout(
-          DuplicateScoreDetectionService.checkForDuplicates(result, activeExamId),
-          2000
+          DuplicateScoreDetectionService.checkForDuplicates(
+            result,
+            activeExamId,
+          ),
+          2000,
         );
-      } catch (err) { /* proceed if check hangs */ }
+      } catch (err) {
+        /* proceed if check hangs */
+      }
 
-      if (duplicateCheck && (duplicateCheck.matchType === "exact" || duplicateCheck.matchType === "high")) {
+      if (
+        duplicateCheck &&
+        (duplicateCheck.matchType === "exact" ||
+          duplicateCheck.matchType === "high")
+      ) {
         setPendingResult(result);
         setDuplicateMatch(duplicateCheck);
         setShowDuplicateModal(true);
@@ -286,40 +322,59 @@ export default function ScannerScreen({
       const savedResult = await StorageService.saveScanResult(result, imageUri);
 
       // Async Firestore/Realm save
-      GradeStorageService.saveGradingResult(result, activeExamId).then(saveResult => {
-        if (saveResult.status === "saved") {
-          Toast.show({ type: "success", text1: "Saved", text2: `Score: ${result.score}/${result.totalPoints}` });
-        } else if (saveResult.status === "pending") {
-          Toast.show({ type: "info", text1: "Queued Offline", text2: "Data saved in RealmDB for later sync." });
-        }
-      });
+      GradeStorageService.saveGradingResult(result, activeExamId).then(
+        (saveResult) => {
+          if (saveResult.status === "saved") {
+            Toast.show({
+              type: "success",
+              text1: "Saved",
+              text2: `Score: ${result.score}/${result.totalPoints}`,
+            });
+          } else if (saveResult.status === "pending") {
+            Toast.show({
+              type: "info",
+              text1: "Queued Offline",
+              text2: "Data saved in RealmDB for later sync.",
+            });
+          }
+        },
+      );
 
       setGradingResult(savedResult);
       setScannedImage(imageUri);
       setCurrentState("results");
-
     } catch (error) {
       console.error("[ScannerScreen] Error:", error);
       Alert.alert("Error", "Failed to process scan.");
     }
   };
 
-  const handleRetrySave = () => handleFirestoreRetrySave(gradingResult!, activeExamId);
+  const handleRetrySave = () =>
+    handleFirestoreRetrySave(gradingResult!, activeExamId);
 
-  const handleFirestoreRetrySave = async (result: GradingResult, examId: string) => {
-    const saveResult = await GradeStorageService.saveGradingResult(result, examId);
+  const handleFirestoreRetrySave = async (
+    result: GradingResult,
+    examId: string,
+  ) => {
+    const saveResult = await GradeStorageService.saveGradingResult(
+      result,
+      examId,
+    );
     if (saveResult.status === "saved") {
       Toast.show({ type: "success", text1: "Saved Successfully" });
     } else if (saveResult.status === "pending") {
       Toast.show({ type: "info", text1: "Saved Locally (Realm)" });
     } else {
-      Toast.show({ type: "error", text1: "Still Failing", text2: saveResult.message });
+      Toast.show({
+        type: "error",
+        text1: "Still Failing",
+        text2: saveResult.message,
+      });
     }
   };
 
-
   const handleScanAnother = () => {
-    setScanCount(prev => prev + 1);
+    setScanCount((prev) => prev + 1);
     setCurrentState("camera");
   };
 
@@ -335,7 +390,8 @@ export default function ScannerScreen({
 
   const handleKeepNewScan = async () => {
     if (!pendingResult || !scannedImage) return;
-    const overridden = DuplicateScoreDetectionService.markAsOverride(pendingResult);
+    const overridden =
+      DuplicateScoreDetectionService.markAsOverride(pendingResult);
     const saved = await StorageService.saveScanResult(overridden, scannedImage);
     GradeStorageService.saveGradingResult(overridden, activeExamId);
     setGradingResult(saved);
@@ -381,7 +437,10 @@ export default function ScannerScreen({
       {/* ── Header Overlay (Back + Title) ── */}
       {currentState !== "results" && (
         <View style={styles.headerOverlay}>
-          <TouchableOpacity onPress={handleClose} style={styles.backButtonOverlay}>
+          <TouchableOpacity
+            onPress={handleClose}
+            style={styles.backButtonOverlay}
+          >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Scanner</Text>
@@ -448,10 +507,7 @@ export default function ScannerScreen({
                   }}
                 >
                   <Text
-                    style={[
-                      styles.dropdownName,
-                      selected && { color: "#fff" },
-                    ]}
+                    style={[styles.dropdownName, selected && { color: "#fff" }]}
                   >
                     {cls.class_name || "Unnamed"}
                   </Text>
@@ -497,10 +553,7 @@ export default function ScannerScreen({
                   }}
                 >
                   <Text
-                    style={[
-                      styles.dropdownName,
-                      selected && { color: "#fff" },
-                    ]}
+                    style={[styles.dropdownName, selected && { color: "#fff" }]}
                     numberOfLines={1}
                   >
                     {ex.title || ex.name || "Unnamed Exam"}
@@ -594,7 +647,7 @@ export default function ScannerScreen({
           </View>
         </View>
       </Modal>
-    </View >
+    </View>
   );
 }
 
@@ -610,7 +663,8 @@ const styles = StyleSheet.create({
   },
   topBar: {
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 8 : 12,
+    paddingTop:
+      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 8 : 12,
     paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#d8dfda",
@@ -725,7 +779,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 100,
-    paddingTop: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : 55,
+    paddingTop:
+      Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : 55,
     paddingBottom: 15,
     paddingHorizontal: 16,
     flexDirection: "row",

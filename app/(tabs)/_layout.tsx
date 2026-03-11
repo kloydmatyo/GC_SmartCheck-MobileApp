@@ -1,6 +1,6 @@
-import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Tabs, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { DeviceEventEmitter, StyleSheet, Text, View } from "react-native";
@@ -21,18 +21,12 @@ function ScannerTabButton(props: BottomTabBarButtonProps) {
         style={styles.scannerPressable}
       >
         <View
-          style={[
-            styles.scannerButton,
-            focused && styles.scannerButtonFocused,
-          ]}
+          style={[styles.scannerButton, focused && styles.scannerButtonFocused]}
         >
           <Ionicons name="scan-outline" size={26} color="#FFFFFF" />
         </View>
         <Text
-          style={[
-            styles.scannerLabel,
-            focused && styles.scannerLabelFocused,
-          ]}
+          style={[styles.scannerLabel, focused && styles.scannerLabelFocused]}
         >
           Scanner
         </Text>
@@ -78,19 +72,19 @@ export default function TabLayout() {
 
   const tabColors = darkModeEnabled
     ? {
-      active: "#20BE7B",
-      inactive: "#A7B0BE",
-      bg: "#FFFFFF",
-      border: "#ECEEF2",
-      shadow: "#0F172A",
-    }
+        active: "#20BE7B",
+        inactive: "#A7B0BE",
+        bg: "#FFFFFF",
+        border: "#ECEEF2",
+        shadow: "#0F172A",
+      }
     : {
-      active: "#20BE7B",
-      inactive: "#A7B0BE",
-      bg: "#FFFFFF",
-      border: "#ECEEF2",
-      shadow: "#0F172A",
-    };
+        active: "#20BE7B",
+        inactive: "#A7B0BE",
+        bg: "#FFFFFF",
+        border: "#ECEEF2",
+        shadow: "#0F172A",
+      };
 
   return (
     <Tabs
@@ -182,7 +176,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="batch-history"
         options={{
-          title: "Archived",
+          title: "Archive",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? "archive" : "archive-outline"}
@@ -198,28 +192,28 @@ export default function TabLayout() {
         name="students"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="generator"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="demo"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
@@ -277,6 +271,18 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="exam-stats"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="templates"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="template-preview"
         options={{
           href: null,
         }}

@@ -1,34 +1,34 @@
-import { auth, db } from "@/config/firebase";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { auth, db } from "@/config/firebase";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { ResultsService } from "@/services/resultsService";
 import { SyncService, type SyncResult } from "@/services/syncService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
 import { signOut } from "firebase/auth";
+import {
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    where,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
-import Toast from "react-native-toast-message";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Toast from "react-native-toast-message";
 
 type SummaryStats = {
   scans: number;
@@ -182,7 +182,9 @@ export default function HomeScreen() {
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
-  const displayRecentScans = recentScans.length ? recentScans : MOCK_RECENT_SCANS;
+  const displayRecentScans = recentScans.length
+    ? recentScans
+    : MOCK_RECENT_SCANS;
 
   const animateSyncBannerOut = useCallback(() => {
     Animated.parallel([
@@ -256,11 +258,13 @@ export default function HomeScreen() {
       loadSyncStatus();
     });
 
-    const unsubscribeSync = SyncService.addSyncListener((_result: SyncResult) => {
-      if (!mounted) return;
-      setIsSyncing(false);
-      loadSyncStatus();
-    });
+    const unsubscribeSync = SyncService.addSyncListener(
+      (_result: SyncResult) => {
+        if (!mounted) return;
+        setIsSyncing(false);
+        loadSyncStatus();
+      },
+    );
 
     const interval = setInterval(loadSyncStatus, 30000);
 
@@ -292,9 +296,15 @@ export default function HomeScreen() {
         }
 
         const userProfileSnap = await getDoc(doc(db, "users", currentUser.uid));
-        const userProfile = userProfileSnap.exists() ? userProfileSnap.data() : null;
-        const fullName = String(userProfile?.fullName || currentUser.displayName || "").trim();
-        const email = String(userProfile?.email || currentUser.email || "").trim();
+        const userProfile = userProfileSnap.exists()
+          ? userProfileSnap.data()
+          : null;
+        const fullName = String(
+          userProfile?.fullName || currentUser.displayName || "",
+        ).trim();
+        const email = String(
+          userProfile?.email || currentUser.email || "",
+        ).trim();
         const fallbackName = email ? email.split("@")[0] : "";
         const firstName = (fullName || fallbackName).split(" ")[0];
 
@@ -316,14 +326,16 @@ export default function HomeScreen() {
         const classDocs = classesSnapshot.docs
           .map((doc) => doc.data())
           .filter((item) => !item.isArchived);
-        const scanRows = unifiedResults.rows.filter((item) => item.source === "scan");
+        const scanRows = unifiedResults.rows.filter(
+          (item) => item.source === "scan",
+        );
 
         const averageScore =
           scanRows.length > 0
             ? Math.round(
-              scanRows.reduce((sum, item) => sum + item.percentage, 0) /
-              scanRows.length,
-            )
+                scanRows.reduce((sum, item) => sum + item.percentage, 0) /
+                  scanRows.length,
+              )
             : 0;
 
         const recent = scanRows.slice(0, 4).map((scan) => {
@@ -360,7 +372,6 @@ export default function HomeScreen() {
             textColor: item.textColor,
           })),
         );
-
       } catch (error) {
         console.error("Error loading home screen:", error);
         if (active) {
@@ -377,7 +388,7 @@ export default function HomeScreen() {
     return () => {
       active = false;
     };
-  }, [subscribeExams, subscribeClasses]);
+  }, []);
 
   useFocusEffect(loadHome);
 
@@ -459,7 +470,10 @@ export default function HomeScreen() {
                     ]}
                   >
                     {isSyncing ? (
-                      <ActivityIndicator size="small" color={syncVisual.color} />
+                      <ActivityIndicator
+                        size="small"
+                        color={syncVisual.color}
+                      />
                     ) : (
                       <Ionicons
                         name={syncVisual.icon}
@@ -496,7 +510,7 @@ export default function HomeScreen() {
                   styles.statCard,
                   styles.statCardStatic,
                   Platform.OS === "web"
-                    ? { cursor: card.route ? "pointer" : "auto" } as any
+                    ? ({ cursor: card.route ? "pointer" : "auto" } as any)
                     : null,
                 ]}
                 activeOpacity={card.route ? 0.82 : 1}
@@ -528,9 +542,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.quickScanButton}
-            onPress={() =>
-              router.push(`/scanner?quick=${Date.now()}`)
-            }
+            onPress={() => router.push(`/scanner?quick=${Date.now()}`)}
             activeOpacity={0.9}
           >
             <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
@@ -609,7 +621,9 @@ export default function HomeScreen() {
             <View style={styles.accountMenuHeader}>
               <Text style={styles.accountMenuTitle}>Teacher Account</Text>
               <Text style={styles.accountMenuEmail} numberOfLines={1}>
-                {teacherEmail || auth.currentUser?.email || "teacher@school.edu"}
+                {teacherEmail ||
+                  auth.currentUser?.email ||
+                  "teacher@school.edu"}
               </Text>
             </View>
             <TouchableOpacity

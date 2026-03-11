@@ -2,7 +2,14 @@ import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
-import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import {
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
@@ -32,25 +39,59 @@ export default function CameraScanner({
   if (!permission.granted) {
     // Camera permissions are not granted yet
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <Ionicons name="camera-outline" size={64} color="white" style={{ marginBottom: 20 }} />
-        <Text style={{ color: 'white', fontSize: 20, fontWeight: 'bold', marginBottom: 10, textAlign: 'center' }}>
+      <View
+        style={[
+          styles.container,
+          { justifyContent: "center", alignItems: "center", padding: 20 },
+        ]}
+      >
+        <Ionicons
+          name="camera-outline"
+          size={64}
+          color="white"
+          style={{ marginBottom: 20 }}
+        />
+        <Text
+          style={{
+            color: "white",
+            fontSize: 20,
+            fontWeight: "bold",
+            marginBottom: 10,
+            textAlign: "center",
+          }}
+        >
           We need your permission
         </Text>
-        <Text style={{ color: '#aaa', fontSize: 16, marginBottom: 30, textAlign: 'center' }}>
+        <Text
+          style={{
+            color: "#aaa",
+            fontSize: 16,
+            marginBottom: 30,
+            textAlign: "center",
+          }}
+        >
           GCSC needs access to your camera to scan Zipgrade answer sheets.
         </Text>
         <TouchableOpacity
-          style={{ backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, width: '100%', alignItems: 'center' }}
+          style={{
+            backgroundColor: "#22c55e",
+            paddingHorizontal: 24,
+            paddingVertical: 12,
+            borderRadius: 8,
+            width: "100%",
+            alignItems: "center",
+          }}
           onPress={requestPermission}
         >
-          <Text style={{ color: 'white', fontSize: 16, fontWeight: 'bold' }}>Grant Camera Access</Text>
+          <Text style={{ color: "white", fontSize: 16, fontWeight: "bold" }}>
+            Grant Camera Access
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={{ marginTop: 20, padding: 10 }}
           onPress={onCancel}
         >
-          <Text style={{ color: '#ff4444', fontSize: 16 }}>Cancel</Text>
+          <Text style={{ color: "#ff4444", fontSize: 16 }}>Cancel</Text>
         </TouchableOpacity>
       </View>
     );
@@ -137,41 +178,57 @@ export default function CameraScanner({
         facing="back"
         enableTorch={torch}
         flash={torch ? "on" : "off"}
-      />
-
-      <TouchableOpacity
-        style={styles.torchButton}
-        onPress={() => setTorch(!torch)}
       >
-        {/* Precise Mask (Dims everything outside the border tightly) */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {/* Top Mask - flex: 1 for perfect vertical centering */}
-          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
+        <TouchableOpacity
+          style={styles.torchButton}
+          onPress={() => setTorch(!torch)}
+        >
+          {/* Precise Mask (Dims everything outside the border tightly) */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {/* Top Mask - flex: 1 for perfect vertical centering */}
+            <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
 
-          <View style={{ flexDirection: 'row', height: frameDimensions.height }}>
-            {/* Left Side Mask */}
-            <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
+            <View
+              style={{ flexDirection: "row", height: frameDimensions.height }}
+            >
+              {/* Left Side Mask */}
+              <View
+                style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }}
+              />
 
-            {/* Transparent Center Area (Width matches frame) */}
-            <View style={{ width: frameDimensions.width, backgroundColor: 'transparent' }} />
+              {/* Transparent Center Area (Width matches frame) */}
+              <View
+                style={{
+                  width: frameDimensions.width,
+                  backgroundColor: "transparent",
+                }}
+              />
 
-            {/* Right Side Mask */}
-            <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
+              {/* Right Side Mask */}
+              <View
+                style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }}
+              />
+            </View>
+
+            {/* Bottom Mask - flex: 1 for perfect vertical centering */}
+            <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
           </View>
-
-          {/* Bottom Mask - flex: 1 for perfect vertical centering */}
-          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
-        </View>
-        <Text style={styles.instructionText}>
-          Align answer sheet within the frame
-        </Text>
-      </View>
+          <Text style={styles.instructionText}>
+            Align answer sheet within the frame
+          </Text>
+        </TouchableOpacity>
 
         {/* UI Overlay Layer (Frame and Controls) */}
         <View style={StyleSheet.absoluteFill}>
           {/* Centered Frame Area (Matches Mask Flex above) */}
           <View style={{ flex: 1 }} />
-          <View style={{ height: frameDimensions.height, alignItems: 'center', justifyContent: 'center' }}>
+          <View
+            style={{
+              height: frameDimensions.height,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
             <View
               style={[
                 styles.scanFrame,
@@ -182,11 +239,7 @@ export default function CameraScanner({
               ]}
             >
               <View style={styles.frameContent}>
-                <Ionicons
-                  name="camera-outline"
-                  size={54}
-                  color="#00FF7F"
-                />
+                <Ionicons name="camera-outline" size={54} color="#00FF7F" />
                 <Text style={styles.frameText}>
                   Align the answer sheet within the{"\n"}frame
                 </Text>
@@ -204,7 +257,10 @@ export default function CameraScanner({
           {/* Controls Panel (Absolute bottom) */}
           <View style={styles.shutterContainer}>
             <TouchableOpacity
-              style={[styles.shutterButton, isProcessing && styles.disabledButton]}
+              style={[
+                styles.shutterButton,
+                isProcessing && styles.disabledButton,
+              ]}
               onPress={takePicture}
               disabled={isProcessing}
             >
@@ -235,7 +291,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   shutterContainer: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 25,
     left: 0,
     right: 0,
@@ -298,7 +354,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 0,
   },
   bottomControls: {
-    width: '100%',
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
