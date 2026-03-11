@@ -9,7 +9,6 @@ import { ImportResult } from "@/types/student";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import * as XLSX from "xlsx";
 import React, { useState } from "react";
 import {
     ActivityIndicator,
@@ -22,6 +21,7 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import * as XLSX from "xlsx";
 
 interface StudentImportModalProps {
   visible: boolean;
@@ -143,7 +143,7 @@ export function StudentImportModal({
         // Native: use expo-file-system/legacy
         if (isXlsx) {
           const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
-            encoding: FileSystem.EncodingType.Base64,
+            encoding: "base64",
           });
           const wb = XLSX.read(base64, { type: "base64" });
           const firstSheet = wb.Sheets[wb.SheetNames[0]];

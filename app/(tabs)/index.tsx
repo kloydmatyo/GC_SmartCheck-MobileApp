@@ -1,24 +1,23 @@
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import { Ionicons } from "@expo/vector-icons";
-import NetInfo from "@react-native-community/netinfo";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, orderBy, query, where } from "firebase/firestore";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import ScannerScreen from "../../components/scanner/ScannerScreen";
-import Toast from "react-native-toast-message";
 import { GradeStorageService } from "@/services/gradeStorageService";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
+import { useFocusEffect, useRouter } from "expo-router";
+import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
+import React, { useCallback, useState } from "react";
+import {
+    ActivityIndicator,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
+} from "react-native";
+import Toast from "react-native-toast-message";
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 interface RecentExam {
   id: string;
@@ -220,13 +219,15 @@ export default function HomeScreen() {
   // ── Pull-to-refresh handler ──────────────────────────────────────────────
   const onRefresh = useCallback(() => {
     setRefreshing(true);
+    loadDashboard();
     loadRecentExams();
-  }, [loadRecentExams]);
+  }, [loadDashboard, loadRecentExams]);
   // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
   useFocusEffect(
     useCallback(() => {
+      loadDashboard();
       loadRecentExams();
-    }, [loadRecentExams]),
+    }, [loadDashboard, loadRecentExams]),
   );
 
   // ── Manual Sync from Header ──────────────────────────────────────────────

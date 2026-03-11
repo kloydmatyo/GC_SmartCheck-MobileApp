@@ -1,6 +1,8 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,7 +19,6 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
@@ -36,6 +37,8 @@ export default function ClassesScreen() {
     Record<string, boolean>
   >({});
   const [blockPickerVisible, setBlockPickerVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (
@@ -151,6 +154,34 @@ export default function ClassesScreen() {
         accentStrong: "#4CAF50",
       };
 
+  // Delete class
+  const handleDeleteClass = async () => {
+    if (!selectedClass) return;
+
+    try {
+      setDeleting(true);
+      await ClassService.deleteClass(selectedClass.id);
+
+      Toast.show({
+        type: "success",
+        text1: "Success",
+        text2: "Class deleted successfully",
+      });
+
+      setDeleteConfirmVisible(false);
+      loadClasses();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Create new class
   const handleCreateClass = async () => {
     // Validation
@@ -168,6 +199,15 @@ export default function ClassesScreen() {
         type: "error",
         text1: "Validation Error",
         text2: "Course subject is required",
+      });
+      return;
+    }
+
+    if (!/^\d{3}$/.test(formData.room.trim())) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Room must be exactly 3 digits",
       });
       return;
     }
@@ -552,8 +592,13 @@ export default function ClassesScreen() {
                 placeholder="e.g., 404"
                 placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
                 value={formData.room}
+                keyboardType="number-pad"
+                maxLength={3}
                 onChangeText={(text) =>
-                  setFormData({ ...formData, room: text })
+                  setFormData({
+                    ...formData,
+                    room: text.replace(/\D/g, "").slice(0, 3),
+                  })
                 }
               />
           </ScrollView>
@@ -634,11 +679,7 @@ export default function ClassesScreen() {
               style={styles.menuAction}
               onPress={() => {
                 setClassMenuVisible(false);
-                Toast.show({
-                  type: "info",
-                  text1: "Delete",
-                  text2: "Delete action is available in frontend menu.",
-                });
+                setDeleteConfirmVisible(true);
               }}
             >
               <Ionicons name="trash-outline" size={18} color={COLORS.error} />
@@ -713,6 +754,18 @@ export default function ClassesScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Class"
+        message={`Are you sure you want to delete "${selectedClass?.class_name ?? "this class"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleDeleteClass}
+        onCancel={() => setDeleteConfirmVisible(false)}
+        destructive={true}
+        loading={deleting}
+      />
 
       <Toast />
     </View>

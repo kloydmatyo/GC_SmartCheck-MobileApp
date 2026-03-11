@@ -1,12 +1,11 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
-import ConfirmationModal from "@/components/common/ConfirmationModal";
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as XLSX from 'xlsx';
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Animated,
@@ -22,6 +21,7 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import * as XLSX from 'xlsx';
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { StudentImportService } from "../../services/studentImportService";
@@ -51,6 +51,8 @@ export default function ClassDetailsScreen() {
     studentName: string;
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sortBy, setSortBy] = useState<'id_asc' | 'id_desc' | 'fname_asc' | 'fname_desc'>('id_asc');
+  const [sortModalVisible, setSortModalVisible] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
@@ -442,6 +444,24 @@ export default function ClassDetailsScreen() {
       // to avoid global duplicate checks
       const isExcelFile = isExcel;
       let rows;
+
+      // Validate required headers before parsing any rows.
+      const headerErrors = isExcelFile
+        ? StudentImportService.validateXLSXHeaders(fileContent)
+        : StudentImportService.validateCSVHeaders(fileContent);
+
+      if (headerErrors.length > 0) {
+        setImportErrors({
+          visible: true,
+          successCount: 0,
+          errors: headerErrors.map((e) => ({
+            student_id: e.field,
+            error: e.error,
+          })),
+        });
+        setImporting(false);
+        return;
+      }
       
       if (isExcelFile) {
         rows = StudentImportService.parseXLSX(fileContent);
@@ -459,6 +479,7 @@ export default function ClassDetailsScreen() {
         const rowErrors = StudentImportService.validateRow(row);
         if (rowErrors.length === 0) {
           validStudents.push({
+            rowNumber: row.rowNumber,
             student_id: row.studentId,
             first_name: row.firstName,
             last_name: row.lastName,
@@ -476,21 +497,23 @@ export default function ClassDetailsScreen() {
         classData.students.map(s => s.student_id)
       );
 
+      const duplicateInClassErrors = validStudents
+        .filter((student) => existingStudentIds.has(student.student_id))
+        .map((student) => ({
+          rowNumber: student.rowNumber,
+          field: 'student_id',
+          value: student.student_id,
+          error: 'Student already exists in this class',
+          severity: 'warning' as const,
+        }));
+
+      if (duplicateInClassErrors.length > 0) {
+        errors.push(...duplicateInClassErrors);
+      }
+
       // Add students to the class
       let successCount = 0;
       for (const student of validStudents) {
-        // Check if student already exists in THIS class
-        if (existingStudentIds.has(student.student_id)) {
-          errors.push({
-            rowNumber: 0,
-            field: 'student_id',
-            value: student.student_id,
-            error: 'Student already exists in this class',
-            severity: 'warning' as const,
-          });
-          continue;
-        }
-
         try {
           await ClassService.addStudent(classId, student);
           existingStudentIds.add(student.student_id); // Track added students
@@ -562,6 +585,19 @@ export default function ClassDetailsScreen() {
       student.student_id.toLowerCase().includes(q) ||
       (student.email ?? "").toLowerCase().includes(q)
     );
+  }).sort((a, b) => {
+    switch (sortBy) {
+      case 'id_asc':
+        return a.student_id.localeCompare(b.student_id, undefined, { numeric: true });
+      case 'id_desc':
+        return b.student_id.localeCompare(a.student_id, undefined, { numeric: true });
+      case 'fname_asc':
+        return a.first_name.localeCompare(b.first_name);
+      case 'fname_desc':
+        return b.first_name.localeCompare(a.first_name);
+      default:
+        return 0;
+    }
   });
   const recentQuizzes = [
     {
@@ -922,6 +958,12 @@ export default function ClassDetailsScreen() {
             {activeTab === "students" && (
               <View style={styles.headerActions}>
                 <TouchableOpacity
+                  style={styles.sortButton}
+                  onPress={() => setSortModalVisible(true)}
+                >
+                  <Ionicons name="funnel-outline" size={16} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.exportButton}
                   onPress={handleExportStudents}
                   disabled={exporting || classData.students.length === 0}
@@ -1250,6 +1292,62 @@ export default function ClassDetailsScreen() {
         </View>
       </Modal>
 
+      {/* Sort Modal */}
+      <Modal
+        visible={sortModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSortModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.sortModalOverlay}
+          activeOpacity={1}
+          onPress={() => setSortModalVisible(false)}
+        >
+          <View style={[styles.sortModalContent, darkModeEnabled && { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sortModalTitle, darkModeEnabled && { color: colors.text }]}>Sort Students</Text>
+
+            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY STUDENT ID</Text>
+            {(['id_asc', 'id_desc'] as const).map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
+                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
+              >
+                <Ionicons
+                  name={option === 'id_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  size={16}
+                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                />
+                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
+                  {option === 'id_asc' ? 'Ascending (0 → 9)' : 'Descending (9 → 0)'}
+                </Text>
+                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
+              </TouchableOpacity>
+            ))}
+
+            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY FIRST NAME</Text>
+            {(['fname_asc', 'fname_desc'] as const).map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
+                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
+              >
+                <Ionicons
+                  name={option === 'fname_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  size={16}
+                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                />
+                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
+                  {option === 'fname_asc' ? 'A → Z' : 'Z → A'}
+                </Text>
+                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Duplicate Student Warning Modal */}
       <ConfirmationModal
         visible={duplicateWarning.visible}
@@ -1549,6 +1647,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
+  sortButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#4a7a6e",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   exportButton: {
     width: 28,
     height: 28,
@@ -1556,6 +1662,60 @@ const styles = StyleSheet.create({
     backgroundColor: "#1e6b4f",
     alignItems: "center",
     justifyContent: "center",
+  },
+  sortModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  sortModalContent: {
+    width: 280,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#d5dfd9",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1f2f2a",
+    marginBottom: 14,
+  },
+  sortModalGroupLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#8ea094",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 6,
+    marginTop: 10,
+  },
+  sortOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  sortOptionActive: {
+    backgroundColor: "#e8f5ee",
+  },
+  sortOptionText: {
+    fontSize: 14,
+    color: "#2a3d37",
+    flex: 1,
+  },
+  sortOptionTextActive: {
+    fontWeight: "600",
+    color: COLORS.primary,
   },
   importButton: {
     width: 28,

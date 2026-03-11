@@ -113,7 +113,8 @@ export class StudentImportService {
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(",").map((v) => v.trim());
 
-      if (values.length < headers.length) continue; // Skip incomplete rows
+      const hasAnyData = values.some((v) => v !== "");
+      if (!hasAnyData) continue;
 
       const row: ImportRow = {
         rowNumber: i + 1,
@@ -219,8 +220,8 @@ export class StudentImportService {
           }
         });
         
-        // Only add rows with at least a student ID
-        if (row.studentId) {
+        const hasAnyData = values.some((v) => String(v || '').trim() !== '');
+        if (hasAnyData) {
           rows.push(row);
         }
       }
@@ -480,6 +481,76 @@ export class StudentImportService {
     }
 
     return errors;
+  }
+
+  /**
+   * Validate required headers in an XLSX file (base64 content).
+   */
+  static validateXLSXHeaders(fileContent: string): ImportValidationError[] {
+    try {
+      const workbook = XLSX.read(fileContent, { type: "base64" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      const firstRow = (jsonData[0] as any[] | undefined) || [];
+      const headers = firstRow.map((h) => this.normalizeHeader(String(h || "")));
+      const headerSet = new Set(headers);
+
+      const errors: ImportValidationError[] = [];
+      const hasStudentId =
+        headerSet.has("student_id") ||
+        headerSet.has("studentid") ||
+        headerSet.has("id");
+      const hasFirstName =
+        headerSet.has("first_name") || headerSet.has("firstname");
+      const hasLastName =
+        headerSet.has("last_name") || headerSet.has("lastname");
+
+      if (!hasStudentId) {
+        errors.push({
+          rowNumber: 0,
+          field: "header",
+          value: headers.join(","),
+          error:
+            "Missing required column: student_id (accepted: student_id, studentid, id)",
+          severity: "error",
+        });
+      }
+      if (!hasFirstName) {
+        errors.push({
+          rowNumber: 0,
+          field: "header",
+          value: headers.join(","),
+          error:
+            "Missing required column: first_name (accepted: first_name, firstname)",
+          severity: "error",
+        });
+      }
+      if (!hasLastName) {
+        errors.push({
+          rowNumber: 0,
+          field: "header",
+          value: headers.join(","),
+          error:
+            "Missing required column: last_name (accepted: last_name, lastname)",
+          severity: "error",
+        });
+      }
+
+      return errors;
+    } catch (error) {
+      console.error("[Import] XLSX header validation failed:", error);
+      return [
+        {
+          rowNumber: 0,
+          field: "file",
+          value: "xlsx",
+          error: "Failed to validate Excel headers. Please ensure the file is a valid .xlsx file.",
+          severity: "error",
+        },
+      ];
+    }
   }
 
   /**
