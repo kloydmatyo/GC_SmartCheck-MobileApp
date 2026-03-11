@@ -6,6 +6,9 @@ import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   collection,
@@ -27,6 +30,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import * as XLSX from "xlsx";
 
 interface QuestionAnswer {
   questionNumber: number;
@@ -532,6 +536,214 @@ export default function EditAnswerKeyScreen() {
     return options;
   };
 
+  const normalizeHeader = (value: unknown) =>
+    String(value ?? "").trim().toLowerCase();
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const totalQuestions = (() => {
+        const count = Math.max(answers.length, 1);
+        if (count <= 20) return 20;
+        if (count <= 50) return 50;
+        return 100;
+      })();
+      const rows: (string | number)[][] = [
+        ["Question Number", "Answer"],
+        ...Array.from({ length: totalQuestions }, (_, i) => [i + 1, ""]),
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.aoa_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, sheet, "AnswerKey");
+
+      const base64 = XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
+      const baseDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      if (!baseDir) {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Error",
+          message: "Unable to access file storage on this device.",
+        });
+        return;
+      }
+
+      const fileName = `answer-key-template-${totalQuestions}q.xlsx`;
+      const fileUri = `${baseDir}${fileName}`;
+
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType:
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          dialogTitle: "Download Answer Key Template",
+        });
+      } else {
+        setStatusModal({
+          visible: true,
+          type: "info",
+          title: "Template Ready",
+          message: "Template saved to device storage.",
+        });
+      }
+    } catch (error) {
+      console.error("Template download failed:", error);
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Failed to create template file.",
+      });
+    }
+  };
+
+  const handleImportAnswerKey = async () => {
+    try {
+      const pickerResult = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.ms-excel",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (pickerResult.canceled) return;
+
+      const file = pickerResult.assets[0];
+      const base64 = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: "base64" as any,
+      });
+      const workbook = XLSX.read(base64, { type: "base64" });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as
+        | unknown[][]
+        | undefined;
+
+      if (!rows || rows.length === 0) {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Import Error",
+          message: "Incorrect fields",
+        });
+        return;
+      }
+
+      const headerRow = rows[0] as unknown[];
+      const headerMap = headerRow.map(normalizeHeader);
+      const qIndex = headerMap.indexOf("question number");
+      const aIndex = headerMap.indexOf("answer");
+
+      if (qIndex === -1 || aIndex === -1) {
+        setStatusModal({
+          visible: true,
+          type: "error",
+          title: "Import Error",
+          message: "Incorrect fields",
+        });
+        return;
+      }
+
+      const allowedChoices = new Set(getChoiceOptions());
+      const incoming = new Map<number, string>();
+
+      for (let i = 1; i < rows.length; i += 1) {
+        const row = rows[i] as unknown[];
+        if (!row) continue;
+
+        const questionRaw = row[qIndex];
+        if (questionRaw == null || String(questionRaw).trim() === "") {
+          continue;
+        }
+
+        const questionNumber = Number(String(questionRaw).trim());
+        if (!Number.isFinite(questionNumber) || !Number.isInteger(questionNumber)) {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Import Error",
+            message: "Incorrect value",
+          });
+          return;
+        }
+
+        if (questionNumber < 1 || questionNumber > answers.length) {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Import Error",
+            message: "Incorrect value",
+          });
+          return;
+        }
+
+        if (incoming.has(questionNumber)) {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Import Error",
+            message: "Incorrect value",
+          });
+          return;
+        }
+
+        const answerRaw = row[aIndex];
+        if (answerRaw == null || String(answerRaw).trim() === "") {
+          continue;
+        }
+
+        const normalizedAnswer = String(answerRaw).trim().toUpperCase();
+        if (normalizedAnswer.length !== 1 || !allowedChoices.has(normalizedAnswer)) {
+          setStatusModal({
+            visible: true,
+            type: "error",
+            title: "Import Error",
+            message: "Incorrect value",
+          });
+          return;
+        }
+
+        incoming.set(questionNumber, normalizedAnswer);
+      }
+
+      if (incoming.size === 0) {
+        setStatusModal({
+          visible: true,
+          type: "info",
+          title: "Import Complete",
+          message: "No answers found to import.",
+        });
+        return;
+      }
+
+      setAnswers((prev) =>
+        prev.map((item) =>
+          incoming.has(item.questionNumber)
+            ? { ...item, answer: incoming.get(item.questionNumber) || "" }
+            : item,
+        ),
+      );
+      setHasLocalChanges(true);
+      setStatusModal({
+        visible: true,
+        type: "success",
+        title: "Import Complete",
+        message: "Answer key updated from template.",
+      });
+    } catch (error) {
+      console.error("Import failed:", error);
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Import Error",
+        message: "Failed to import answer key.",
+      });
+    }
+  };
+
   const renderQuestion = ({ item }: { item: QuestionAnswer }) => {
     const choices = getChoiceOptions();
 
@@ -663,6 +875,55 @@ export default function EditAnswerKeyScreen() {
           disabled={saving}
         >
           <Ionicons name="close" size={20} color="#A8AFBC" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[
+            styles.secondaryButton,
+            darkModeEnabled && styles.secondaryButtonDark,
+            saving && styles.secondaryButtonDisabled,
+          ]}
+          onPress={handleDownloadTemplate}
+          disabled={saving}
+        >
+          <Ionicons
+            name="download-outline"
+            size={18}
+            color="#fff"
+          />
+          <Text
+            style={[
+              styles.secondaryButtonText,
+              darkModeEnabled && styles.secondaryButtonTextDark,
+            ]}
+          >
+            Template
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.secondaryButton,
+            darkModeEnabled && styles.secondaryButtonDark,
+            saving && styles.secondaryButtonDisabled,
+          ]}
+          onPress={handleImportAnswerKey}
+          disabled={saving}
+        >
+          <Ionicons
+            name="cloud-upload-outline"
+            size={18}
+            color="#fff"
+          />
+          <Text
+            style={[
+              styles.secondaryButtonText,
+              darkModeEnabled && styles.secondaryButtonTextDark,
+            ]}
+          >
+            Import
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -808,6 +1069,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 100,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  secondaryButton: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#20BE7B",
+    backgroundColor: "#20BE7B",
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  secondaryButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#ffffff",
+  },
+  secondaryButtonDark: {
+    backgroundColor: "#20BE7B",
+    borderColor: "#20BE7B",
+  },
+  secondaryButtonTextDark: {
+    color: "#ffffff",
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.6,
   },
   questionCard: {
     flexDirection: "row",
