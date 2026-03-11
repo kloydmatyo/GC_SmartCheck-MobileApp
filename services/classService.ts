@@ -157,6 +157,18 @@ export class ClassService {
         throw new Error("Class not found");
       }
 
+      // Check if student with same ID already exists in this class
+      const existingStudent = classData.students.find(
+        (s) => s.student_id === student.student_id
+      );
+
+      if (existingStudent) {
+        throw new Error(
+          `Student with ID "${student.student_id}" already exists in this class. ` +
+          `Existing student: ${existingStudent.first_name} ${existingStudent.last_name}`
+        );
+      }
+
       const updatedStudents = [...classData.students, student];
       await this.updateClass(classId, { students: updatedStudents });
     } catch (error) {

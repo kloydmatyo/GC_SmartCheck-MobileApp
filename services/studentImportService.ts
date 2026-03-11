@@ -341,14 +341,14 @@ export class StudentImportService {
       idMap.get(row.studentId)!.push(row.rowNumber);
     });
 
-    // Find duplicates
+    // Find duplicates within the import file itself
     idMap.forEach((rowNumbers, studentId) => {
       if (rowNumbers.length > 1) {
         duplicates.set(studentId, rowNumbers);
       }
     });
 
-    // Check against existing database
+    // Check against existing database (Firestore + local cache)
     try {
       const studentIds = Array.from(idMap.keys());
       const existingIds = await this.checkExistingStudents(studentIds);
@@ -361,20 +361,44 @@ export class StudentImportService {
       });
     } catch (error) {
       console.error("[Import] Duplicate check failed:", error);
+      throw new Error(
+        "Failed to check for duplicate students. Please ensure you have an active internet connection and try again."
+      );
     }
 
     return duplicates;
   }
 
   /**
-   * Check which student IDs already exist in Firestore
+   * Check which student IDs already exist in Firestore and local cache
    */
   private static async checkExistingStudents(
     studentIds: string[],
   ): Promise<string[]> {
     try {
-      const studentsRef = collection(db, "students");
       const existing: string[] = [];
+
+      // First check local cache (if available) - much faster
+      try {
+        const { StudentDatabaseService } = await import("@/services/studentDatabaseService");
+        await StudentDatabaseService.initializeDatabase();
+        
+        // Check each ID against the cache
+        for (const studentId of studentIds) {
+          const cached = await StudentDatabaseService.getStudentById(studentId);
+          if (cached) {
+            existing.push(studentId);
+          }
+        }
+        
+        console.log(`[Import] Cache check: ${existing.length}/${studentIds.length} IDs already exist`);
+      } catch (cacheError) {
+        console.warn("[Import] Cache check failed, falling back to Firestore:", cacheError);
+      }
+
+      // Also check Firestore directly (for consistency and to catch any cache misses)
+      const studentsRef = collection(db, "students");
+      const firestoreExisting: string[] = [];
 
       // Query in batches of 10 (Firestore 'in' query limit)
       for (let i = 0; i < studentIds.length; i += 10) {
@@ -384,11 +408,19 @@ export class StudentImportService {
 
         querySnapshot.forEach((doc: any) => {
           const data = doc.data();
-          existing.push(data.student_id);
+          if (data.student_id && !firestoreExisting.includes(data.student_id)) {
+            firestoreExisting.push(data.student_id);
+          }
         });
       }
 
-      return existing;
+      console.log(`[Import] Firestore check: ${firestoreExisting.length}/${studentIds.length} IDs already exist`);
+
+      // Combine results from both sources (deduplicate)
+      const allExisting = [...new Set([...existing, ...firestoreExisting])];
+      console.log(`[Import] Total existing IDs: ${allExisting.length}`);
+
+      return allExisting;
     } catch (error) {
       console.error("[Import] Failed to check existing students:", error);
       return [];
@@ -541,29 +573,64 @@ export class StudentImportService {
       const duplicates = await this.checkForDuplicates(validRows);
       const duplicateCount = duplicates.size;
 
-      // Add duplicate errors
+      // Track duplicate IDs for better error reporting
+      const duplicateIdsInFile: string[] = [];
+      const duplicateIdsInDatabase: string[] = [];
+
+      // Add duplicate errors with detailed messages
       duplicates.forEach((rowNumbers, studentId) => {
+        const isExistingInDB = studentId.startsWith("existing_");
+        const cleanId = studentId.replace("existing_", "");
+
+        if (isExistingInDB) {
+          duplicateIdsInDatabase.push(cleanId);
+        } else {
+          duplicateIdsInFile.push(cleanId);
+        }
+
         rowNumbers.forEach((rowNumber) => {
           allErrors.push({
             rowNumber,
             field: "student_id",
-            value: studentId.replace("existing_", ""),
-            error: studentId.startsWith("existing_")
-              ? "Student ID already exists in database"
-              : "Duplicate student ID in import file",
+            value: cleanId,
+            error: isExistingInDB
+              ? `Student ID "${cleanId}" already exists in the database. This student will NOT be imported.`
+              : `Duplicate student ID "${cleanId}" found in multiple rows (${rowNumbers.join(", ")}). Only the first occurrence will be processed.`,
             severity: "error",
           });
         });
       });
 
+      // Log summary of duplicates found
+      if (duplicateIdsInFile.length > 0) {
+        console.warn(
+          `[Import] Duplicates within file (${duplicateIdsInFile.length}):`,
+          duplicateIdsInFile.join(", ")
+        );
+      }
+      if (duplicateIdsInDatabase.length > 0) {
+        console.warn(
+          `[Import] Already exist in database (${duplicateIdsInDatabase.length}):`,
+          duplicateIdsInDatabase.join(", ")
+        );
+      }
+
       onProgress?.(50);
 
       // Filter out rows with errors or duplicates
       const rowsToInsert = validRows.filter((row) => {
+        // Check if this row has any validation errors
+        const hasValidationError = allErrors.some(
+          (err) => err.rowNumber === row.rowNumber && err.severity === "error"
+        );
+        
+        // Check if this row has duplicate student ID
         const hasDuplicate = Array.from(duplicates.values()).some((nums) =>
           nums.includes(row.rowNumber),
         );
-        return !hasDuplicate;
+        
+        // Only insert if no errors and no duplicates
+        return !hasValidationError && !hasDuplicate;
       });
 
       // REQ 28: Batch insert valid rows
@@ -571,6 +638,13 @@ export class StudentImportService {
 
       if (rowsToInsert.length > 0) {
         successCount = await this.insertStudentsBatch(rowsToInsert, onProgress);
+        console.log(`[Import] ✓ Successfully imported ${successCount}/${totalRows} students`);
+        
+        if (duplicateCount > 0) {
+          console.log(`[Import] ⚠ Skipped ${totalRows - successCount} rows due to errors/duplicates`);
+        }
+      } else {
+        console.warn(`[Import] ✗ No students imported - all ${totalRows} rows had errors or were duplicates`);
       }
 
       onProgress?.(100);
@@ -591,6 +665,19 @@ export class StudentImportService {
         processedRows: rowsToInsert,
         sessionId,
         timestamp,
+        // Add summary information for better error reporting
+        summary: {
+          duplicatesInFile: Array.from(new Set(
+            Array.from(duplicates.entries())
+              .filter(([key]) => !key.startsWith("existing_"))
+              .map(([key]) => key)
+          )),
+          duplicatesInDatabase: Array.from(new Set(
+            Array.from(duplicates.entries())
+              .filter(([key]) => key.startsWith("existing_"))
+              .map(([key]) => key.replace("existing_", ""))
+          )),
+        },
       };
 
       // REQ 30: Log import session
@@ -609,6 +696,7 @@ export class StudentImportService {
 
   /**
    * REQ 28, 32: Insert students in batches (optimized for large files)
+   * Stores in both Firestore and local storage cache
    */
   private static async insertStudentsBatch(
     rows: ImportRow[],
@@ -623,6 +711,7 @@ export class StudentImportService {
       let insertedCount = 0;
       const batchSize = IMPORT_CONFIG.BATCH_SIZE;
       const totalBatches = Math.ceil(rows.length / batchSize);
+      const allInsertedStudents: any[] = [];
 
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
@@ -631,6 +720,7 @@ export class StudentImportService {
         // Use Firestore batch write
         const firestoreBatch = writeBatch(db);
         const studentsRef = collection(db, "students");
+        const batchStudents: any[] = [];
 
         batch.forEach((row) => {
           const studentData: any = {
@@ -652,9 +742,16 @@ export class StudentImportService {
 
           const newDocRef = doc(studentsRef); // auto-generate Firestore doc ID
           firestoreBatch.set(newDocRef, studentData);
+          
+          // Store with generated doc ID for cache
+          batchStudents.push({
+            ...studentData,
+            id: newDocRef.id,
+          });
         });
 
         await firestoreBatch.commit();
+        allInsertedStudents.push(...batchStudents);
         insertedCount += batch.length;
 
         // Update progress
@@ -662,16 +759,27 @@ export class StudentImportService {
         onProgress?.(Math.round(progress));
       }
 
-      // REQ 30: Sync offline cache after import
+      // Store in local storage cache and Firestore
       try {
         const { StudentDatabaseService } =
           await import("@/services/studentDatabaseService");
-        await StudentDatabaseService.downloadStudentDatabase();
+        
+        // Add students directly to local cache instead of re-downloading everything
+        await StudentDatabaseService.addStudentsToCache(allInsertedStudents);
+        console.log(`[Import] Added ${allInsertedStudents.length} students to local cache`);
       } catch (cacheError) {
         console.warn(
-          "[Import] Offline cache sync failed (non-critical):",
+          "[Import] Local cache update failed (non-critical):",
           cacheError,
         );
+        // Fallback: Download entire database if direct cache update fails
+        try {
+          const { StudentDatabaseService } =
+            await import("@/services/studentDatabaseService");
+          await StudentDatabaseService.downloadStudentDatabase();
+        } catch (fallbackError) {
+          console.warn("[Import] Fallback cache sync also failed:", fallbackError);
+        }
       }
 
       return insertedCount;

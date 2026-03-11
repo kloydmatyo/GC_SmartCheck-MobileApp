@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as XLSX from 'xlsx';
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import {
     ActivityIndicator,
@@ -12,6 +13,7 @@ import {
     DeviceEventEmitter,
     FlatList,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -50,7 +52,17 @@ export default function ClassDetailsScreen() {
   } | null>(null);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [exporting, setExporting] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    visible: boolean;
+    message: string;
+  }>({ visible: false, message: "" });
+  const [importErrors, setImportErrors] = useState<{
+    visible: boolean;
+    successCount: number;
+    errors: Array<{ student_id: string; error: string }>;
+  }>({ visible: false, successCount: 0, errors: [] });
 
   // Student form state
   const [studentForm, setStudentForm] = useState({
@@ -223,11 +235,31 @@ export default function ClassDetailsScreen() {
       loadClassData(); // Reload class data
     } catch (error) {
       console.error("Error adding student:", error);
-      Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to add student",
-      });
+      
+      // Extract clean message without error prefixes
+      let cleanMessage = "Failed to add student";
+      if (error instanceof Error) {
+        cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
+      }
+      
+      // Check if it's a duplicate error
+      const isDuplicate = cleanMessage.toLowerCase().includes('already exists');
+      
+      if (isDuplicate) {
+        // Show modal for duplicate warnings
+        setDuplicateWarning({
+          visible: true,
+          message: cleanMessage,
+        });
+      } else {
+        // Show toast for other errors
+        Toast.show({
+          type: "error",
+          text1: "Cannot Add Student",
+          text2: cleanMessage,
+          visibilityTime: 4000,
+        });
+      }
     } finally {
       setAddingStudent(false);
     }
@@ -236,6 +268,127 @@ export default function ClassDetailsScreen() {
   const handleRemoveStudent = (studentId: string, studentName: string) => {
     setStudentToRemove({ studentId, studentName });
     setRemoveStudentConfirmVisible(true);
+  };
+
+  const handleExportStudents = async () => {
+    if (!classData || classData.students.length === 0) {
+      Toast.show({
+        type: 'info',
+        text1: 'No Students',
+        text2: 'There are no students to export',
+      });
+      return;
+    }
+
+    try {
+      setExporting(true);
+
+      // Prepare data for Excel
+      const exportData = classData.students.map((student, index) => ({
+        'No.': index + 1,
+        'Student ID': student.student_id,
+        'First Name': student.first_name,
+        'Last Name': student.last_name,
+        'Email': student.email || '',
+      }));
+
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
+
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 5 },  // No.
+        { wch: 15 }, // Student ID
+        { wch: 20 }, // First Name
+        { wch: 20 }, // Last Name
+        { wch: 30 }, // Email
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Students');
+
+      // Generate filename
+      const className = classData.class_name.replace(/[^a-z0-9]/gi, '_');
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `${className}_Students_${timestamp}.xlsx`;
+
+      // Write file
+      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+
+      // Save file
+      if (Platform.OS === 'web') {
+        // Web: trigger download
+        const blob = await (await fetch(`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${wbout}`)).blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Export Successful',
+          text2: `Downloaded ${classData.students.length} students`,
+        });
+      } else {
+        // Native: Let user choose save location
+        try {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          
+          if (!permissions.granted) {
+            Toast.show({
+              type: 'error',
+              text1: 'Permission Denied',
+              text2: 'Storage access is required to save the file',
+            });
+            return;
+          }
+
+          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            filename,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          );
+
+          await FileSystem.writeAsStringAsync(fileUri, wbout, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          Toast.show({
+            type: 'success',
+            text1: 'File Downloaded',
+            text2: `${classData.students.length} students saved to ${filename}`,
+            visibilityTime: 4000,
+          });
+        } catch (permError) {
+          // Fallback to app directory if permission issues
+          console.log('Permission error, falling back to app directory:', permError);
+          const fileUri = `${FileSystem.documentDirectory}${filename}`;
+          await FileSystem.writeAsStringAsync(fileUri, wbout, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          Toast.show({
+            type: 'success',
+            text1: 'File Saved',
+            text2: Platform.OS === 'ios' 
+              ? `Open Files app > On My ${Platform.OS === 'ios' ? 'iPhone/iPad' : 'Device'} > ${filename}`
+              : `File saved to app folder: ${filename}`,
+            visibilityTime: 5000,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Export Failed',
+        text2: 'Could not export student list',
+      });
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleBulkImport = async () => {
@@ -344,12 +497,19 @@ export default function ClassDetailsScreen() {
           successCount++;
         } catch (error) {
           console.error('Error adding student to class:', error);
+          
+          // Extract clean message
+          let cleanMessage = 'Failed to add student';
+          if (error instanceof Error) {
+            cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
+          }
+          
           errors.push({
             rowNumber: 0,
             field: 'student_id',
             value: student.student_id,
-            error: error instanceof Error ? error.message : 'Failed to add student',
-            severity: 'error' as const,
+            error: cleanMessage,
+            severity: cleanMessage.toLowerCase().includes('already exists') ? 'warning' as const : 'error' as const,
           });
         }
       }
@@ -360,13 +520,14 @@ export default function ClassDetailsScreen() {
       if (errors.length > 0) {
         console.log('[Import] Errors:', JSON.stringify(errors, null, 2));
         
-        Toast.show({
-          type: successCount > 0 ? 'warning' : 'error',
-          text1: successCount > 0 ? 'Import Completed with Errors' : 'Import Failed',
-          text2: successCount > 0 
-            ? `${successCount} students added, ${errors.length} errors`
-            : `${errors.length} errors found`,
-          visibilityTime: 5000,
+        // Show modal with detailed errors
+        setImportErrors({
+          visible: true,
+          successCount,
+          errors: errors.map(e => ({
+            student_id: e.value,
+            error: e.error,
+          })),
         });
       } else {
         Toast.show({
@@ -472,7 +633,27 @@ export default function ClassDetailsScreen() {
           )}
         </View>
       </View>
-      {showClassDetails ? (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {!showClassDetails && (
+          <View
+            style={[
+              styles.scoreBadge,
+              {
+                backgroundColor: colors.scoreBadgeBg,
+                borderColor: colors.scoreBadgeBorder,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.scoreText,
+                { color: getScoreColor(getScore(item.student_id)) },
+              ]}
+            >
+              {getScore(item.student_id)}/50
+            </Text>
+          </View>
+        )}
         <TouchableOpacity
           onPress={() =>
             handleRemoveStudent(
@@ -483,26 +664,7 @@ export default function ClassDetailsScreen() {
         >
           <Ionicons name="trash-outline" size={20} color={COLORS.error} />
         </TouchableOpacity>
-      ) : (
-        <View
-          style={[
-            styles.scoreBadge,
-            {
-              backgroundColor: colors.scoreBadgeBg,
-              borderColor: colors.scoreBadgeBorder,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.scoreText,
-              { color: getScoreColor(getScore(item.student_id)) },
-            ]}
-          >
-            {getScore(item.student_id)}/50
-          </Text>
-        </View>
-      )}
+      </View>
     </View>
   );
 
@@ -760,6 +922,17 @@ export default function ClassDetailsScreen() {
             {activeTab === "students" && (
               <View style={styles.headerActions}>
                 <TouchableOpacity
+                  style={styles.exportButton}
+                  onPress={handleExportStudents}
+                  disabled={exporting || classData.students.length === 0}
+                >
+                  {exporting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Ionicons name="download-outline" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={styles.importButton}
                   onPress={handleBulkImport}
                   disabled={importing}
@@ -798,7 +971,7 @@ export default function ClassDetailsScreen() {
             <FlatList
               data={filteredStudents}
               renderItem={renderStudentItem}
-              keyExtractor={(item) => item.student_id}
+              keyExtractor={(item, index) => item.id || item.student_id || `student-${index}`}
               scrollEnabled={false}
             />
           ) : filteredQuizzes.length === 0 ? (
@@ -1077,6 +1250,69 @@ export default function ClassDetailsScreen() {
         </View>
       </Modal>
 
+      {/* Duplicate Student Warning Modal */}
+      <ConfirmationModal
+        visible={duplicateWarning.visible}
+        title="Duplicate Student ID"
+        message={duplicateWarning.message}
+        confirmText="OK"
+        onConfirm={() => {
+          setDuplicateWarning({ visible: false, message: "" });
+        }}
+      />
+
+      {/* Import Errors Modal */}
+      <Modal
+        visible={importErrors.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setImportErrors({ visible: false, successCount: 0, errors: [] });
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.importErrorModal, { backgroundColor: colors.surface }]}>
+            <View style={styles.importErrorHeader}>
+              <Ionicons 
+                name={importErrors.successCount > 0 ? "warning" : "close-circle"} 
+                size={48} 
+                color={importErrors.successCount > 0 ? "#ff9800" : "#e74c3c"} 
+              />
+              <Text style={[styles.importErrorTitle, { color: colors.text }]}>
+                {importErrors.successCount > 0 ? "Import Completed with Issues" : "Import Failed"}
+              </Text>
+              <Text style={[styles.importErrorSubtitle, { color: colors.textSecondary }]}>
+                {importErrors.successCount > 0 
+                  ? `${importErrors.successCount} students added, ${importErrors.errors.length} skipped`
+                  : `${importErrors.errors.length} errors found`}
+              </Text>
+            </View>
+
+            <ScrollView style={styles.importErrorList}>
+              {importErrors.errors.map((err, index) => (
+                <View key={index} style={[styles.importErrorItem, { borderLeftColor: "#ff9800" }]}>
+                  <Text style={[styles.importErrorId, { color: colors.text }]}>
+                    {err.student_id}
+                  </Text>
+                  <Text style={[styles.importErrorMessage, { color: colors.textSecondary }]}>
+                    {err.error}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.importErrorButton, { backgroundColor: COLORS.primary }]}
+              onPress={() => {
+                setImportErrors({ visible: false, successCount: 0, errors: [] });
+              }}
+            >
+              <Text style={styles.importErrorButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <ConfirmationModal
         visible={removeStudentConfirmVisible}
         title="Remove Student"
@@ -1105,10 +1341,16 @@ export default function ClassDetailsScreen() {
             loadClassData();
           } catch (error) {
             console.error("Error removing student:", error);
+            
+            let cleanMessage = "Failed to remove student";
+            if (error instanceof Error) {
+              cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
+            }
+            
             Toast.show({
               type: "error",
-              text1: "Error",
-              text2: "Failed to remove student",
+              text1: "Cannot Remove Student",
+              text2: cleanMessage,
             });
           } finally {
             setStudentToRemove(null);
@@ -1306,6 +1548,14 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: "row",
     gap: 8,
+  },
+  exportButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#1e6b4f",
+    alignItems: "center",
+    justifyContent: "center",
   },
   importButton: {
     width: 28,
@@ -1620,6 +1870,63 @@ const styles = StyleSheet.create({
   addButtonText: {
     fontSize: 15,
     color: COLORS.white,
+    fontWeight: "700",
+  },
+  importErrorModal: {
+    margin: 20,
+    borderRadius: RADIUS.medium,
+    maxHeight: "80%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  importErrorHeader: {
+    alignItems: "center",
+    padding: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.1)",
+  },
+  importErrorTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  importErrorSubtitle: {
+    fontSize: 14,
+    textAlign: "center",
+  },
+  importErrorList: {
+    maxHeight: 300,
+    padding: 16,
+  },
+  importErrorItem: {
+    padding: 12,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    backgroundColor: "rgba(255, 152, 0, 0.05)",
+    borderRadius: 4,
+  },
+  importErrorId: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  importErrorMessage: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  importErrorButton: {
+    margin: 16,
+    padding: 14,
+    borderRadius: RADIUS.small,
+    alignItems: "center",
+  },
+  importErrorButtonText: {
+    color: COLORS.white,
+    fontSize: 15,
     fontWeight: "700",
   },
 });

@@ -174,17 +174,46 @@ export function StudentImportModal({
         );
         onImportComplete(importResult);
       } else {
+        // Build detailed message about what went wrong
+        let message = `Successfully imported: ${importResult.successCount} out of ${importResult.totalRows}\n\n`;
+        
+        if (importResult.duplicateCount > 0) {
+          const summary = importResult.summary;
+          if (summary) {
+            if (summary.duplicatesInDatabase?.length > 0) {
+              message += `❌ Already in database (${summary.duplicatesInDatabase.length}): ${summary.duplicatesInDatabase.slice(0, 5).join(", ")}${summary.duplicatesInDatabase.length > 5 ? '...' : ''}\n\n`;
+            }
+            if (summary.duplicatesInFile?.length > 0) {
+              message += `⚠️ Duplicates in file (${summary.duplicatesInFile.length}): ${summary.duplicatesInFile.slice(0, 5).join(", ")}${summary.duplicatesInFile.length > 5 ? '...' : ''}\n\n`;
+            }
+          } else {
+            message += `Duplicates skipped: ${importResult.duplicateCount}\n\n`;
+          }
+          message += `These students were NOT imported to prevent duplicate records.\n\n`;
+        }
+        
+        if (importResult.warningCount > 0) {
+          message += `Warnings: ${importResult.warningCount}\n`;
+        }
+        
         Alert.alert(
-          "Import Completed with Errors",
-          `Imported: ${importResult.successCount}\nErrors: ${importResult.errorCount}\nWarnings: ${importResult.warningCount}`,
+          importResult.successCount > 0 ? "Import Completed with Issues" : "Import Failed",
+          message.trim(),
           [{ text: "View Details" }],
         );
       }
     } catch (error) {
       console.error("Import error:", error);
+      
+      // Extract clean message
+      let cleanMessage = "An unexpected error occurred while importing";
+      if (error instanceof Error) {
+        cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
+      }
+      
       Alert.alert(
         "Import Failed",
-        error instanceof Error ? error.message : "Unknown error",
+        cleanMessage,
       );
     } finally {
       setIsProcessing(false);
