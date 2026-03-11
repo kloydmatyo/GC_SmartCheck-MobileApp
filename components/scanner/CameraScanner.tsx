@@ -37,26 +37,21 @@ export default function CameraScanner({
     setFacing((current) => (current === "back" ? "front" : "back"));
   };
 
-  // Calculate frame dimensions based on screen size and question count
+  // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
-    const maxWidth = screenWidth * 0.93;
-    const maxHeight = screenHeight * 0.5; // Slightly enlarged middle ground to avoid overlap
-
+    // Custom dimensions for each template to fit phone screen
+    // These dimensions create the green guide frame overlay
     if (questionCount <= 20) {
-      // 20-item: aspect ~0.707
-      const h = Math.min(maxHeight, maxWidth / 0.707);
-      const w = h * 0.707;
-      return { width: w, height: h };
+      // 20-item: 105mm × 148.5mm (aspect ~0.707)
+      return { width: 300, height: 400 };
     } else if (questionCount <= 50) {
-      // 50-item: aspect ~0.354 (but we make it wider for mobile display)
-      const h = Math.min(maxHeight, maxWidth / 0.45);
-      const w = h * 0.45;
-      return { width: w, height: h };
+      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
+      return { width: 215, height: 500 };
     } else {
-      // 100-item: aspect ~0.707
-      const h = Math.min(maxHeight, maxWidth / 0.707);
-      const w = h * 0.707;
-      return { width: w, height: h };
+      // 100-item: 210mm × 297mm (aspect ~0.707, A4 paper)
+      // The paper is A4 size, nearly same aspect as 20-item but larger
+      // Use 85% of screen width to allow some margin
+      return { width: 320, height: 450 };
     }
   };
 
@@ -123,53 +118,74 @@ export default function CameraScanner({
         facing={facing}
         enableTorch={torch}
       >
-        {/* Top Space for Selectors (matches ScannerScreen layout) */}
-        <View style={styles.topSpace} />
+        {/* Precise Mask (Dims everything outside the border tightly) */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {/* Top Mask - flex: 1 for perfect vertical centering */}
+          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
 
-        {/* Middle Area with Scan Frame */}
-        <View style={styles.middleArea}>
-          <View
-            style={[
-              styles.scanFrame,
-              {
-                width: frameDimensions.width,
-                height: frameDimensions.height,
-              },
-            ]}
-          >
-            <View style={styles.frameContent}>
-              <Ionicons
-                name="camera-outline"
-                size={54}
-                color="#00FF7F"
-                style={{ opacity: 0.8 }}
-              />
-              <Text style={styles.frameText}>
-                Align the answer sheet within the{"\n"}frame
-              </Text>
-            </View>
+          <View style={{ flexDirection: 'row', height: frameDimensions.height }}>
+            {/* Left Side Mask */}
+            <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
 
-            {/* Corner Markers */}
-            <View style={[styles.corner, styles.topLeft]} />
-            <View style={[styles.corner, styles.topRight]} />
-            <View style={[styles.corner, styles.bottomLeft]} />
-            <View style={[styles.corner, styles.bottomRight]} />
+            {/* Transparent Center Area (Width matches frame) */}
+            <View style={{ width: frameDimensions.width, backgroundColor: 'transparent' }} />
+
+            {/* Right Side Mask */}
+            <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
           </View>
+
+          {/* Bottom Mask - flex: 1 for perfect vertical centering */}
+          <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)' }} />
         </View>
 
-        {/* Bottom Panel with Shutter */}
-        <View style={styles.bottomPanel}>
-          <TouchableOpacity
-            style={[styles.shutterButton, isProcessing && styles.disabledButton]}
-            onPress={takePicture}
-            disabled={isProcessing}
-          >
-            <View style={styles.shutterInner} />
-          </TouchableOpacity>
+        {/* UI Overlay Layer (Frame and Controls) */}
+        <View style={StyleSheet.absoluteFill}>
+          {/* Centered Frame Area (Matches Mask Flex above) */}
+          <View style={{ flex: 1 }} />
+          <View style={{ height: frameDimensions.height, alignItems: 'center', justifyContent: 'center' }}>
+            <View
+              style={[
+                styles.scanFrame,
+                {
+                  width: frameDimensions.width,
+                  height: frameDimensions.height,
+                },
+              ]}
+            >
+              <View style={styles.frameContent}>
+                <Ionicons
+                  name="camera-outline"
+                  size={54}
+                  color="#00FF7F"
+                />
+                <Text style={styles.frameText}>
+                  Align the answer sheet within the{"\n"}frame
+                </Text>
+              </View>
 
-          <Text style={styles.footerText}>
-            Supports ZipGrade-compatible sheets
-          </Text>
+              {/* Corner Markers */}
+              <View style={[styles.corner, styles.topLeft]} />
+              <View style={[styles.corner, styles.topRight]} />
+              <View style={[styles.corner, styles.bottomLeft]} />
+              <View style={[styles.corner, styles.bottomRight]} />
+            </View>
+          </View>
+          <View style={{ flex: 1 }} />
+
+          {/* Controls Panel (Absolute bottom) */}
+          <View style={styles.shutterContainer}>
+            <TouchableOpacity
+              style={[styles.shutterButton, isProcessing && styles.disabledButton]}
+              onPress={takePicture}
+              disabled={isProcessing}
+            >
+              <View style={styles.shutterInner} />
+            </TouchableOpacity>
+
+            <Text style={styles.footerText}>
+              Supports ZipGrade-compatible sheets
+            </Text>
+          </View>
         </View>
       </CameraView>
     </View>
@@ -184,21 +200,24 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
-  topSpace: {
-    height: Platform.OS === "android" ? 200 : 250, // Space for Header + Selectors
-    backgroundColor: "transparent",
-  },
-  middleArea: {
+  centerFrameContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "transparent",
+  },
+  shutterContainer: {
+    position: 'absolute',
+    bottom: 25,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
   },
   scanFrame: {
-    borderWidth: 1,
-    borderColor: "rgba(0, 255, 127, 0.4)",
+    borderWidth: 2,
+    borderColor: "#00FF7F",
     borderStyle: "dashed",
-    borderRadius: 20,
     backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
@@ -230,36 +249,31 @@ const styles = StyleSheet.create({
     left: -2,
     borderRightWidth: 0,
     borderBottomWidth: 0,
-    borderTopLeftRadius: 15,
   },
   topRight: {
     top: -2,
     right: -2,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
-    borderTopRightRadius: 15,
   },
   bottomLeft: {
     bottom: -2,
     left: -2,
     borderRightWidth: 0,
     borderTopWidth: 0,
-    borderBottomLeftRadius: 15,
   },
   bottomRight: {
     bottom: -2,
     right: -2,
     borderLeftWidth: 0,
     borderTopWidth: 0,
-    borderBottomRightRadius: 15,
   },
-  bottomPanel: {
-    height: 200, // Fixed height bottom area
+  bottomControls: {
+    width: '100%',
     alignItems: "center",
     justifyContent: "center",
-    gap: 15,
-    backgroundColor: "transparent",
-    paddingBottom: 30,
+    gap: 12,
+    paddingBottom: 20,
   },
   shutterButton: {
     width: 84,

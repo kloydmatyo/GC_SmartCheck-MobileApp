@@ -31,17 +31,20 @@ type ScannerState = "exam-select" | "camera" | "results";
 
 interface ScannerScreenProps {
   onClose: () => void;
-  sectionId?: string; // Section context for validation
+  initialClassId?: string;
+  initialExamId?: string;
   /**
    * value passed from the parent when a "quick scan" navigation occurs.
-   * changing this prop should reset the local scanner state so the user is
-   * shown the exam‑id entry screen rather than resuming whatever they were
-   * doing previously.
    */
   resetFlag?: string;
 }
 
-export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps) {
+export default function ScannerScreen({
+  onClose,
+  resetFlag,
+  initialClassId,
+  initialExamId,
+}: ScannerScreenProps) {
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
@@ -88,6 +91,14 @@ export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps
       try {
         const cls = await ClassService.getClassesByUser();
         setClassesList(cls);
+        
+        // Handle pre-selection if initialClassId is provided
+        if (initialClassId) {
+          const matched = cls.find(c => c.id === initialClassId);
+          if (matched) {
+            setSelectedClass(matched);
+          }
+        }
       } catch (error) {
         console.error("[ScannerScreen] failed loading classes", error);
       }
@@ -116,6 +127,14 @@ export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps
         const snap = await getDocs(examsQuery);
         const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         setExamsList(list);
+
+        // Handle pre-selection of exam if initialExamId is provided
+        if (initialExamId) {
+          const matched = list.find(ex => ex.id === initialExamId);
+          if (matched) {
+            setSelectedExam(matched);
+          }
+        }
       } catch (error) {
         console.error("[ScannerScreen] failed loading exams", error);
       }
@@ -457,15 +476,15 @@ export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps
         </View>
       )}
 
-      {/* ── Selectors Overlay (Class & Exam) ── */}
+      {/* ── Selectors Overlay (Class & Exam side-by-side) ── */}
       {currentState !== "results" && (
         <View style={styles.selectorsOverlay}>
           <TouchableOpacity
-            style={[styles.selectorField, { marginBottom: 12 }]}
+            style={styles.selectorField}
             onPress={() => setClassDropdownOpen(true)}
           >
-            <Text style={styles.selectorFieldText}>
-              {selectedClass?.class_name || "Select Class..."}
+            <Text style={styles.selectorFieldText} numberOfLines={1}>
+              {selectedClass?.class_name || "Class..."}
             </Text>
           </TouchableOpacity>
 
@@ -477,8 +496,8 @@ export default function ScannerScreen({ onClose, resetFlag }: ScannerScreenProps
             onPress={() => selectedClass && setExamDropdownOpen(true)}
             disabled={!selectedClass}
           >
-            <Text style={styles.selectorFieldText}>
-              {selectedExam?.title || "Select Exam..."}
+            <Text style={styles.selectorFieldText} numberOfLines={1}>
+              {selectedExam?.title || "Exam..."}
             </Text>
           </TouchableOpacity>
         </View>
@@ -763,19 +782,23 @@ const styles = StyleSheet.create({
   },
   selectorsOverlay: {
     position: "absolute",
-    top: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 60 : 100,
-    left: 20,
-    right: 20,
+    top: Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 60 : 105,
+    left: 16,
+    right: 16,
     zIndex: 90,
+    flexDirection: "row",
+    gap: 10,
   },
   selectorField: {
-    backgroundColor: "rgba(30, 30, 30, 0.7)",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    flex: 1,
+    backgroundColor: "rgba(30, 30, 30, 0.75)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderColor: "rgba(255, 255, 255, 0.15)",
     alignItems: "center",
+    justifyContent: "center",
   },
   selectorFieldDisabled: {
     opacity: 0.5,

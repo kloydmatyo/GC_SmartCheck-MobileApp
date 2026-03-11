@@ -691,12 +691,14 @@ export default function ClassDetailsScreen() {
           </View>
           <Text style={styles.scanTitle}>Ready to Scan</Text>
           <Text style={styles.scanDescription}>
-            Scan answer sheets for {classData?.class_name}. You&apos;ll select the exam
-            on the next screen.
+            Scan answer sheets for {classData?.class_name}. {examRows.length === 1 ? `This will use the "${examRows[0].title}" exam.` : "Select the exam on the next screen."}
           </Text>
           <TouchableOpacity
             style={styles.startScanButton}
-            onPress={() => router.push("/(tabs)/scanner")}
+            onPress={() => {
+              const examIdParam = examRows.length === 1 ? `&examId=${examRows[0].id}` : "";
+              router.push(`/(tabs)/scanner?classId=${classId}${examIdParam}`);
+            }}
             activeOpacity={0.9}
           >
             <Text style={styles.startScanText}>Start Scanning</Text>
@@ -938,6 +940,15 @@ export default function ClassDetailsScreen() {
                 <Ionicons name="close" size={18} color="#98A2B3" />
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                closeExamMenu();
+                router.push(`/(tabs)/scanner?classId=${classId}&examId=${selectedExam?.id}`);
+              }}
+            >
+              <Text style={styles.menuItemText}>Scan answer sheet</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
               <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
             </TouchableOpacity>

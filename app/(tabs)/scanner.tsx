@@ -4,20 +4,26 @@ import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function ScannerTab() {
   const router = useRouter();
-  const { quick } = useLocalSearchParams<{ quick?: string }>();
+  const { quick, classId, examId } = useLocalSearchParams<{ 
+    quick?: string; 
+    classId?: string; 
+    examId?: string; 
+  }>();
   const [scannerKey, setScannerKey] = useState(() => Date.now());
 
   useEffect(() => {
-    if (quick) {
+    if (quick || classId || examId) {
       setScannerKey(Date.now());
     }
-  }, [quick]);
+  }, [quick, classId, examId]);
 
   return (
     <ScannerScreen
       key={scannerKey}
       onClose={() => router.push("/")}
       resetFlag={quick}
+      initialClassId={classId}
+      initialExamId={examId}
     />
   );
 }
