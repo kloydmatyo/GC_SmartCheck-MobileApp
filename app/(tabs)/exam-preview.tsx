@@ -596,6 +596,31 @@ export default function ExamPreviewScreen() {
             <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
               {exam.totalQuestions} Questions • Multiple Choice
             </Text>
+            <View style={styles.infoRow}>
+              <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>Exam Code</Text>
+                <View style={styles.codeContainer}>
+                  <Text style={styles.examCode}>
+                    {exam.metadata.examCode || "Not available"}
+                  </Text>
+                  {exam.metadata.examCode ? (
+                    <TouchableOpacity
+                      style={styles.copyButton}
+                      onPress={() => {
+                        Clipboard.setString(exam.metadata.examCode);
+                        Toast.show({
+                          type: "success",
+                          text1: "Copied",
+                          text2: "Exam code copied to clipboard",
+                        });
+                      }}
+                    >
+                      <Ionicons name="copy-outline" size={18} color="#20BE7B" />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            </View>
             {renderAnswerKeyGrid()}
           </View>
         ) : (

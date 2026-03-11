@@ -20,7 +20,17 @@ export default function ScannerTab() {
   return (
     <ScannerScreen
       key={scannerKey}
-      onClose={() => router.push("/")}
+      onClose={() => {
+        if (router.canGoBack()) {
+          router.back();
+          return;
+        }
+        if (classId) {
+          router.replace(`/(tabs)/class-details?classId=${classId}&tab=scan`);
+          return;
+        }
+        router.replace("/(tabs)/index");
+      }}
       resetFlag={quick}
       initialClassId={classId}
       initialExamId={examId}

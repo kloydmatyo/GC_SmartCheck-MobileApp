@@ -475,6 +475,15 @@ export default function CreateQuizScreen() {
             </Text>
           </View>
         </View>
+
+        <View style={styles.section}>
+          <View style={styles.inlineInfoBox}>
+            <Text style={styles.inlineInfoText}>
+              After you create the exam, the exam code will appear on the
+              Answer Key tab.
+            </Text>
+          </View>
+        </View>
       </ScrollView>
 
       <View style={styles.lightFooter}>
