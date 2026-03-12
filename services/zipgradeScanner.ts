@@ -1417,22 +1417,29 @@ export class ZipgradeScanner {
         const idRegion =
           detectedQ === 20
             ? { yMin: 0.2, yMax: 0.37, numDigits: 10 }
-            : { yMin: 0.09, yMax: 0.18, numDigits: 10 };
+            // 50q: expand yMax to 0.20 to capture all 10 digit rows
+            // (9%-18% is the declared region; a small buffer ensures the last row is included)
+            : { yMin: 0.09, yMax: 0.20, numDigits: 10 };
 
         // Fixed row-spacing based on the physical ZipGrade bubble pitch.
         //   20q: (0.32 - 0.20) × paperH / 9  ≈ 45.7 px per row
         //   50q: (0.18 - 0.09) × paperH / 9  ≈ 34.3 px per row
+        //        10 digit rows occupy 9 gaps, so divide by 9 is correct.
         const idRowSpacing =
           detectedQ === 20
-            ? ((0.32 - 0.2) * paperH) / 9 // ≈ 45.7 px
-            : ((0.18 - 0.09) * paperH) / 9; // ≈ 34.3 px
+            ? ((0.32 - 0.2) * paperH) / 9  // ≈ 45.7 px
+            : ((0.18 - 0.09) * paperH) / 9; // ≈ 34.3 px for 50q
 
         // ── Row spacing and corrected start position ────────────────────────
-        // Empirically verified (20q): digit rows 0-9 begin 3 row-spacings below
-        // the box top. The header/border area occupies ~3 row heights.
-        // Row 0 lands at ≈ 823 px; row 2 at ≈ 914 px (matches filled-bubble data).
-        // The 50q offset has not been re-calibrated; keep at 2.0 until verified.
-        const rowHeaderOffsetFactor = detectedQ === 20 ? 3.0 : 2.0;
+        // 20q: digit rows 0-9 begin ~3 row-spacings below the box top.
+        //      Header/border area occupies ~3 row heights.
+        //      Row 0 lands at ≈ 823 px; row 2 at ≈ 914 px (calibrated).
+        //
+        // 50q: The student ID section is narrower (9%-18% = 9% of paper height).
+        //      The section label + box border takes ~1.5 row heights.
+        //      Factor of 1.5 places row 0 at: 9% + 1.5 × (9%/9) = 9% + 1.5% = 10.5%
+        //      which aligns with the first bubble row inside the ID border frame.
+        const rowHeaderOffsetFactor = detectedQ === 20 ? 3.0 : 1.5;
         const idRowStart =
           idRegion.yMin * paperH + rowHeaderOffsetFactor * idRowSpacing;
         const digitYPositions = Array.from(
@@ -1446,12 +1453,17 @@ export class ZipgradeScanner {
         // to find the column centroids.
         //
         // Filter bubbles in the ID region
+        // For 20q the ID section is confined to the left half (0.15–0.55).
+        // For 50q the 10-column ID grid spans the full sheet width (~0.10–0.90).
+        const idXMin = detectedQ === 20 ? 0.15 : 0.10;
+        const idXMax = detectedQ === 20 ? 0.55 : 0.90;
+
         const idBubbles = bubbles.filter(
           (b) =>
             b.y >= idRegion.yMin * paperH &&
             b.y <= idRegion.yMax * paperH &&
-            b.x >= 0.15 * paperW &&
-            b.x <= 0.55 * paperW, // ID section is in left half only
+            b.x >= idXMin * paperW &&
+            b.x <= idXMax * paperW,
         );
         
         console.log(
@@ -1516,23 +1528,23 @@ export class ZipgradeScanner {
               })
               .sort((a, b) => a - b);
             
-            if (answerColCentroids.length >= 5) {
-              // ID columns are narrower: they fit within the first 3 answer columns
-              // Empirically: ID section spans ~60% of answer section width
+            if (answerColCentroids.length >= 5 && detectedQ === 20) {
+              // 20q: ID columns span ~60% of the answer section width
               const answerSpan = answerColCentroids[4] - answerColCentroids[0];
               const idSpan = answerSpan * 0.6;
               const idColSpacing = idSpan / 9;
               const idFirstCol = answerColCentroids[0];
-              
+
               finalColCentroids = Array.from(
                 { length: 10 },
                 (_, i) => idFirstCol + i * idColSpacing,
               );
             } else {
-              // Last resort fallback
-              const leftRegionWidth = (leftRegion.xMax - leftRegion.xMin) * paperW;
-              const colSpacing = (leftRegionWidth * 0.6) / 9;
-              const firstColX = leftRegion.xMin * paperW;
+              // 50q (or 20q without enough answer cols): generate columns evenly
+              // across the full ID section X range (idXMin–idXMax)
+              const firstColX = idXMin * paperW;
+              const lastColX = idXMax * paperW;
+              const colSpacing = (lastColX - firstColX) / 9;
               finalColCentroids = Array.from(
                 { length: 10 },
                 (_, i) => firstColX + i * colSpacing,
@@ -1563,20 +1575,23 @@ export class ZipgradeScanner {
             })
             .sort((a, b) => a - b);
           
-          if (answerColCentroids.length >= 5) {
+          if (answerColCentroids.length >= 5 && detectedQ === 20) {
+            // 20q: ID columns span ~60% of the answer section width
             const answerSpan = answerColCentroids[4] - answerColCentroids[0];
             const idSpan = answerSpan * 0.6;
             const idColSpacing = idSpan / 9;
             const idFirstCol = answerColCentroids[0];
-            
+
             finalColCentroids = Array.from(
               { length: 10 },
               (_, i) => idFirstCol + i * idColSpacing,
             );
           } else {
-            const leftRegionWidth = (leftRegion.xMax - leftRegion.xMin) * paperW;
-            const colSpacing = (leftRegionWidth * 0.6) / 9;
-            const firstColX = leftRegion.xMin * paperW;
+            // 50q (or 20q without enough answer cols): generate columns evenly
+            // across the full ID section X range (idXMin–idXMax)
+            const firstColX = idXMin * paperW;
+            const lastColX = idXMax * paperW;
+            const colSpacing = (lastColX - firstColX) / 9;
             finalColCentroids = Array.from(
               { length: 10 },
               (_, i) => firstColX + i * colSpacing,
