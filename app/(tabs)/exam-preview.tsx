@@ -1,15 +1,20 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ExamService as ExamApi } from "@/services/examService";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
-import { ResultsService, type UnifiedResultRow } from "@/services/resultsService";
-import ConfirmationModal from "@/components/common/ConfirmationModal";
-import { ExamService as ExamApi } from "@/services/examService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  ResultsService,
+  type UnifiedResultRow,
+} from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { deleteDoc, doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Clipboard,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -18,10 +23,8 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Clipboard,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 import { ExamPreviewData } from "../../types/exam";
 
@@ -106,17 +109,29 @@ export default function ExamPreviewScreen() {
     }, []),
   );
 
-  const colors = {
-    bg: "#FFFFFF",
-    headerBg: "#FFFFFF",
-    border: "#ECEEF2",
-    cardBg: "#FFFFFF",
-    cardSoft: "#F7F8FA",
-    title: "#1F2937",
-    text: "#9AA3B2",
-    icon: "#667085",
-    accent: "#20BE7B",
-  };
+  const colors = darkModeEnabled
+    ? {
+        bg: "#111815",
+        headerBg: "#1a2520",
+        border: "#34483f",
+        cardBg: "#1f2b26",
+        cardSoft: "#2a3a33",
+        title: "#e7f1eb",
+        text: "#b9c9c0",
+        icon: "#8fd1ad",
+        accent: "#9bd8b8",
+      }
+    : {
+        bg: "#eef1ef",
+        headerBg: "#3d5a3d",
+        border: "#2f4a38",
+        cardBg: "#3d5a3d",
+        cardSoft: "#2d4a2d",
+        title: "#e8f6ee",
+        text: "#b8d4b8",
+        icon: "#8fd1ad",
+        accent: "#8fd1ad",
+      };
 
   useEffect(() => {
     setExam(null);
@@ -159,10 +174,7 @@ export default function ExamPreviewScreen() {
       let liveLoadError: unknown = null;
 
       try {
-        const authorized = await ExamApi.isAuthorized(
-          currentUser.uid,
-          examId,
-        );
+        const authorized = await ExamApi.isAuthorized(currentUser.uid, examId);
         if (!mountedRef.current || requestId !== loadRequestRef.current) return;
         if (!authorized) {
           setError("You are not authorized to view this exam.");
@@ -239,16 +251,6 @@ export default function ExamPreviewScreen() {
       };
 
       setExam(examData);
-
-      try {
-        const resultRows = await ResultsService.getExamResults(examId);
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setExamResults(resultRows);
-      } catch (resultsError) {
-        console.warn("Failed to load exam results:", resultsError);
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setExamResults([]);
-      }
     } catch (err) {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setError("Failed to load exam data. Please try again.");
@@ -349,10 +351,7 @@ export default function ExamPreviewScreen() {
               const answer = resolvedAnswers[questionNum - 1] || "";
               const hasAnswer = answer && answer.trim() !== "";
               return (
-                <View
-                  key={questionNum}
-                  style={styles.answerKeyItem}
-                >
+                <View key={questionNum} style={styles.answerKeyItem}>
                   <Text style={styles.questionNumber}>{questionNum}</Text>
                   <View
                     style={[
@@ -360,7 +359,12 @@ export default function ExamPreviewScreen() {
                       !hasAnswer && styles.answerBubbleEmpty,
                     ]}
                   >
-                    <Text style={[styles.answerText, !hasAnswer && styles.answerTextEmpty]}>
+                    <Text
+                      style={[
+                        styles.answerText,
+                        !hasAnswer && styles.answerTextEmpty,
+                      ]}
+                    >
                       {hasAnswer ? answer : "?"}
                     </Text>
                   </View>
@@ -424,25 +428,46 @@ export default function ExamPreviewScreen() {
                 },
               ]}
             >
-              <View style={[styles.resultAvatar, { backgroundColor: scoreColors.badge }]}>
-                <Text style={[styles.resultAvatarText, { color: scoreColors.text }]}>
+              <View
+                style={[
+                  styles.resultAvatar,
+                  { backgroundColor: scoreColors.badge },
+                ]}
+              >
+                <Text
+                  style={[styles.resultAvatarText, { color: scoreColors.text }]}
+                >
                   {initials || "?"}
                 </Text>
               </View>
 
               <View style={styles.resultCardBody}>
-                <Text style={styles.resultStudentName}>{result.studentName}</Text>
+                <Text style={styles.resultStudentName}>
+                  {result.studentName}
+                </Text>
                 <Text style={styles.resultStudentMeta}>
                   ID: {result.studentId || "N/A"}
                 </Text>
               </View>
 
               <View style={styles.resultScoreWrap}>
-                <Text style={[styles.resultPercentage, { color: scoreColors.text }]}>
+                <Text
+                  style={[styles.resultPercentage, { color: scoreColors.text }]}
+                >
                   {result.percentage}%
                 </Text>
-                <View style={[styles.resultCorrectBadge, { backgroundColor: scoreColors.badge }]}>
-                  <Text style={[styles.resultCorrectText, { color: scoreColors.text }]}>
+                <View
+                  style={[
+                    styles.resultCorrectBadge,
+                    { backgroundColor: scoreColors.badge },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.resultCorrectText,
+                      { color: scoreColors.text },
+                    ]}
+                  >
                     {result.correctLabel}
                   </Text>
                 </View>
@@ -458,7 +483,9 @@ export default function ExamPreviewScreen() {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color="#00a550" />
-        <Text style={[styles.loadingText, { color: colors.text }]}>Loading exam data...</Text>
+        <Text style={[styles.loadingText, { color: colors.text }]}>
+          Loading exam data...
+        </Text>
       </View>
     );
   }
@@ -519,9 +546,17 @@ export default function ExamPreviewScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.tabSwitcher, { backgroundColor: "#FFFFFF", borderBottomColor: colors.border }]}>
+      <View
+        style={[
+          styles.tabSwitcher,
+          { backgroundColor: "#FFFFFF", borderBottomColor: colors.border },
+        ]}
+      >
         <TouchableOpacity
-          style={[styles.tabButton, activeTab === "answerKey" && styles.tabButtonActive]}
+          style={[
+            styles.tabButton,
+            activeTab === "answerKey" && styles.tabButtonActive,
+          ]}
           onPress={() => setActiveTab("answerKey")}
         >
           <Text
@@ -535,7 +570,10 @@ export default function ExamPreviewScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tabButton, activeTab === "results" && styles.tabButtonActive]}
+          style={[
+            styles.tabButton,
+            activeTab === "results" && styles.tabButtonActive,
+          ]}
           onPress={() => setActiveTab("results")}
         >
           <Text
@@ -563,7 +601,9 @@ export default function ExamPreviewScreen() {
             ]}
           >
             <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: colors.title }]}>Answer Key</Text>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>
+                Answer Key
+              </Text>
               {exam.metadata.status === "Draft" ? (
                 <TouchableOpacity
                   style={styles.inlineEditButton}
@@ -630,7 +670,9 @@ export default function ExamPreviewScreen() {
               { backgroundColor: colors.cardBg, borderColor: colors.border },
             ]}
           >
-            <Text style={[styles.sectionTitle, { color: colors.title }]}>Results</Text>
+            <Text style={[styles.sectionTitle, { color: colors.title }]}>
+              Results
+            </Text>
             {renderResultsList()}
           </View>
         )}
@@ -760,7 +802,6 @@ export default function ExamPreviewScreen() {
       />
 
       <Toast />
-
     </SafeAreaView>
   );
 }

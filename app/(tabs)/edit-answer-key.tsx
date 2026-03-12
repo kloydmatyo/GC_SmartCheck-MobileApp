@@ -1,24 +1,20 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
+import { db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import { auth, db } from "@/config/firebase";
 import { NetworkService } from "@/services/networkService";
-import { OfflineStorageService } from "@/services/offlineStorageService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import * as Sharing from "expo-sharing";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import * as Sharing from "expo-sharing";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   query,
-  runTransaction,
-  serverTimestamp,
   where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
@@ -39,14 +35,20 @@ interface QuestionAnswer {
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ examId?: string; classId?: string; tab?: string }>();
+  const params = useLocalSearchParams<{
+    examId?: string;
+    classId?: string;
+    tab?: string;
+  }>();
   const examId = params.examId;
   const classId = params.classId;
   const returnTab = params.tab || "exams";
 
   const goBack = () =>
     classId
-      ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=${returnTab}`)
+      ? router.replace(
+          `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
+        )
       : router.replace("/(tabs)/quizzes");
 
   const [loading, setLoading] = useState(true);
@@ -161,7 +163,14 @@ export default function EditAnswerKeyScreen() {
       unsubscribe();
       unsubscribeRef.current = null;
     };
-  }, [answerKeyId, isOffline, saving, hasLocalChanges, answerKeyVersion, answers.length]);
+  }, [
+    answerKeyId,
+    isOffline,
+    saving,
+    hasLocalChanges,
+    answerKeyVersion,
+    answers.length,
+  ]);
 
   const parseAnswersFromAnswerKey = (
     data: Record<string, any>,
@@ -348,6 +357,9 @@ export default function EditAnswerKeyScreen() {
       setRemoteVersion(Number(offlineExam.version ?? 1));
       setConflictDetected(false);
       setHasLocalChanges(false);
+
+      const online = await NetworkService.isOnline();
+      setIsOffline(!online);
     } catch (error) {
       console.error("Error loading answer key:", error);
       setStatusModal({
@@ -374,7 +386,6 @@ export default function EditAnswerKeyScreen() {
     try {
       setSaving(true);
 
-      // Check for incomplete answers (warning, not blocking)
       const emptyAnswers = answers.filter((a) => !a.answer);
       if (emptyAnswers.length > 0) {
         const shouldContinue = await new Promise<boolean>((resolve) => {
@@ -389,7 +400,6 @@ export default function EditAnswerKeyScreen() {
         }
       }
 
-      // Check if we're offline
       const online = await NetworkService.isOnline();
 
       if (!online) {
@@ -500,28 +510,22 @@ export default function EditAnswerKeyScreen() {
       setRemoteVersion(nextVersion);
       setConflictDetected(false);
       setHasLocalChanges(false);
-
       setStatusModal({
         visible: true,
         type: "success",
         title: "Success",
-        message: "Answer key saved successfully!",
+        message: online
+          ? "Answer key saved successfully!"
+          : "Answer key saved offline. It will sync when you are online.",
         onClose: goBack,
       });
     } catch (error) {
       console.error("Error saving answer key:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to save answer key";
-      const isConflict = /conflict/i.test(errorMessage);
-
       setStatusModal({
         visible: true,
-        type: isConflict ? "info" : "error",
-        title: isConflict ? "Conflict Detected" : "Error",
-        message: isConflict
-          ? "Another device saved newer answer key changes. We loaded the latest data. Please re-apply your edits and save again."
-          : "Failed to save answer key",
-        onClose: isConflict ? loadAnswerKey : undefined,
+        type: "error",
+        title: "Error",
+        message: "Failed to save answer key",
       });
     } finally {
       setSaving(false);
@@ -537,7 +541,9 @@ export default function EditAnswerKeyScreen() {
   };
 
   const normalizeHeader = (value: unknown) =>
-    String(value ?? "").trim().toLowerCase();
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
 
   const handleDownloadTemplate = async () => {
     try {
@@ -660,7 +666,10 @@ export default function EditAnswerKeyScreen() {
         }
 
         const questionNumber = Number(String(questionRaw).trim());
-        if (!Number.isFinite(questionNumber) || !Number.isInteger(questionNumber)) {
+        if (
+          !Number.isFinite(questionNumber) ||
+          !Number.isInteger(questionNumber)
+        ) {
           setStatusModal({
             visible: true,
             type: "error",
@@ -696,7 +705,10 @@ export default function EditAnswerKeyScreen() {
         }
 
         const normalizedAnswer = String(answerRaw).trim().toUpperCase();
-        if (normalizedAnswer.length !== 1 || !allowedChoices.has(normalizedAnswer)) {
+        if (
+          normalizedAnswer.length !== 1 ||
+          !allowedChoices.has(normalizedAnswer)
+        ) {
           setStatusModal({
             visible: true,
             type: "error",
@@ -757,31 +769,36 @@ export default function EditAnswerKeyScreen() {
           },
         ]}
       >
-        <Text style={[styles.questionNumber, { color: darkModeEnabled ? "#e7f1eb" : "#98A1B2" }]}>
+        <Text
+          style={[
+            styles.questionNumber,
+            { color: darkModeEnabled ? "#e7f1eb" : "#98A1B2" },
+          ]}
+        >
           {item.questionNumber}.
         </Text>
         <View style={styles.choicesContainer}>
           {choices.map((choice) => (
             <TouchableOpacity
               key={choice}
-                style={[
-                  styles.choiceButton,
-                  darkModeEnabled && {
-                    backgroundColor: "#2a3a33",
-                    borderColor: "#34483f",
-                  },
-                  item.answer === choice && styles.choiceButtonSelected,
-                ]}
+              style={[
+                styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
+                item.answer === choice && styles.choiceButtonSelected,
+              ]}
               onPress={() => handleAnswerSelect(item.questionNumber, choice)}
               disabled={loading || saving}
             >
-                <Text
-                  style={[
-                    styles.choiceText,
-                    darkModeEnabled && { color: "#9db1a6" },
-                    item.answer === choice && styles.choiceTextSelected,
-                  ]}
-                >
+              <Text
+                style={[
+                  styles.choiceText,
+                  darkModeEnabled && { color: "#9db1a6" },
+                  item.answer === choice && styles.choiceTextSelected,
+                ]}
+              >
                 {choice}
               </Text>
             </TouchableOpacity>
@@ -888,11 +905,7 @@ export default function EditAnswerKeyScreen() {
           onPress={handleDownloadTemplate}
           disabled={saving}
         >
-          <Ionicons
-            name="download-outline"
-            size={18}
-            color="#fff"
-          />
+          <Ionicons name="download-outline" size={18} color="#fff" />
           <Text
             style={[
               styles.secondaryButtonText,
@@ -911,11 +924,7 @@ export default function EditAnswerKeyScreen() {
           onPress={handleImportAnswerKey}
           disabled={saving}
         >
-          <Ionicons
-            name="cloud-upload-outline"
-            size={18}
-            color="#fff"
-          />
+          <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
           <Text
             style={[
               styles.secondaryButtonText,

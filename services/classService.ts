@@ -1,28 +1,36 @@
 import { auth, db } from "@/config/firebase";
 import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    Timestamp,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  Timestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { Class, CreateClassData, Student } from "../types/class";
+import { NetworkService } from "./networkService";
+import { ClassCache, OfflineClass, RealmService } from "./realmService";
 
 function getClassSortTime(item: {
   createdAt?: Date;
   updatedAt?: Date;
   created_at?: string;
 }) {
-  if (item.createdAt instanceof Date && !Number.isNaN(item.createdAt.getTime())) {
+  if (
+    item.createdAt instanceof Date &&
+    !Number.isNaN(item.createdAt.getTime())
+  ) {
     return item.createdAt.getTime();
   }
 
-  if (item.updatedAt instanceof Date && !Number.isNaN(item.updatedAt.getTime())) {
+  if (
+    item.updatedAt instanceof Date &&
+    !Number.isNaN(item.updatedAt.getTime())
+  ) {
     return item.updatedAt.getTime();
   }
 
@@ -49,6 +57,26 @@ export class ClassService {
         throw new Error("User must be authenticated to create a class");
       }
 
+      const isOnline = await NetworkService.isOnline();
+
+      if (!isOnline) {
+        console.log("[ClassService] Offline. Queueing class to staging...");
+        const stagingRealm = await RealmService.getStagingRealm();
+        stagingRealm.write(() => {
+          stagingRealm.create("OfflineClass", {
+            class_name: classData.class_name,
+            course_subject: classData.course_subject,
+            room: classData.room,
+            section_block: classData.section_block,
+            students: JSON.stringify(classData.students || []),
+            status: "pending",
+            createdBy: currentUser.uid,
+            createdAt: new Date(),
+          });
+        });
+        return "offline_pending";
+      }
+
       const newClass = {
         ...classData,
         students: classData.students || [],
@@ -60,6 +88,26 @@ export class ClassService {
       };
 
       const docRef = await addDoc(collection(db, this.COLLECTION), newClass);
+
+      // Update local cache manually for immediate UI response
+      const cacheRealm = await RealmService.getCacheRealm();
+      cacheRealm.write(() => {
+        cacheRealm.create(
+          "ClassCache",
+          {
+            id: docRef.id,
+            class_name: classData.class_name,
+            course_subject: classData.course_subject,
+            room: classData.room,
+            section_block: classData.section_block,
+            students: JSON.stringify(classData.students || []),
+            createdBy: currentUser.uid,
+            updatedAt: new Date(),
+          },
+          Realm.UpdateMode.Modified,
+        );
+      });
+
       return docRef.id;
     } catch (error) {
       console.error("Error creating class:", error);
@@ -73,38 +121,77 @@ export class ClassService {
   static async getClassesByUser(): Promise<Class[]> {
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error("User must be authenticated");
+      if (!currentUser) throw new Error("User must be authenticated");
+
+      const isOnline = await NetworkService.isOnline();
+
+      if (isOnline) {
+        console.log("[ClassService] Online. Fetching from Firestore...");
+        const q = query(
+          collection(db, this.COLLECTION),
+          where("createdBy", "==", currentUser.uid),
+        );
+        const querySnapshot = await getDocs(q);
+        const classes: Class[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          classes.push({
+            id: doc.id,
+            class_name: data.class_name,
+            course_subject: data.course_subject,
+            room: data.room,
+            section_block: data.section_block,
+            students: data.students || [],
+            createdBy: data.createdBy,
+            created_at: data.created_at,
+            createdAt: data.createdAt?.toDate(),
+            updatedAt: data.updatedAt?.toDate(),
+          });
+        });
+        return classes;
       }
 
-      const q = query(
-        collection(db, this.COLLECTION),
-        where("createdBy", "==", currentUser.uid),
-      );
+      // Offline Fallback: Load from Cache + Staging
+      console.log("[ClassService] Offline. Falling back to Realm Cache...");
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objects<ClassCache>("ClassCache");
 
-      const querySnapshot = await getDocs(q);
-      const classes: Class[] = [];
+      const stagingRealm = await RealmService.getStagingRealm();
+      const staging = stagingRealm.objects<OfflineClass>("OfflineClass");
 
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        classes.push({
-          id: doc.id,
-          class_name: data.class_name,
-          course_subject: data.course_subject,
-          room: data.room,
-          section_block: data.section_block,
-          students: data.students || [],
-          isArchived: data.isArchived || false,
-          createdBy: data.createdBy,
-          created_at: data.created_at,
-          createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate(),
+      const localClasses: Class[] = [];
+
+      cached.forEach((c) => {
+        localClasses.push({
+          id: c.id,
+          class_name: c.class_name,
+          course_subject: c.course_subject,
+          room: c.room,
+          section_block: c.section_block,
+          students: JSON.parse(c.students || "[]"),
+          createdBy: c.createdBy,
+          created_at: c.updatedAt.toISOString(),
+          createdAt: c.updatedAt,
+          updatedAt: c.updatedAt,
         });
       });
 
-      classes.sort((a, b) => getClassSortTime(b) - getClassSortTime(a));
+      staging.forEach((s) => {
+        localClasses.push({
+          id: `staging_${s._id.toHexString()}`,
+          class_name: s.class_name,
+          course_subject: s.course_subject,
+          room: s.room,
+          section_block: s.section_block,
+          students: JSON.parse(s.students || "[]"),
+          createdBy: s.createdBy,
+          created_at: s.createdAt.toISOString(),
+          createdAt: s.createdAt,
+          updatedAt: s.createdAt,
+        });
+      });
 
-      return classes;
+      return localClasses;
     } catch (error) {
       console.error("Error fetching classes:", error);
       throw error;

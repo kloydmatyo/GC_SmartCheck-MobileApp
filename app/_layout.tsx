@@ -9,13 +9,14 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
-import 'react-native-get-random-values';
+import "react-native-get-random-values";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 
 import { toastConfig } from "@/components/ui/ToastConfig";
+import { auth } from "@/config/firebase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { GradeStorageService } from "@/services/gradeStorageService";
+import { SyncService } from "@/services/syncService";
 
 export const unstable_settings = {
   initialRouteName: "sign-in",
@@ -42,15 +43,15 @@ export default function RootLayout() {
     try {
       isSyncingRef.current = true;
       const netState = await NetInfo.fetch();
-      if (netState.isConnected && netState.isInternetReachable) {
-        const count = await GradeStorageService.getOfflineItemCount();
-        if (count > 0) {
-          setIsSyncing(true);
-          await GradeStorageService.syncOfflineQueue();
-        }
+
+      if (netState.isConnected && netState.isInternetReachable && auth.currentUser) {
+        setIsSyncing(true);
+        console.log("[RootLayout] Triggering background sync...");
+        await SyncService.syncPendingUpdates();
+        console.log("[RootLayout] Background sync complete");
       }
     } catch (err) {
-      console.warn("Sync error:", err);
+      console.warn("Background sync error:", err);
     } finally {
       setIsSyncing(false);
       isSyncingRef.current = false;

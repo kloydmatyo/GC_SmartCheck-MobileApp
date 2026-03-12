@@ -2,7 +2,13 @@ import { auth } from "@/config/firebase";
 import { ResultsService } from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -500,4 +506,3 @@ const styles = StyleSheet.create({
     color: "#fff",
   },
 });
-

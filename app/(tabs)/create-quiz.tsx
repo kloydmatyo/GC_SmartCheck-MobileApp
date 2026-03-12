@@ -1,9 +1,10 @@
 import StatusModal from "@/components/common/StatusModal";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
@@ -111,24 +112,62 @@ export default function CreateQuizScreen() {
 
         try {
           setClassesLoading(true);
-          const classesQuery = query(
-            collection(db, "classes"),
-            where("createdBy", "==", currentUser.uid),
-          );
-          const classesSnapshot = await getDocs(classesQuery);
-          const classes = classesSnapshot.docs
-            .map((classDoc) => ({
-              id: classDoc.id,
-              ...(classDoc.data() as Omit<ClassOption, "id">),
-            }))
-            .filter((cls) => !cls.isArchived);
+          const { NetworkService } = await import("@/services/networkService");
+          const isOnline = await NetworkService.isOnline();
+          let classes: ClassOption[] = [];
 
-          setClassOptions(classes);
-          if (classIdParam && classes.some((cls) => cls.id === classIdParam)) {
-            setSelectedClassId(classIdParam);
-          } else if (classes.length === 1) {
-            setSelectedClassId(classes[0].id);
+          if (isOnline) {
+            try {
+              const classesQuery = query(
+                collection(db, "classes"),
+                where("createdBy", "==", currentUser.uid),
+              );
+              // Provide a short timeout so UI won't freeze on flaky networks
+              const classesSnapshot = await Promise.race([
+                getDocs(classesQuery),
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000))
+              ]);
+
+              classes = classesSnapshot.docs
+                .map((classDoc: any) => ({
+                  id: classDoc.id,
+                  ...(classDoc.data() as Omit<ClassOption, "id">),
+                }))
+                .filter((cls: any) => !cls.isArchived);
+            } catch (err) {
+              console.warn("Firestore classes fetch failed, falling back to cache", err);
+            }
           }
+
+          // Fallback to cache if offline or Firestore query failed
+          if (!isOnline || classes.length === 0) {
+            const { RealmService } = await import("@/services/realmService");
+            const cacheRealm = await RealmService.getCacheRealm();
+            const cachedClasses = cacheRealm.objects<any>("ClassCache").filtered(`createdBy == "${currentUser.uid}"`);
+
+            classes = cachedClasses.map((c: any) => ({
+              id: c.id,
+              class_name: c.class_name,
+              course_subject: c.course_subject,
+              section_block: c.section_block,
+              isArchived: false, // We assume cached active ones aren't archived
+            }));
+          }
+
+          // Always add unsynced classes from the Staging Realm
+          const { RealmService } = await import("@/services/realmService");
+          const stagingRealm = await RealmService.getStagingRealm();
+          const stagingClasses = stagingRealm.objects<any>("OfflineClass");
+
+          const sClasses = stagingClasses.map((c: any) => ({
+            id: `staging_${c._id.toHexString()}`,
+            class_name: c.class_name,
+            course_subject: c.course_subject,
+            section_block: c.section_block,
+            isArchived: false,
+          }));
+
+          setClassOptions([...classes, ...sClasses]);
         } catch (error) {
           console.warn("Could not load classes:", error);
           setClassOptions([]);
@@ -143,27 +182,36 @@ export default function CreateQuizScreen() {
 
   const colors = darkModeEnabled
     ? {
-        screenBg: "#111815",
-        headerBg: "#1a2520",
-        cardBg: "#1f2b26",
-        border: "#34483f",
-        text: "#e7f1eb",
-        subtext: "#9db1a6",
-        primary: "#1f3a2f",
-        primaryDark: "#2b3b34",
-        accent: "#8fd1ad",
-      }
+      screenBg: "#111815",
+      headerBg: "#1a2520",
+      cardBg: "#1f2b26",
+      border: "#34483f",
+      text: "#e7f1eb",
+      subtext: "#9db1a6",
+      primary: "#1f3a2f",
+      primaryDark: "#2b3b34",
+      accent: "#8fd1ad",
+    }
     : {
-        screenBg: "#f5f5f5",
-        headerBg: "#3d5a3d",
-        cardBg: "#3d5a3d",
-        border: "#e0e0e0",
-        text: "#E8F5E9",
-        subtext: "#B8D4B8",
-        primary: "#3d5a3d",
-        primaryDark: "#2f4a38",
-        accent: "#4CAF50",
-      };
+      screenBg: "#f5f5f5",
+      headerBg: "#3d5a3d",
+      cardBg: "#3d5a3d",
+      border: "#e0e0e0",
+      text: "#E8F5E9",
+      subtext: "#B8D4B8",
+      primary: "#3d5a3d",
+      primaryDark: "#2f4a38",
+      accent: "#4CAF50",
+    };
+
+  const handleDateChange = (_event: any, selectedDate?: Date) => {
+    setShowDatePicker(Platform.OS === "ios");
+    if (selectedDate) {
+      const today = toStartOfDay(new Date());
+      const picked = toStartOfDay(selectedDate);
+      setExamDate(picked < today ? today : selectedDate);
+    }
+  };
 
   const handleSave = async () => {
     // Validation
@@ -259,27 +307,18 @@ export default function CreateQuizScreen() {
       const selectedClass =
         classOptions.find((cls) => cls.id === selectedClassId) || null;
 
-      // Generate exam code from quiz name and date
+      // Generate exam code
       const generateExamCode = (title: string, date: string): string => {
-        const words = title.trim().split(/\s+/);
-        const initials = words
-          .slice(0, 3)
-          .map((word) => word.charAt(0).toUpperCase())
-          .join("");
-
+        const initials = title.trim().substring(0, 3).toUpperCase();
         const dateCode = date.replace(/-/g, "");
-        const randomSuffix = Math.random()
-          .toString(36)
-          .substring(2, 5)
-          .toUpperCase();
-
+        const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
         return `${initials}-${dateCode}-${randomSuffix}`;
       };
 
       const examCode = generateExamCode(quizName.trim(), currentDate);
 
-      // Create exam document
-      const examData = {
+      // Prepare exam data
+      const baseExamData = {
         title: quizName.trim(),
         subject: subject.trim() || selectedClass?.course_subject || "General",
         examType: examType,
@@ -287,27 +326,48 @@ export default function CreateQuizScreen() {
         choices_per_item: choicesPerItem,
         status: "Draft",
         createdBy: currentUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
         created_at: currentDate,
         classId: selectedClass?.id || null,
         className: selectedClass?.class_name || null,
         instructorId: instructorId,
         examCode: examCode,
         version: 1,
-        answerKeys: [],
-        generated_sheets: [],
-        choicePoints: {},
+        // For offline staging
+        answerKeyJson: JSON.stringify({
+          questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
+            questionNumber: i + 1,
+            correctAnswer: "",
+            points: 1,
+          })),
+        }),
       };
 
-      console.log("Creating exam with data:", examData);
-      const examRef = await addDoc(collection(db, "exams"), examData);
-      console.log("Exam created with ID:", examRef.id);
+      console.log("Saving quiz via ExamService...");
+      const result = await ExamService.createExam(baseExamData);
 
-      // Create default answer key with specific ID
-      const answerKeyId = `ak_${examRef.id}_${Date.now()}`;
+      if (result.startsWith("staging_")) {
+        console.log("Quiz saved to staging realm (OFFLINE)");
+        setCreatedExamId(result);
+        setStatusModal({
+          visible: true,
+          type: "success",
+          title: "Saved Offline",
+          message: "Quiz saved locally. Redirecting to answer key...",
+        });
+        setTimeout(() => {
+          setStatusModal(prev => ({ ...prev, visible: false }));
+          router.replace(`/(tabs)/edit-answer-key?examId=${result}`);
+        }, 1500);
+        return;
+      }
+
+      const newExamId = result;
+      setCreatedExamId(newExamId);
+
+      // Create default answer key in Firestore (Online path)
+      const answerKeyId = `ak_${newExamId}_${Date.now()}`;
       const answerKeyData = {
-        examId: examRef.id,
+        examId: newExamId,
         id: answerKeyId,
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
@@ -318,49 +378,26 @@ export default function CreateQuizScreen() {
           questionNumber: i + 1,
           correctAnswer: "",
           points: 1,
-          choiceLabels: {},
         })),
-        ...Object.fromEntries(
-          Array.from({ length: numQuestions }, (_, i) => [i.toString(), ""]),
-        ),
       };
 
-      console.log("Creating answer key with ID:", answerKeyId);
       await setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData);
-      console.log("Answer key created successfully");
 
-      // Create template automatically
+      // Create template automatically (Online path)
       try {
-        console.log("Creating template for exam...");
         const templateData = {
           name: `${quizName.trim()}_Template`,
-          description: `Answer sheet template for ${quizName.trim()}`,
-          numQuestions: numQuestions,
-          choicesPerQuestion: 5, // A-E
-          layout:
-            numQuestions === 20
-              ? "quad"
-              : numQuestions === 50
-                ? "double"
-                : "single",
-          includeStudentId: true,
-          studentIdLength: 10,
+          numQuestions,
+          choicesPerQuestion: choicesPerItem,
           createdBy: currentUser.uid,
-          instructorId: instructorId,
-          classId: selectedClass?.id || null,
-          className: selectedClass?.class_name || null,
-          examId: examRef.id,
+          examId: newExamId,
           examName: quizName.trim(),
-          examCode: examCode,
+          examCode,
           createdAt: serverTimestamp(),
-          isArchived: false,
         };
-
         await addDoc(collection(db, "templates"), templateData);
-        console.log("Template created successfully");
-      } catch (templateError) {
-        console.error("Error creating template:", templateError);
-        // Don't fail the exam creation if template fails
+      } catch (err) {
+        console.warn("Template creation failed:", err);
       }
 
       console.log("=== Quiz Creation Complete ===");
@@ -450,6 +487,70 @@ export default function CreateQuizScreen() {
             ))}
           </View>
 
+        {/* Subject (Optional) */}
+        {/* Choices Per Item */}
+        <View style={styles.section}>
+          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CHOICES PER ITEM *</Text>
+          <View style={styles.choiceButtons}>
+            <TouchableOpacity
+              style={[
+                styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
+                choicesPerItem === 4 && styles.choiceButtonActive,
+                darkModeEnabled &&
+                choicesPerItem === 4 && {
+                  backgroundColor: "#1f3a2f",
+                  borderColor: "#8fd1ad",
+                },
+              ]}
+              onPress={() => setChoicesPerItem(4)}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
+                  choicesPerItem === 4 && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                  choicesPerItem === 4 && { color: "#8fd1ad" },
+                ]}
+              >
+                A-D (4 choices)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
+                choicesPerItem === 5 && styles.choiceButtonActive,
+                darkModeEnabled &&
+                choicesPerItem === 5 && {
+                  backgroundColor: "#1f3a2f",
+                  borderColor: "#8fd1ad",
+                },
+              ]}
+              onPress={() => setChoicesPerItem(5)}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceButtonText,
+                  darkModeEnabled && { color: "#dbe8e1" },
+                  choicesPerItem === 5 && styles.choiceButtonTextActive,
+                  darkModeEnabled &&
+                  choicesPerItem === 5 && { color: "#8fd1ad" },
+                ]}
+              >
+                A-E (5 choices)
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {!classIdParam && (

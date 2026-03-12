@@ -1,21 +1,21 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import StatusModal from "@/components/common/StatusModal";
 import { auth } from "@/config/firebase";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import React from "react";
 import {
-    DeviceEventEmitter,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  DeviceEventEmitter,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 export default function SettingsScreen() {
@@ -126,6 +126,14 @@ export default function SettingsScreen() {
 
   const confirmLogout = async () => {
     try {
+      const { RealmService } = await import("@/services/realmService");
+      const { OfflineStorageService } =
+        await import("@/services/offlineStorageService");
+
+      // Clear all local data on logout
+      await RealmService.clearCache();
+      await OfflineStorageService.clearAllData();
+
       await signOut(auth);
       setLogoutConfirmVisible(false);
       router.replace("/sign-in");
@@ -160,11 +168,15 @@ export default function SettingsScreen() {
       onPress={onPress}
     >
       <View style={styles.settingLeft}>
-        <View style={[styles.iconContainer, { backgroundColor: colors.iconBg }]}>
+        <View
+          style={[styles.iconContainer, { backgroundColor: colors.iconBg }]}
+        >
           <Ionicons name={icon as any} size={22} color={colors.accent} />
         </View>
         <View style={styles.settingText}>
-          <Text style={[styles.settingTitle, { color: colors.itemText }]}>{title}</Text>
+          <Text style={[styles.settingTitle, { color: colors.itemText }]}>
+            {title}
+          </Text>
           {subtitle && (
             <Text style={[styles.settingSubtitle, { color: colors.itemMuted }]}>
               {subtitle}
@@ -198,11 +210,15 @@ export default function SettingsScreen() {
       ]}
     >
       <View style={styles.settingLeft}>
-        <View style={[styles.iconContainer, { backgroundColor: colors.iconBg }]}>
+        <View
+          style={[styles.iconContainer, { backgroundColor: colors.iconBg }]}
+        >
           <Ionicons name={icon as any} size={22} color={colors.accent} />
         </View>
         <View style={styles.settingText}>
-          <Text style={[styles.settingTitle, { color: colors.itemText }]}>{title}</Text>
+          <Text style={[styles.settingTitle, { color: colors.itemText }]}>
+            {title}
+          </Text>
           {subtitle && (
             <Text style={[styles.settingSubtitle, { color: colors.itemMuted }]}>
               {subtitle}
@@ -218,13 +234,17 @@ export default function SettingsScreen() {
           true: darkModeEnabled ? "#8fd1ad" : "#8fd1ad",
         }}
         ios_backgroundColor={darkModeEnabled ? "#5f7268" : "#c6d3cc"}
-        thumbColor={value ? (darkModeEnabled ? "#f3fff8" : "#2f4a38") : "#ffffff"}
+        thumbColor={
+          value ? (darkModeEnabled ? "#f3fff8" : "#2f4a38") : "#ffffff"
+        }
       />
     </View>
   );
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       {/* Header */}
       <View
         style={[
@@ -232,7 +252,9 @@ export default function SettingsScreen() {
           { backgroundColor: colors.header, borderBottomColor: colors.border },
         ]}
       >
-        <Text style={[styles.headerTitle, { color: colors.headerText }]}>Settings</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]}>
+          Settings
+        </Text>
       </View>
 
       {/* Profile Section */}
@@ -251,7 +273,9 @@ export default function SettingsScreen() {
             <Text style={[styles.profileName, { color: colors.text }]}>
               Faculty User
             </Text>
-            <Text style={[styles.profileEmail, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.profileEmail, { color: colors.textSecondary }]}
+            >
               faculty@gordoncollege.edu.ph
             </Text>
           </View>
@@ -272,7 +296,9 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.sectionChipText }]}>
+          <Text
+            style={[styles.sectionTitle, { color: colors.sectionChipText }]}
+          >
             General
           </Text>
         </View>
@@ -296,7 +322,9 @@ export default function SettingsScreen() {
           <SettingToggle
             icon={darkModeEnabled ? "sunny" : "moon"}
             title="Dark Mode"
-            subtitle={darkModeEnabled ? "Switch to light mode" : "Switch to dark mode"}
+            subtitle={
+              darkModeEnabled ? "Switch to light mode" : "Switch to dark mode"
+            }
             value={darkModeEnabled}
             onValueChange={handleDarkModeToggle}
           />
@@ -326,7 +354,9 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.sectionChipText }]}>
+          <Text
+            style={[styles.sectionTitle, { color: colors.sectionChipText }]}
+          >
             Scanner
           </Text>
         </View>
@@ -390,7 +420,9 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.sectionChipText }]}>
+          <Text
+            style={[styles.sectionTitle, { color: colors.sectionChipText }]}
+          >
             Account
           </Text>
         </View>
@@ -440,7 +472,9 @@ export default function SettingsScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.sectionChipText }]}>
+          <Text
+            style={[styles.sectionTitle, { color: colors.sectionChipText }]}
+          >
             About
           </Text>
         </View>

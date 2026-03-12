@@ -1,14 +1,19 @@
 import { auth, db } from "@/config/firebase";
 import {
-    deleteDoc,
-    doc,
-    getDoc,
-    serverTimestamp,
-    setDoc,
-    updateDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs, query,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  where
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
+import { OfflineClass, OfflineQuiz, RealmService } from "./realmService";
 
 export interface SyncResult {
   success: boolean;
@@ -81,53 +86,27 @@ export class SyncService {
     const conflicts: ConflictInfo[] = [];
 
     try {
-      const pendingUpdates = await OfflineStorageService.getPendingUpdates();
+      // 1. Flush Grades from Staging
+      try { await this.syncStagingGrades(); syncedCount++; } catch (e) { console.error("Flush Grades Error", e); failedCount++; }
 
-      if (pendingUpdates.length === 0) {
-        console.log("✅ No pending updates to sync");
-        return {
-          success: true,
-          syncedCount: 0,
-          failedCount: 0,
-          conflicts: [],
-        };
-      }
+      // 2. Flush Classes from Staging
+      try { await this.syncStagingClasses(); syncedCount++; } catch (e) { console.error("Flush Classes Error", e); failedCount++; }
 
-      console.log(`🔄 Syncing ${pendingUpdates.length} pending updates...`);
+      // 3. Flush Exams from Staging
+      try { await this.syncStagingExams(); syncedCount++; } catch (e) { console.error("Flush Exams Error", e); failedCount++; }
 
-      for (const update of pendingUpdates) {
-        try {
-          const conflict = await this.syncUpdate(update);
-
-          if (conflict) {
-            conflicts.push(conflict);
-            failedCount++;
-          } else {
-            await OfflineStorageService.removePendingUpdate(update.id);
-            syncedCount++;
-          }
-        } catch (error) {
-          console.error(`Error syncing update ${update.id}:`, error);
-          failedCount++;
-        }
-      }
-
-      await OfflineStorageService.updateLastSync();
+      // 4. Update the Cache Realm from Firestore
+      try { await this.syncFirestoreToCache(); syncedCount++; } catch (e) { console.error("Refresh Cache Error", e); failedCount++; }
 
       const result: SyncResult = {
-        success: conflicts.length === 0,
+        success: failedCount === 0,
         syncedCount,
         failedCount,
-        conflicts,
+        conflicts: [],
       };
 
-      console.log(
-        `✅ Sync complete: ${syncedCount} synced, ${failedCount} failed, ${conflicts.length} conflicts`,
-      );
-
-      // Notify listeners
+      console.log(`✅ Full sync complete. Synced: ${syncedCount}, Failed: ${failedCount}`);
       this.notifyListeners(result);
-
       return result;
     } catch (error) {
       console.error("Error during sync:", error);
@@ -139,6 +118,180 @@ export class SyncService {
       };
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Fetch user data from Firestore and store in Primary Cache Realm
+   */
+  static async syncFirestoreToCache(): Promise<void> {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    const realm = await RealmService.getCacheRealm();
+
+    // Sync Classes
+    const classesQuery = query(collection(db, "classes"), where("createdBy", "==", currentUser.uid));
+    const classesSnap = await getDocs(classesQuery);
+
+    // Sync Exams + their latest answer keys
+    const examsQuery = query(collection(db, "exams"), where("createdBy", "==", currentUser.uid));
+    const examsSnap = await getDocs(examsQuery);
+    const examsWithAK: any[] = [];
+
+    for (const examDoc of examsSnap.docs) {
+      const akQuery = query(collection(db, "answerKeys"), where("examId", "==", examDoc.id));
+      const akSnap = await getDocs(akQuery);
+      let answerKeyJson = "";
+      if (!akSnap.empty) {
+        const latestAk = akSnap.docs.sort((a, b) => (b.data().version || 0) - (a.data().version || 0))[0];
+        answerKeyJson = JSON.stringify(latestAk.data());
+      }
+      examsWithAK.push({ id: examDoc.id, data: examDoc.data(), answerKey: answerKeyJson });
+    }
+
+    // Sync Grades (limit to 100 recent?)
+    const gradesQuery = query(collection(db, "scannedResults"), where("scannedBy", "==", currentUser.uid));
+    const gradesSnap = await getDocs(gradesQuery);
+
+    realm.write(() => {
+      // Clear existing cache for these types
+      realm.delete(realm.objects("ClassCache"));
+      realm.delete(realm.objects("QuizCache"));
+      realm.delete(realm.objects("GradeCache"));
+
+      // Insert fresh classes
+      classesSnap.docs.forEach(doc => {
+        const data = doc.data();
+        realm.create("ClassCache", {
+          id: doc.id,
+          class_name: data.class_name,
+          course_subject: data.course_subject,
+          room: data.room,
+          section_block: data.section_block,
+          students: JSON.stringify(data.students || []),
+          createdBy: data.createdBy,
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+        });
+      });
+
+      // Insert fresh exams
+      examsWithAK.forEach(item => {
+        realm.create("QuizCache", {
+          id: item.id,
+          title: item.data.title,
+          subject: item.data.subject || item.data.className || "",
+          status: item.data.status || "Draft",
+          papersCount: item.data.scanned_papers || 0,
+          questionCount: item.data.num_items || 0,
+          answerKey: item.answerKey,
+          createdBy: item.data.createdBy,
+          createdAt: item.data.createdAt?.toDate() || new Date(),
+          updatedAt: item.data.updatedAt?.toDate() || new Date(),
+          instructorId: item.data.instructorId || "",
+          examCode: item.data.examCode || item.data.room || "",
+          choicesPerItem: item.data.choices_per_item || 4,
+        });
+      });
+
+      // Insert fresh grades
+      gradesSnap.docs.forEach(doc => {
+        const data = doc.data();
+        realm.create("GradeCache", {
+          id: doc.id,
+          studentId: data.studentId,
+          examId: data.examId,
+          score: data.score,
+          totalPoints: data.totalPoints,
+          percentage: data.percentage,
+          gradeEquivalent: data.gradeEquivalent,
+          dateScanned: data.dateScanned,
+          scannedBy: data.scannedBy,
+          createdAt: data.createdAt?.toDate() || new Date(),
+        });
+      });
+    });
+
+    console.log("✅ Primary Cache Realm updated from Firestore");
+  }
+
+  private static async syncStagingGrades(): Promise<void> {
+    // This is handled by GradeStorageService.syncOfflineQueue()
+    // We can call it here for centralization
+    console.log("🔄 Syncing staging grades...");
+    const { GradeStorageService } = await import("./gradeStorageService");
+    await GradeStorageService.syncOfflineQueue();
+  }
+
+  private static async syncStagingClasses(): Promise<void> {
+    const realm = await RealmService.getStagingRealm();
+    const stagingClasses = realm.objects<OfflineClass>("OfflineClass");
+
+    if (stagingClasses.length === 0) return;
+
+    for (const sClass of stagingClasses) {
+      try {
+        const classData = {
+          class_name: sClass.class_name,
+          course_subject: sClass.course_subject,
+          room: sClass.room,
+          section_block: sClass.section_block,
+          students: JSON.parse(sClass.students),
+          createdBy: sClass.createdBy,
+          createdAt: Timestamp.fromDate(sClass.createdAt),
+          updatedAt: Timestamp.now(),
+        };
+
+        await setDoc(doc(collection(db, "classes")), classData);
+
+        realm.write(() => {
+          realm.delete(sClass);
+        });
+      } catch (err) {
+        console.error("Failed to sync staging class:", err);
+      }
+    }
+  }
+
+  private static async syncStagingExams(): Promise<void> {
+    const realm = await RealmService.getStagingRealm();
+    const stagingQuizzes = realm.objects<OfflineQuiz>("OfflineQuiz");
+
+    if (stagingQuizzes.length === 0) return;
+
+    for (const sQuiz of stagingQuizzes) {
+      try {
+        const quizData = {
+          title: sQuiz.title,
+          subject: sQuiz.subject,
+          num_items: sQuiz.questionCount,
+          status: sQuiz.status,
+          createdBy: sQuiz.createdBy,
+          createdAt: Timestamp.fromDate(sQuiz.createdAt),
+          updatedAt: Timestamp.now(),
+          instructorId: sQuiz.instructorId || "",
+          examCode: sQuiz.examCode || "",
+        };
+
+        const examRef = doc(collection(db, "exams"));
+        await setDoc(examRef, quizData);
+
+        // Also sync answer key if it exists
+        if (sQuiz.answerKey) {
+          const akData = JSON.parse(sQuiz.answerKey);
+          await setDoc(doc(db, "answerKeys", `ak_${examRef.id}_${Date.now()}`), {
+            examId: examRef.id,
+            ...akData,
+            createdAt: Timestamp.now(),
+          });
+        }
+
+        realm.write(() => {
+          realm.delete(sQuiz);
+        });
+      } catch (err) {
+        console.error("Failed to sync staging quiz:", err);
+      }
     }
   }
 
