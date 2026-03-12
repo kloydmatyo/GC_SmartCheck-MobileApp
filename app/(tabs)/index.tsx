@@ -396,6 +396,9 @@ export default function HomeScreen() {
     if (!isOnline) {
       return {
         color: "#F2A54A",
+        iconColor: "#F2A54A",
+        iconBackground: "#F2A54A1A",
+        textColor: "#5A6475",
         icon: "cloud-offline-outline" as keyof typeof Ionicons.glyphMap,
         text: "Offline",
       };
@@ -403,7 +406,10 @@ export default function HomeScreen() {
 
     if (isSyncing) {
       return {
-        color: "#3B82F6",
+        color: "#22C58B",
+        iconColor: "#22C58B",
+        iconBackground: "#22C58B1A",
+        textColor: "#5A6475",
         icon: "sync-outline" as keyof typeof Ionicons.glyphMap,
         text: "Syncing...",
       };
@@ -412,6 +418,9 @@ export default function HomeScreen() {
     if (pendingCount > 0) {
       return {
         color: "#F2C45A",
+        iconColor: "#F2C45A",
+        iconBackground: "#F2C45A1A",
+        textColor: "#5A6475",
         icon: "cloud-upload-outline" as keyof typeof Ionicons.glyphMap,
         text: `${pendingCount} pending`,
       };
@@ -419,6 +428,10 @@ export default function HomeScreen() {
 
     return {
       color: "#1FC27D",
+      iconColor: "#9AA3AF",
+      iconBackground: "transparent",
+      dotColor: "#22C58B",
+      textColor: "#6B7280",
       icon: "cloud-done-outline" as keyof typeof Ionicons.glyphMap,
       text: lastSync ? `Synced ${formatLastSync(lastSync)}` : "Synced to Web",
     };
@@ -466,23 +479,42 @@ export default function HomeScreen() {
                   <View
                     style={[
                       styles.syncIconWrap,
-                      { backgroundColor: `${syncVisual.color}1A` },
+                      syncVisual.iconBackground
+                        ? { backgroundColor: syncVisual.iconBackground }
+                        : null,
                     ]}
                   >
                     {isSyncing ? (
                       <ActivityIndicator
                         size="small"
-                        color={syncVisual.color}
+                        color={syncVisual.iconColor}
                       />
                     ) : (
-                      <Ionicons
-                        name={syncVisual.icon}
-                        size={14}
-                        color={syncVisual.color}
-                      />
+                      <>
+                        <Ionicons
+                          name={syncVisual.icon}
+                          size={14}
+                          color={syncVisual.iconColor}
+                        />
+                        {syncVisual.dotColor ? (
+                          <View
+                            style={[
+                              styles.syncDot,
+                              { backgroundColor: syncVisual.dotColor },
+                            ]}
+                          />
+                        ) : null}
+                      </>
                     )}
                   </View>
-                  <Text style={styles.syncText}>{syncVisual.text}</Text>
+                  <Text
+                    style={[
+                      styles.syncText,
+                      { color: syncVisual.textColor },
+                    ]}
+                  >
+                    {syncVisual.text}
+                  </Text>
                 </TouchableOpacity>
               </Animated.View>
             ) : (
@@ -698,16 +730,26 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   syncIconWrap: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
+    position: "relative",
+  },
+  syncDot: {
+    position: "absolute",
+    right: -2,
+    top: -2,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
   },
   syncText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#5A6475",
   },
   settingsButton: {
     width: 32,
