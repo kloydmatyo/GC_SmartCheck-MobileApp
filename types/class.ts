@@ -13,6 +13,7 @@ export interface Class {
   section_block: string;
   students: Student[];
   createdBy: string;
+  instructorId?: string;
   created_at: string;
   createdAt: Date;
   updatedAt: Date;
@@ -25,5 +26,6 @@ export interface CreateClassData {
   room: string;
   section_block: string;
   students?: Student[];
+  instructorId?: string;
   isArchived?: boolean;
 }

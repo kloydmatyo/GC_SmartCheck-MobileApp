@@ -1,19 +1,20 @@
 import { auth, db } from "@/config/firebase";
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  Timestamp,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    Timestamp,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import { Class, CreateClassData, Student } from "../types/class";
 import { NetworkService } from "./networkService";
 import { ClassCache, OfflineClass, RealmService } from "./realmService";
+import { UserService } from "./userService";
 
 function getClassSortTime(item: {
   createdAt?: Date;
@@ -57,6 +58,9 @@ export class ClassService {
         throw new Error("User must be authenticated to create a class");
       }
 
+      // Get instructor ID from user profile
+      const instructorId = await UserService.getCurrentUserInstructorId();
+
       const isOnline = await NetworkService.isOnline();
 
       if (!isOnline) {
@@ -81,6 +85,7 @@ export class ClassService {
         ...classData,
         students: classData.students || [],
         isArchived: classData.isArchived || false,
+        instructorId,
         createdBy: currentUser.uid,
         created_at: new Date().toISOString(),
         createdAt: Timestamp.now(),
@@ -142,6 +147,7 @@ export class ClassService {
             room: data.room,
             section_block: data.section_block,
             students: data.students || [],
+            instructorId: data.instructorId,
             createdBy: data.createdBy,
             created_at: data.created_at,
             createdAt: data.createdAt?.toDate(),
@@ -218,6 +224,7 @@ export class ClassService {
         room: data.room,
         section_block: data.section_block,
         students: data.students || [],
+        instructorId: data.instructorId,
         isArchived: data.isArchived || false,
         createdBy: data.createdBy,
         created_at: data.created_at,
