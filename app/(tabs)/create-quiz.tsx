@@ -55,7 +55,9 @@ export default function CreateQuizScreen() {
   const classIdParam = params.classId as string | undefined;
   const goBack = () =>
     classIdParam
-      ? router.replace(`/(tabs)/class-details?classId=${classIdParam}&tab=exams`)
+      ? router.replace(
+          `/(tabs)/class-details?classId=${classIdParam}&tab=exams`,
+        )
       : router.replace("/(tabs)/quizzes");
   const [loading, setLoading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
@@ -70,6 +72,7 @@ export default function CreateQuizScreen() {
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [createdExamId, setCreatedExamId] = useState<string | null>(null);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
     type: "success" | "error" | "info";
@@ -125,7 +128,9 @@ export default function CreateQuizScreen() {
               // Provide a short timeout so UI won't freeze on flaky networks
               const classesSnapshot = await Promise.race([
                 getDocs(classesQuery),
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000))
+                new Promise<any>((_, reject) =>
+                  setTimeout(() => reject(new Error("timeout")), 3000),
+                ),
               ]);
 
               classes = classesSnapshot.docs
@@ -135,7 +140,10 @@ export default function CreateQuizScreen() {
                 }))
                 .filter((cls: any) => !cls.isArchived);
             } catch (err) {
-              console.warn("Firestore classes fetch failed, falling back to cache", err);
+              console.warn(
+                "Firestore classes fetch failed, falling back to cache",
+                err,
+              );
             }
           }
 
@@ -143,7 +151,9 @@ export default function CreateQuizScreen() {
           if (!isOnline || classes.length === 0) {
             const { RealmService } = await import("@/services/realmService");
             const cacheRealm = await RealmService.getCacheRealm();
-            const cachedClasses = cacheRealm.objects<any>("ClassCache").filtered(`createdBy == "${currentUser.uid}"`);
+            const cachedClasses = cacheRealm
+              .objects<any>("ClassCache")
+              .filtered(`createdBy == "${currentUser.uid}"`);
 
             classes = cachedClasses.map((c: any) => ({
               id: c.id,
@@ -182,36 +192,27 @@ export default function CreateQuizScreen() {
 
   const colors = darkModeEnabled
     ? {
-      screenBg: "#111815",
-      headerBg: "#1a2520",
-      cardBg: "#1f2b26",
-      border: "#34483f",
-      text: "#e7f1eb",
-      subtext: "#9db1a6",
-      primary: "#1f3a2f",
-      primaryDark: "#2b3b34",
-      accent: "#8fd1ad",
-    }
+        screenBg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        text: "#e7f1eb",
+        subtext: "#9db1a6",
+        primary: "#1f3a2f",
+        primaryDark: "#2b3b34",
+        accent: "#8fd1ad",
+      }
     : {
-      screenBg: "#f5f5f5",
-      headerBg: "#3d5a3d",
-      cardBg: "#3d5a3d",
-      border: "#e0e0e0",
-      text: "#E8F5E9",
-      subtext: "#B8D4B8",
-      primary: "#3d5a3d",
-      primaryDark: "#2f4a38",
-      accent: "#4CAF50",
-    };
-
-  const handleDateChange = (_event: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate) {
-      const today = toStartOfDay(new Date());
-      const picked = toStartOfDay(selectedDate);
-      setExamDate(picked < today ? today : selectedDate);
-    }
-  };
+        screenBg: "#f5f5f5",
+        headerBg: "#3d5a3d",
+        cardBg: "#3d5a3d",
+        border: "#e0e0e0",
+        text: "#E8F5E9",
+        subtext: "#B8D4B8",
+        primary: "#3d5a3d",
+        primaryDark: "#2f4a38",
+        accent: "#4CAF50",
+      };
 
   const handleSave = async () => {
     // Validation
@@ -311,7 +312,10 @@ export default function CreateQuizScreen() {
       const generateExamCode = (title: string, date: string): string => {
         const initials = title.trim().substring(0, 3).toUpperCase();
         const dateCode = date.replace(/-/g, "");
-        const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
+        const randomSuffix = Math.random()
+          .toString(36)
+          .substring(2, 5)
+          .toUpperCase();
         return `${initials}-${dateCode}-${randomSuffix}`;
       };
 
@@ -355,7 +359,7 @@ export default function CreateQuizScreen() {
           message: "Quiz saved locally. Redirecting to answer key...",
         });
         setTimeout(() => {
-          setStatusModal(prev => ({ ...prev, visible: false }));
+          setStatusModal((prev) => ({ ...prev, visible: false }));
           router.replace(`/(tabs)/edit-answer-key?examId=${result}`);
         }, 1500);
         return;
@@ -405,7 +409,9 @@ export default function CreateQuizScreen() {
       const nextParams = classIdParam
         ? `&classId=${encodeURIComponent(classIdParam)}&tab=exams`
         : "";
-      router.replace(`/(tabs)/edit-answer-key?examId=${examRef.id}${nextParams}`);
+      router.replace(
+        `/(tabs)/edit-answer-key?examId=${newExamId}${nextParams}`,
+      );
     } catch (error) {
       console.error("Error creating quiz:", error);
       setStatusModal({
@@ -421,8 +427,8 @@ export default function CreateQuizScreen() {
 
   const canProceed = Boolean(
     quizName.trim() &&
-      quizName.trim().length <= MAX_FIELD_LENGTH &&
-      numQuestions,
+    quizName.trim().length <= MAX_FIELD_LENGTH &&
+    numQuestions,
   );
 
   return (
@@ -486,71 +492,6 @@ export default function CreateQuizScreen() {
               </TouchableOpacity>
             ))}
           </View>
-
-        {/* Subject (Optional) */}
-        {/* Choices Per Item */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CHOICES PER ITEM *</Text>
-          <View style={styles.choiceButtons}>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                choicesPerItem === 4 && styles.choiceButtonActive,
-                darkModeEnabled &&
-                choicesPerItem === 4 && {
-                  backgroundColor: "#1f3a2f",
-                  borderColor: "#8fd1ad",
-                },
-              ]}
-              onPress={() => setChoicesPerItem(4)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  choicesPerItem === 4 && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                  choicesPerItem === 4 && { color: "#8fd1ad" },
-                ]}
-              >
-                A-D (4 choices)
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                choicesPerItem === 5 && styles.choiceButtonActive,
-                darkModeEnabled &&
-                choicesPerItem === 5 && {
-                  backgroundColor: "#1f3a2f",
-                  borderColor: "#8fd1ad",
-                },
-              ]}
-              onPress={() => setChoicesPerItem(5)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  choicesPerItem === 5 && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                  choicesPerItem === 5 && { color: "#8fd1ad" },
-                ]}
-              >
-                A-E (5 choices)
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
         {!classIdParam && (
@@ -572,7 +513,10 @@ export default function CreateQuizScreen() {
                   return (
                     <TouchableOpacity
                       key={cls.id}
-                      style={[styles.lightClassButton, selected && styles.lightClassButtonActive]}
+                      style={[
+                        styles.lightClassButton,
+                        selected && styles.lightClassButtonActive,
+                      ]}
                       onPress={() => setSelectedClassId(cls.id)}
                       disabled={loading}
                     >
@@ -597,7 +541,8 @@ export default function CreateQuizScreen() {
             <Text style={styles.formLabel}>Class</Text>
             <View style={styles.inlineInfoBox}>
               <Text style={styles.inlineInfoText}>
-                {classOptions.find((cls) => cls.id === selectedClassId)?.class_name || "Selected class"}
+                {classOptions.find((cls) => cls.id === selectedClassId)
+                  ?.class_name || "Selected class"}
               </Text>
             </View>
           </View>
@@ -615,8 +560,8 @@ export default function CreateQuizScreen() {
         <View style={styles.section}>
           <View style={styles.inlineInfoBox}>
             <Text style={styles.inlineInfoText}>
-              After you create the exam, the exam code will appear on the
-              Answer Key tab.
+              After you create the exam, the exam code will appear on the Answer
+              Key tab.
             </Text>
           </View>
         </View>

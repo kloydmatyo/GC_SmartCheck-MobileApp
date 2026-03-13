@@ -357,9 +357,6 @@ export default function EditAnswerKeyScreen() {
       setRemoteVersion(Number(offlineExam.version ?? 1));
       setConflictDetected(false);
       setHasLocalChanges(false);
-
-      const online = await NetworkService.isOnline();
-      setIsOffline(!online);
     } catch (error) {
       console.error("Error loading answer key:", error);
       setStatusModal({
