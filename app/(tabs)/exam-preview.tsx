@@ -594,12 +594,7 @@ export default function ExamPreviewScreen() {
         showsVerticalScrollIndicator={false}
       >
         {activeTab === "answerKey" ? (
-          <View
-            style={[
-              styles.section,
-              { backgroundColor: colors.cardBg, borderColor: colors.border },
-            ]}
-          >
+          <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.title }]}>
                 Answer Key
@@ -664,12 +659,7 @@ export default function ExamPreviewScreen() {
             {renderAnswerKeyGrid()}
           </View>
         ) : (
-          <View
-            style={[
-              styles.section,
-              { backgroundColor: colors.cardBg, borderColor: colors.border },
-            ]}
-          >
+          <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.title }]}>
               Results
             </Text>
@@ -1006,7 +996,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   section: {
-    backgroundColor: "#ffffff",
+    backgroundColor: "transparent",
     borderRadius: 0,
     padding: 0,
     marginBottom: 10,
@@ -1136,8 +1126,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   answerBubbleEmpty: {
-    backgroundColor: "#F3F4F6",
-    borderColor: "#E5E7EB",
+    backgroundColor: "#E5E7EB",
+    borderColor: "#D1D5DB",
   },
   answerText: {
     fontSize: 13,
@@ -1145,7 +1135,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   answerTextEmpty: {
-    color: "#D0D5DD",
+    color: "#9CA3AF",
   },
   emptyPanel: {
     alignItems: "center",
