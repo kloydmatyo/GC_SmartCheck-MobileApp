@@ -1,3 +1,4 @@
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import {
     androidStatusBarHeight,
     horizontalPadding,
@@ -6,9 +7,8 @@ import {
     rp,
     rs,
 } from "@/utils/responsive";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -521,9 +521,14 @@ function buildFallbackHtml(
 ): string {
   const total =
     TEMPLATES.find((t) => t.key === templateKey)?.totalQuestions ?? 50;
-  const examCode = `${String(examName || "GCSC")
-    .replace(/\s+/g, "-")
-    .toUpperCase()}-${version}`;
+
+  // Generate exam code with clear, unambiguous characters
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  const examCode = `EX-${code}`;
 
   // For 20 questions, use 4-up layout (4 sheets per page)
   if (templateKey === "standard20") {
@@ -731,34 +736,35 @@ export default function PrintAnswerSheetScreen() {
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [pendingGeneration, setPendingGeneration] = useState(false);
 
-  const syncExamContext = useCallback(async (): Promise<LatestExamContext | null> => {
-    if (!examId) return null;
+  const syncExamContext =
+    useCallback(async (): Promise<LatestExamContext | null> => {
+      if (!examId) return null;
 
-    const examData = await ExamService.getExamById(examId);
-    if (!examData) return null;
+      const examData = await ExamService.getExamById(examId);
+      if (!examData) return null;
 
-    const latestTitle = examData.metadata.title?.trim() || "Untitled Exam";
-    const latestSection =
-      examData.metadata.section?.trim() ||
-      examData.metadata.subject?.trim() ||
-      "";
-    const latestVersion = examData.metadata.version || 1;
-    const changed =
-      latestTitle !== examName ||
-      latestSection !== section ||
-      latestVersion !== examVersion;
+      const latestTitle = examData.metadata.title?.trim() || "Untitled Exam";
+      const latestSection =
+        examData.metadata.section?.trim() ||
+        examData.metadata.subject?.trim() ||
+        "";
+      const latestVersion = examData.metadata.version || 1;
+      const changed =
+        latestTitle !== examName ||
+        latestSection !== section ||
+        latestVersion !== examVersion;
 
-    setExamName(latestTitle);
-    setSection(latestSection);
-    setExamVersion(latestVersion);
+      setExamName(latestTitle);
+      setSection(latestSection);
+      setExamVersion(latestVersion);
 
-    return {
-      examTitle: latestTitle,
-      examSection: latestSection,
-      examVersion: latestVersion,
-      changed,
-    };
-  }, [examId, examName, section, examVersion]);
+      return {
+        examTitle: latestTitle,
+        examSection: latestSection,
+        examVersion: latestVersion,
+        changed,
+      };
+    }, [examId, examName, section, examVersion]);
 
   const selected = useMemo(
     () => TEMPLATES.find((t) => t.key === templateKey)!,
@@ -871,7 +877,14 @@ export default function PrintAnswerSheetScreen() {
         return;
       }
 
-      const examCode = `${generationData.examTitle.toUpperCase().replace(/\s+/g, "-")}-${version}`;
+      // Generate exam code with clear, unambiguous characters
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let codeStr = "";
+      for (let i = 0; i < 6; i++) {
+        codeStr += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const examCode = `EX-${codeStr}`;
+
       const batchId = await BatchHistoryService.createBatch(
         generationData.examIdValue,
         generationData.examTitle,
@@ -897,7 +910,9 @@ export default function PrintAnswerSheetScreen() {
   // Main generation handler with duplicate/version checks
   async function handleGeneratePreview() {
     const hasLocalSnapshot =
-      examName.trim().length > 0 || section.trim().length > 0 || examVersion > 1;
+      examName.trim().length > 0 ||
+      section.trim().length > 0 ||
+      examVersion > 1;
     const syncedExam = await syncExamContext();
 
     if (syncedExam?.changed && hasLocalSnapshot) {
@@ -1116,13 +1131,18 @@ export default function PrintAnswerSheetScreen() {
       <View
         style={[
           styles.header,
-          { backgroundColor: colors.headerBg, borderBottomColor: colors.border },
+          {
+            backgroundColor: colors.headerBg,
+            borderBottomColor: colors.border,
+          },
         ]}
       >
         <TouchableOpacity onPress={goToQuizzes} style={styles.headerBack}>
           <Ionicons name="chevron-back" size={rs(24)} color={colors.title} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.title }]}>OMR PDF Preview</Text>
+        <Text style={[styles.headerTitle, { color: colors.title }]}>
+          OMR PDF Preview
+        </Text>
         <View style={styles.headerBack} />
       </View>
 
@@ -1132,8 +1152,15 @@ export default function PrintAnswerSheetScreen() {
           { paddingHorizontal: horizontalPadding },
         ]}
       >
-        <View style={[styles.stepCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={[styles.stepTitle, { color: colors.title }]}>Template</Text>
+        <View
+          style={[
+            styles.stepCard,
+            { backgroundColor: colors.cardBg, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.stepTitle, { color: colors.title }]}>
+            Template
+          </Text>
           <View style={styles.templateRow}>
             {TEMPLATES.map((t) => {
               const active = t.key === templateKey;
@@ -1147,7 +1174,10 @@ export default function PrintAnswerSheetScreen() {
                       backgroundColor: colors.pillBg,
                     },
                     active && styles.templateBtnActive,
-                    active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                    active && {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
                   ]}
                   onPress={() => setTemplateKey(t.key)}
                 >
@@ -1165,7 +1195,9 @@ export default function PrintAnswerSheetScreen() {
             })}
           </View>
 
-          <Text style={[styles.fieldLabel, { color: colors.text }]}>Exam Title</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>
+            Exam Title
+          </Text>
           <TextInput
             style={[
               styles.input,
@@ -1181,7 +1213,9 @@ export default function PrintAnswerSheetScreen() {
             placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ca3af"}
           />
 
-          <Text style={[styles.fieldLabel, { color: colors.text }]}>Section/Block</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>
+            Section/Block
+          </Text>
           <TextInput
             style={[
               styles.input,
@@ -1197,7 +1231,9 @@ export default function PrintAnswerSheetScreen() {
             placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ca3af"}
           />
 
-          <Text style={[styles.fieldLabel, { color: colors.text }]}>Version</Text>
+          <Text style={[styles.fieldLabel, { color: colors.text }]}>
+            Version
+          </Text>
           <View style={styles.versionRow}>
             {VERSIONS.map((v) => {
               const active = version === v;
@@ -1211,7 +1247,10 @@ export default function PrintAnswerSheetScreen() {
                       backgroundColor: colors.pillBg,
                     },
                     active && styles.versionBtnActive,
-                    active && { backgroundColor: colors.primary, borderColor: colors.primary },
+                    active && {
+                      backgroundColor: colors.primary,
+                      borderColor: colors.primary,
+                    },
                   ]}
                   onPress={() => setVersion(v)}
                 >
@@ -1264,7 +1303,9 @@ export default function PrintAnswerSheetScreen() {
               size={rs(18)}
               color={colors.primary}
             />
-            <Text style={[styles.batchHistoryText, { color: colors.primary }]}>View Batch History</Text>
+            <Text style={[styles.batchHistoryText, { color: colors.primary }]}>
+              View Batch History
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -1279,7 +1320,12 @@ export default function PrintAnswerSheetScreen() {
             ]}
           >
             <Text style={styles.errorTitle}>PDF Preview Failed</Text>
-            <Text style={[styles.errorText, { color: darkModeEnabled ? "#f1c6c6" : COLORS.textMid }]}>
+            <Text
+              style={[
+                styles.errorText,
+                { color: darkModeEnabled ? "#f1c6c6" : COLORS.textMid },
+              ]}
+            >
               {errorText}
             </Text>
             <TouchableOpacity
@@ -1292,11 +1338,29 @@ export default function PrintAnswerSheetScreen() {
         ) : null}
 
         {htmlContent ? (
-          <View style={[styles.viewerCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-            <View style={[styles.viewerHeader, { backgroundColor: colors.softCardBg, borderBottomColor: colors.border }]}>
-              <Text style={[styles.viewerTitle, { color: colors.title }]}>Answer Sheet Preview</Text>
+          <View
+            style={[
+              styles.viewerCard,
+              { backgroundColor: colors.cardBg, borderColor: colors.border },
+            ]}
+          >
+            <View
+              style={[
+                styles.viewerHeader,
+                {
+                  backgroundColor: colors.softCardBg,
+                  borderBottomColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.viewerTitle, { color: colors.title }]}>
+                Answer Sheet Preview
+              </Text>
               <TouchableOpacity
-                style={[styles.downloadBtn, { backgroundColor: colors.primary }]}
+                style={[
+                  styles.downloadBtn,
+                  { backgroundColor: colors.primary },
+                ]}
                 onPress={handleDownload}
               >
                 <Ionicons
@@ -1364,7 +1428,12 @@ export default function PrintAnswerSheetScreen() {
                     size={rs(14)}
                     color={COLORS.success}
                   />
-                  <Text style={[styles.metricText, { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid }]}>
+                  <Text
+                    style={[
+                      styles.metricText,
+                      { color: darkModeEnabled ? "#c4d2cb" : COLORS.textMid },
+                    ]}
+                  >
                     {pdfMetrics.resolution.width}×{pdfMetrics.resolution.height}
                   </Text>
                 </View>

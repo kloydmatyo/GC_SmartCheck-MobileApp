@@ -7,26 +7,26 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  query,
-  serverTimestamp,
-  setDoc,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDocs,
+    query,
+    serverTimestamp,
+    setDoc,
+    where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
@@ -310,13 +310,12 @@ export default function CreateQuizScreen() {
 
       // Generate exam code
       const generateExamCode = (title: string, date: string): string => {
-        const initials = title.trim().substring(0, 3).toUpperCase();
-        const dateCode = date.replace(/-/g, "");
-        const randomSuffix = Math.random()
-          .toString(36)
-          .substring(2, 5)
-          .toUpperCase();
-        return `${initials}-${dateCode}-${randomSuffix}`;
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars like 0/O, 1/I/L
+        let code = "";
+        for (let i = 0; i < 6; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return `EX-${code}`;
       };
 
       const examCode = generateExamCode(quizName.trim(), currentDate);
