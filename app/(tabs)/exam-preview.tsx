@@ -122,15 +122,15 @@ export default function ExamPreviewScreen() {
         accent: "#9bd8b8",
       }
     : {
-        bg: "#eef1ef",
-        headerBg: "#3d5a3d",
-        border: "#2f4a38",
-        cardBg: "#3d5a3d",
-        cardSoft: "#2d4a2d",
-        title: "#e8f6ee",
-        text: "#b8d4b8",
-        icon: "#8fd1ad",
-        accent: "#8fd1ad",
+        bg: "#F6F8F7",
+        headerBg: "#FFFFFF",
+        border: "#E5E7EB",
+        cardBg: "#FFFFFF",
+        cardSoft: "#F3F4F6",
+        title: "#111827",
+        text: "#374151",
+        icon: "#16A34A",
+        accent: "#16A34A",
       };
 
   useEffect(() => {
