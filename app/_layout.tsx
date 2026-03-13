@@ -106,7 +106,7 @@ export default function RootLayout() {
       {isSyncing && (
         <View style={styles.syncOverlay} pointerEvents="none">
           <View style={styles.syncContainer}>
-            <ActivityIndicator color="white" size="small" />
+            <ActivityIndicator color="#6B7280" size="small" />
             <Text style={styles.syncText}>Syncing Data...</Text>
           </View>
         </View>
@@ -125,20 +125,22 @@ const styles = StyleSheet.create({
   syncContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#ECEEF2',
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
+    shadowColor: '#0E1628',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   syncText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: 'bold',
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '600',
   }
 });
