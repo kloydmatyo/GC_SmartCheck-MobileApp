@@ -1,219 +1,431 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { GradeStorageService } from "@/services/gradeStorageService";
+import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
+import { ResultsService } from "@/services/resultsService";
+import { SyncService, type SyncResult } from "@/services/syncService";
+
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
+
+import { signOut } from "firebase/auth";
 import {
-    ActivityIndicator,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+
+import React, { useCallback, useEffect, useState } from "react";
+
+import {
+  ActivityIndicator,
+  Animated,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+
+import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
+
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
-interface RecentExam {
-  id: string;
-  title: string;
-  subject: string;
-  date: string;
-  papers: number | null;
-  status: string;
-}
-
-const toDate = (value: any): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value?.toDate === "function") return value.toDate();
-
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+type SummaryStats = {
+  scans: number;
+  averageScore: number;
+  classes: number;
 };
 
-const formatDate = (value: any): string => {
-  const parsed = toDate(value);
-  if (!parsed) return "No date";
-  return parsed.toLocaleDateString("en-US", {
+type RecentScan = {
+  id: string;
+  studentName: string;
+  examLabel: string;
+  timeLabel: string;
+  score: number;
+  color: string;
+  textColor: string;
+};
+
+const MOCK_RECENT_SCANS: RecentScan[] = [
+  {
+    id: "mock-scan-1",
+    studentName: "Jess Taylor",
+    examLabel: "BSIT 3B - Chapter Test",
+    timeLabel: "12m ago",
+    score: 95,
+    color: "#D8F3E7",
+    textColor: "#20A86B",
+  },
+  {
+    id: "mock-scan-2",
+    studentName: "Sarah Davis",
+    examLabel: "BSIT 3B - Chapter Test",
+    timeLabel: "27m ago",
+    score: 55,
+    color: "#F9D7D9",
+    textColor: "#E24E5C",
+  },
+  {
+    id: "mock-scan-3",
+    studentName: "Marco Reyes",
+    examLabel: "BSCS 2A - Midterm Exam",
+    timeLabel: "1h ago",
+    score: 84,
+    color: "#F5E8B8",
+    textColor: "#D68B11",
+  },
+  {
+    id: "mock-scan-4",
+    studentName: "Nina Flores",
+    examLabel: "BSCS 2A - Midterm Exam",
+    timeLabel: "2h ago",
+    score: 91,
+    color: "#D8F3E7",
+    textColor: "#20A86B",
+  },
+];
+
+const emptyStats: SummaryStats = {
+  scans: 0,
+  averageScore: 0,
+  classes: 0,
+};
+
+const statCards = [
+  {
+    key: "scans",
+    label: "Scans",
+    icon: "document-text-outline" as const,
+    route: "/(tabs)/quizzes",
+  },
+  {
+    key: "averageScore",
+    label: "Avg Score",
+    icon: "stats-chart-outline" as const,
+    route: null,
+  },
+  {
+    key: "classes",
+    label: "Classes",
+    icon: "folder-open-outline" as const,
+    route: "/(tabs)/classes",
+  },
+] as const;
+
+function formatHeaderDate(date: Date) {
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
     month: "short",
     day: "numeric",
-    year: "numeric",
   });
-};
+}
 
-const normalizeStatus = (
-  value: any,
-): "Draft" | "Scheduled" | "Active" | "Completed" => {
-  switch (String(value || "").toLowerCase()) {
-    case "scheduled":
-      return "Scheduled";
-    case "active":
-      return "Active";
-    case "completed":
-      return "Completed";
-    default:
-      return "Draft";
+function formatRelativeTime(dateLike: string) {
+  const target = new Date(dateLike);
+  if (Number.isNaN(target.getTime())) {
+    return "Just now";
   }
-};
+
+  const diffMs = Date.now() - target.getTime();
+  const minutes = Math.max(0, Math.floor(diffMs / 60000));
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function getScoreTone(score: number) {
+  if (score >= 85) {
+    return { badge: "#D8F3E7", text: "#20A86B" };
+  }
+  if (score >= 70) {
+    return { badge: "#F5E8B8", text: "#D68B11" };
+  }
+  return { badge: "#F9D7D9", text: "#E24E5C" };
+}
+
+function formatLastSync(lastSync: Date | null) {
+  if (!lastSync) return "Never";
+
+  const now = Date.now();
+  const diffMs = now - lastSync.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function HomeScreen() {
-  const [showScanner, setShowScanner] = useState(false);
   const router = useRouter();
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
-
-  const [stats, setStats] = useState({
-    totalExams: 0,
-    totalStudents: 0,
-    totalSheets: 0,
-  });
-  const [recentExams, setRecentExams] = useState<any[]>([]);
+  const syncBannerOffset = useState(new Animated.Value(-16))[0];
+  const syncBannerOpacity = useState(new Animated.Value(0))[0];
   const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState("Faculty User");
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadingExams, setLoadingExams] = useState(false);
-  const [examsError, setExamsError] = useState<string | null>(null);
-  const [showAllExams, setShowAllExams] = useState(false);
+  const [stats, setStats] = useState<SummaryStats>(emptyStats);
+  const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
+  const [teacherName, setTeacherName] = useState("Teacher");
+  const [teacherEmail, setTeacherEmail] = useState("");
+  const [isOnline, setIsOnline] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [showSyncBanner, setShowSyncBanner] = useState(false);
+  const displayRecentScans = recentScans.length
+    ? recentScans
+    : MOCK_RECENT_SCANS;
 
-  const loadDashboard = useCallback(() => {
-    let cancelled = false;
+  const animateSyncBannerOut = useCallback(() => {
+    Animated.parallel([
+      Animated.timing(syncBannerOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(syncBannerOffset, {
+        toValue: -16,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setShowSyncBanner(false);
+      }
+    });
+  }, [syncBannerOffset, syncBannerOpacity]);
+
+  const showSyncBannerTemporarily = useCallback(() => {
+    setShowSyncBanner(true);
+    syncBannerOpacity.setValue(0);
+    syncBannerOffset.setValue(-16);
+
+    Animated.parallel([
+      Animated.timing(syncBannerOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(syncBannerOffset, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [syncBannerOffset, syncBannerOpacity]);
+
+  useEffect(() => {
+    let mounted = true;
+    let hideBannerTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const loadSyncStatus = async () => {
+      const stats = await OfflineStorageService.getStorageStats();
+      if (!mounted) return;
+
+      setPendingCount(stats.pendingUpdatesCount);
+      setLastSync(stats.lastSync);
+      setIsSyncing(SyncService.isSyncInProgress());
+      setIsOnline(NetworkService.getConnectionStatus());
+
+      showSyncBannerTemporarily();
+      if (hideBannerTimer) {
+        clearTimeout(hideBannerTimer);
+      }
+      hideBannerTimer = setTimeout(() => {
+        if (mounted) {
+          animateSyncBannerOut();
+        }
+      }, 2200);
+    };
+
+    NetworkService.initialize();
+    SyncService.initialize();
+    loadSyncStatus();
+
+    const unsubscribeNetwork = NetworkService.addListener((connected) => {
+      if (!mounted) return;
+      setIsOnline(connected);
+      loadSyncStatus();
+    });
+
+    const unsubscribeSync = SyncService.addSyncListener(
+      (_result: SyncResult) => {
+        if (!mounted) return;
+        setIsSyncing(false);
+        loadSyncStatus();
+      },
+    );
+
+    const interval = setInterval(loadSyncStatus, 30000);
+
+    return () => {
+      mounted = false;
+      unsubscribeNetwork();
+      unsubscribeSync();
+      clearInterval(interval);
+      if (hideBannerTimer) {
+        clearTimeout(hideBannerTimer);
+      }
+    };
+  }, [animateSyncBannerOut, showSyncBannerTemporarily]);
+
+  const loadHome = useCallback(() => {
+    let active = true;
+
     (async () => {
       try {
         setLoading(true);
-        const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
-        if (!cancelled) {
-          setDarkModeEnabled(savedDarkMode === "true");
-        }
 
         const currentUser = auth.currentUser;
-        if (!currentUser) return;
-
-        // Fetch user display name
-        if (currentUser.displayName) {
-          setUserName(currentUser.displayName);
-        }
-
-        // Fetch exams
-        const examsQuery = query(
-          collection(db, "exams"),
-          where("createdBy", "==", currentUser.uid),
-        );
-        const examsSnapshot = await getDocs(examsQuery);
-        const exams = examsSnapshot.docs
-          .map((doc) => {
-            const data = doc.data();
-            const createdDate = toDate(data.created_at || data.createdAt);
-            return {
-              id: doc.id,
-              title: data.title || "Untitled",
-              subject: data.subject || "",
-              date: formatDate(data.created_at || data.createdAt),
-              papers: data.scanned_papers || null,
-              status: normalizeStatus(data.status),
-              isArchived: data.isArchived || false,
-              createdAtTs: createdDate ? createdDate.getTime() : 0,
-              createdAtDate: createdDate,
-              generated_sheets: data.generated_sheets || [],
-            };
-          })
-          .filter((e) => !e.isArchived)
-          .sort((a, b) => b.createdAtTs - a.createdAtTs);
-
-        // Total answer sheets
-        const totalSheets = exams.reduce((sum, exam) => {
-          if (Array.isArray(exam.generated_sheets)) {
-            return (
-              sum +
-              exam.generated_sheets.reduce(
-                (s: number, sheet: any) => s + (sheet.sheet_count || 0),
-                0,
-              )
-            );
+        if (!currentUser) {
+          if (active) {
+            setStats(emptyStats);
+            setRecentScans([]);
           }
-          return sum;
-        }, 0);
-
-        // Total exams (non-archived)
-        const totalExams = exams.length;
-
-        // Fetch students from classes
-        let totalStudents = 0;
-        try {
-          const classesQuery = query(
-            collection(db, "classes"),
-            where("createdBy", "==", currentUser.uid),
-          );
-          const classesSnapshot = await getDocs(classesQuery);
-          totalStudents = classesSnapshot.docs.reduce((sum, doc) => {
-            const data = doc.data();
-            if (!data.isArchived) {
-              return sum + (data.students?.length || 0);
-            }
-            return sum;
-          }, 0);
-        } catch (e) {
-          console.warn("Could not fetch students:", e);
+          return;
         }
 
-        setStats({ totalExams, totalStudents, totalSheets });
-        setRecentExams(exams.slice(0, 3));
+        const userProfileSnap = await getDoc(doc(db, "users", currentUser.uid));
+        const userProfile = userProfileSnap.exists()
+          ? userProfileSnap.data()
+          : null;
+        const fullName = String(
+          userProfile?.fullName || currentUser.displayName || "",
+        ).trim();
+        const email = String(
+          userProfile?.email || currentUser.email || "",
+        ).trim();
+        const fallbackName = email ? email.split("@")[0] : "";
+        const firstName = (fullName || fallbackName).split(" ")[0];
+
+        if (active) {
+          setTeacherName(firstName || "Teacher");
+          setTeacherEmail(email);
+        }
+
+        const [classesSnapshot, unifiedResults] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, "classes"),
+              where("createdBy", "==", currentUser.uid),
+            ),
+          ),
+          ResultsService.getUnifiedResults(),
+        ]);
+
+        const classDocs = classesSnapshot.docs
+          .map((doc) => doc.data())
+          .filter((item) => !item.isArchived);
+        const scanRows = unifiedResults.rows.filter(
+          (item) => item.source === "scan",
+        );
+
+        const averageScore =
+          scanRows.length > 0
+            ? Math.round(
+                scanRows.reduce((sum, item) => sum + item.percentage, 0) /
+                  scanRows.length,
+              )
+            : 0;
+
+        const recent = scanRows.slice(0, 4).map((scan) => {
+          const tone = getScoreTone(scan.percentage);
+          return {
+            id: scan.id,
+            studentName: scan.studentName,
+            examLabel: `${scan.classLabel} - ${scan.examLabel}`,
+            timeLabel: formatRelativeTime(scan.dateValue),
+            score: scan.percentage,
+            color: tone.badge,
+            textColor: tone.text,
+          };
+        });
+
+        if (!active) {
+          return;
+        }
+
+        setStats({
+          scans: scanRows.length,
+          averageScore,
+          classes: classDocs.length,
+        });
+
+        setRecentScans(
+          recent.map((item) => ({
+            id: item.id,
+            studentName: item.studentName,
+            examLabel: item.examLabel,
+            timeLabel: item.timeLabel,
+            score: item.score,
+            color: item.color,
+            textColor: item.textColor,
+          })),
+        );
       } catch (error) {
-        console.error("Error loading dashboard:", error);
+        console.error("Error loading home screen:", error);
+        if (active) {
+          setStats(emptyStats);
+          setRecentScans([]);
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (active) {
+          setLoading(false);
+        }
       }
     })();
+
     return () => {
-      cancelled = true;
+      active = false;
     };
   }, []);
 
-  // ── Load recent exams from Firestore (this instructor only) ───────────
-  const loadRecentExams = useCallback(async () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      setLoadingExams(false);
-      return;
+  useFocusEffect(loadHome);
+
+  const syncVisual = (() => {
+    if (!isOnline) {
+      return {
+        color: "#F2A54A",
+        iconColor: "#F2A54A",
+        iconBackground: "#F2A54A1A",
+        textColor: "#5A6475",
+        icon: "cloud-offline-outline" as keyof typeof Ionicons.glyphMap,
+        text: "Offline",
+      };
     }
-    setLoadingExams(true);
-    setExamsError(null);
-    try {
-      const q = query(
-        collection(db, "exams"),
-        where("createdBy", "==", uid),
-        orderBy("created_at", "desc"),
-      );
-      const snap = await getDocs(q);
-      const exams: RecentExam[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          title: data.title ?? "Untitled Exam",
-          subject: data.subject ?? data.course_subject ?? "—",
-          date: data.created_at
-            ? new Date(data.created_at).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })
-            : "—",
-          papers: data.scanned_papers ?? null,
-          status: data.status ?? "Draft",
-        };
-      });
-      setRecentExams(exams);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load exams.";
-      setExamsError(msg);
-    } finally {
-      setLoadingExams(false);
-      setRefreshing(false);
+
+    if (isSyncing) {
+      return {
+        color: "#22C58B",
+        iconColor: "#22C58B",
+        iconBackground: "#22C58B1A",
+        textColor: "#5A6475",
+        icon: "sync-outline" as keyof typeof Ionicons.glyphMap,
+        text: "Syncing...",
+      };
     }
   }, []);
   // ── Pull-to-refresh handler ──────────────────────────────────────────────
@@ -230,899 +442,562 @@ export default function HomeScreen() {
     }, [loadDashboard, loadRecentExams]),
   );
 
-  // ── Manual Sync from Header ──────────────────────────────────────────────
-  const handleManualSync = async () => {
-    setIsManualSyncing(true);
+    if (pendingCount > 0) {
+      return {
+        color: "#F2C45A",
+        iconColor: "#F2C45A",
+        iconBackground: "#F2C45A1A",
+        textColor: "#5A6475",
+        icon: "cloud-upload-outline" as keyof typeof Ionicons.glyphMap,
+        text: `${pendingCount} pending`,
+      };
+    }
+
+    return {
+      color: "#1FC27D",
+      iconColor: "#9AA3AF",
+      iconBackground: "transparent",
+      dotColor: "#22C58B",
+      textColor: "#6B7280",
+      icon: "cloud-done-outline" as keyof typeof Ionicons.glyphMap,
+      text: lastSync ? `Synced ${formatLastSync(lastSync)}` : "Synced to Web",
+    };
+  })();
+
+  const handleLogout = async () => {
     try {
-      const netState = await NetInfo.fetch();
-      if (!netState.isConnected || !netState.isInternetReachable) {
-        Toast.show({
-          type: "error",
-          text1: "Offline",
-          text2: "Please connect to the internet to sync data.",
-        });
-        return;
-      }
-
-      const count = await GradeStorageService.getOfflineItemCount();
-      if (count === 0) {
-        Toast.show({
-          type: "info",
-          text1: "Up to Date",
-          text2: "No offline data to sync.",
-        });
-        return;
-      }
-
-      await GradeStorageService.syncOfflineQueue();
-      Toast.show({
-        type: "success",
-        text1: "Sync Complete",
-        text2: `Successfully synced ${count} items.`,
-      });
-      onRefresh(); // Refresh stats/exams since we've added new records
-    } catch (e) {
+      setLogoutConfirmVisible(false);
+      await signOut(auth);
+      router.replace("/sign-in");
+    } catch (error) {
+      console.error("Error signing out:", error);
       Toast.show({
         type: "error",
-        text1: "Sync Failed",
-        text2: "An error occurred during sync.",
+        text1: "Error",
+        text2: "Failed to log out",
       });
-    } finally {
-      setIsManualSyncing(false);
     }
   };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Draft":
-        return "#9e9e9e";
-      case "Scheduled":
-        return "#ff9800";
-      case "Active":
-        return "#00a550";
-      case "Completed":
-        return "#4a90e2";
-      default:
-        return "#9e9e9e";
-    }
-  };
-
-  if (showScanner) {
-    return <ScannerScreen onClose={() => setShowScanner(false)} />;
-  }
-
-  const colors = darkModeEnabled
-    ? {
-        screenBg: "#111815",
-        headerBg: "#1a2520",
-        headerBorder: "#2b3b34",
-        title: "#e7f1eb",
-        subtitle: "#9db1a6",
-        icon: "#dce8e1",
-        primary: "#3f6b54",
-        cardBg: "#1f2b26",
-        cardBorder: "#34483f",
-        cardIconBg: "#2a3a33",
-        value: "#8fd1ad",
-        examTitle: "#e3eee8",
-        examMeta: "#a3b6ab",
-        surfaceAccent: "#2f8a74",
-        quickActionBg: "#1f3a2f",
-        quickActionBorder: "#4f7a67",
-        quickActionText: "#e8f6ee",
-      }
-    : {
-        screenBg: "#eef1ef",
-        headerBg: "#fff",
-        headerBorder: "#d8dfda",
-        title: "#24362f",
-        subtitle: "#6c7d74",
-        icon: "#24362f",
-        primary: "#3d5a3d",
-        cardBg: "#f0ead6",
-        cardBorder: "#8cb09a",
-        cardIconBg: "#dbe7df",
-        value: "#2f6a50",
-        examTitle: "#333",
-        examMeta: "#666",
-        surfaceAccent: "#2f8a74",
-        quickActionBg: "#3d5a3d",
-        quickActionBorder: "#3d5a3d",
-        quickActionText: "#ffffff",
-      };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: colors.headerBg,
-            borderBottomColor: colors.headerBorder,
-          },
-        ]}
-      >
-        <View style={styles.headerLeft}>
-          <Image
-            source={require("@/assets/images/gordon-college-logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={[styles.headerTitle, { color: colors.title }]}>
-            GCSC
-          </Text>
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={handleManualSync}
-            disabled={isManualSyncing}
-          >
-            {isManualSyncing ? (
-              <ActivityIndicator size={18} color="#24362f" />
-            ) : (
-              <Ionicons name="sync-outline" size={18} color="#24362f" />
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons
-              name="notifications-outline"
-              size={18}
-              color={colors.icon}
-            />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons
-              name="person-circle-outline"
-              size={18}
-              color={colors.icon}
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Welcome */}
-        <View style={styles.welcomeSection}>
-          <Text style={[styles.welcomeText, { color: colors.title }]}>
-            Welcome back, {userName}.
-          </Text>
-          <Text style={[styles.subtitleText, { color: colors.subtitle }]}>
-            Ready to grade some papers?
-          </Text>
-        </View>
-
-        {/* Start Scanning */}
-        <TouchableOpacity
-          style={[styles.scanButton, { backgroundColor: colors.primary }]}
-          onPress={() => setShowScanner(true)}
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
+      <View style={styles.container}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.content}
         >
-          <Ionicons name="document-text-outline" size={20} color="#fff" />
-          <Text style={styles.scanButtonText}>Start Scanning Papers</Text>
-        </TouchableOpacity>
-
-        {/* Stats Row */}
-        <View style={styles.statsContainer}>
-          <View
-            style={[
-              styles.statCard,
-              {
-                backgroundColor: colors.cardBg,
-                borderColor: colors.cardBorder,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.statIconContainer,
-                { backgroundColor: colors.cardIconBg },
-              ]}
-            >
-              <Ionicons name="book-outline" size={18} color={colors.primary} />
-            </View>
-            <Text style={[styles.statValue, { color: colors.value }]}>
-              {loading ? "-" : stats.totalExams}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
-              Total Exams
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statCard,
-              {
-                backgroundColor: colors.cardBg,
-                borderColor: colors.cardBorder,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.statIconContainer,
-                { backgroundColor: colors.cardIconBg },
-              ]}
-            >
-              <Ionicons
-                name="people-outline"
-                size={18}
-                color={colors.primary}
-              />
-            </View>
-            <Text style={[styles.statValue, { color: colors.value }]}>
-              {loading ? "-" : stats.totalStudents}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
-              Total Students
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statCard,
-              {
-                backgroundColor: colors.cardBg,
-                borderColor: colors.cardBorder,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.statIconContainer,
-                { backgroundColor: colors.cardIconBg },
-              ]}
-            >
-              <Ionicons
-                name="document-outline"
-                size={18}
-                color={colors.primary}
-              />
-            </View>
-            <Text style={[styles.statValue, { color: colors.value }]}>
-              {loading ? "-" : stats.totalSheets}
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.subtitle }]}>
-              Answer Sheets
-            </Text>
-          </View>
-
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.quickActionsSection}>
-          <Text style={[styles.sectionTitle, { color: colors.title }]}>
-            Quick Actions
-          </Text>
-          <View style={styles.quickActions}>
-            <TouchableOpacity
-              style={[
-                styles.quickActionCard,
-                {
-                  backgroundColor: colors.quickActionBg,
-                  borderColor: colors.quickActionBorder,
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/create-quiz")}
-            >
-              <View style={styles.quickActionIconWrap}>
-                <Ionicons
-                  name="add-circle-outline"
-                  size={18}
-                  color={colors.primary}
-                />
-              </View>
-              <Text
+          <View style={styles.topRow}>
+            <View style={styles.topSpacer} />
+            {showSyncBanner ? (
+              <Animated.View
                 style={[
-                  styles.quickActionText,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Create Exam
-              </Text>
-              <Text
-                style={[
-                  styles.quickActionSubtext,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                New quiz or test
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.quickActionCard,
-                {
-                  backgroundColor: colors.quickActionBg,
-                  borderColor: colors.quickActionBorder,
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/generator")}
-            >
-              <View style={styles.quickActionIconWrap}>
-                <Ionicons
-                  name="document-text-outline"
-                  size={18}
-                  color={colors.primary}
-                />
-              </View>
-              <Text
-                style={[
-                  styles.quickActionText,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Answer Sheets
-              </Text>
-              <Text
-                style={[
-                  styles.quickActionSubtext,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Generate sheet templates
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.quickActionCard,
-                {
-                  backgroundColor: colors.quickActionBg,
-                  borderColor: colors.quickActionBorder,
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/quizzes")}
-            >
-              <View style={styles.quickActionIconWrap}>
-                <Ionicons
-                  name="book-outline"
-                  size={18}
-                  color={colors.primary}
-                />
-              </View>
-              <Text
-                style={[
-                  styles.quickActionText,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                All Exams
-              </Text>
-              <Text
-                style={[
-                  styles.quickActionSubtext,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Browse saved quizzes
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.quickActionCard,
-                styles.quickActionCardWide,
-                styles.quickActionCenterCard,
-                {
-                  backgroundColor: colors.quickActionBg,
-                  borderColor: colors.quickActionBorder,
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/batch-history")}
-            >
-              <Text
-                style={[
-                  styles.quickActionCenterText,
-                  { color: colors.quickActionText },
-                ]}
-              >
-                Batch History
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Recent Exams */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Exams</Text>
-          {recentExams.length > 5 && (
-            <TouchableOpacity onPress={() => setShowAllExams((prev) => !prev)}>
-              <Text style={styles.viewAllText}>
-                {showAllExams ? "Show Less" : `View All (${recentExams.length})`}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        <View style={styles.examsContainer}>
-          {loading ? (
-            <>
-              <View
-                style={[
-                  styles.examSkeleton,
-                  { backgroundColor: colors.cardIconBg },
-                ]}
-              />
-              <View
-                style={[
-                  styles.examSkeleton,
-                  { backgroundColor: colors.cardIconBg },
-                ]}
-              />
-              <View
-                style={[
-                  styles.examSkeleton,
-                  { backgroundColor: colors.cardIconBg },
-                ]}
-              />
-            </>
-          ) : recentExams.length === 0 ? (
-            <View
-              style={[
-                styles.emptyExams,
-                {
-                  backgroundColor: colors.cardBg,
-                  borderColor: colors.cardBorder,
-                },
-              ]}
-            >
-              <Ionicons
-                name="document-outline"
-                size={36}
-                color={colors.subtitle}
-              />
-              <Text style={[styles.emptyExamsText, { color: colors.subtitle }]}>
-                No exams yet
-              </Text>
-              <TouchableOpacity
-                onPress={() => router.push("/(tabs)/create-quiz")}
-              >
-                <Text
-                  style={[
-                    styles.emptyExamsLink,
-                    { color: colors.surfaceAccent },
-                  ]}
-                >
-                  Create your first exam
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            (showAllExams ? recentExams : recentExams.slice(0, 5)).map((exam) => (
-              <TouchableOpacity
-                key={exam.id}
-                style={[
-                  styles.examCard,
+                  styles.syncPill,
                   {
-                    backgroundColor: colors.cardBg,
-                    borderColor: colors.cardBorder,
+                    opacity: syncBannerOpacity,
+                    transform: [{ translateY: syncBannerOffset }],
                   },
                 ]}
-                onPress={() =>
-                  router.push(`/(tabs)/exam-preview?examId=${exam.id}`)
-                }
               >
-                <View style={styles.examHeader}>
-                  <Text
-                    style={[styles.examTitle, { color: colors.examTitle }]}
-                    numberOfLines={1}
-                  >
-                    {exam.title}
-                  </Text>
+                <TouchableOpacity
+                  style={styles.syncPillTouch}
+                  activeOpacity={0.85}
+                  onPress={animateSyncBannerOut}
+                >
                   <View
                     style={[
-                      styles.statusBadge,
-                      { backgroundColor: getStatusColor(exam.status) },
+                      styles.syncIconWrap,
+                      syncVisual.iconBackground
+                        ? { backgroundColor: syncVisual.iconBackground }
+                        : null,
                     ]}
                   >
-                    <Text style={styles.statusText}>{exam.status}</Text>
+                    {isSyncing ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={syncVisual.iconColor}
+                      />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name={syncVisual.icon}
+                          size={14}
+                          color={syncVisual.iconColor}
+                        />
+                        {syncVisual.dotColor ? (
+                          <View
+                            style={[
+                              styles.syncDot,
+                              { backgroundColor: syncVisual.dotColor },
+                            ]}
+                          />
+                        ) : null}
+                      </>
+                    )}
                   </View>
-                </View>
-                <Text
-                  style={[styles.examSubject, { color: colors.subtitle }]}
-                  numberOfLines={1}
-                >
-                  {exam.subject}
-                </Text>
-                <View style={styles.examFooter}>
-                  <View style={styles.examInfo}>
-                    <Ionicons
-                      name="calendar-outline"
-                      size={14}
-                      color={colors.examMeta}
-                    />
-                    <Text
-                      style={[styles.examInfoText, { color: colors.examMeta }]}
-                    >
-                      {exam.date}
-                    </Text>
-                  </View>
-                  <View style={styles.examInfo}>
-                    <Ionicons
-                      name="document-outline"
-                      size={14}
-                      color={colors.examMeta}
-                    />
-                    <Text
-                      style={[styles.examInfoText, { color: colors.examMeta }]}
-                    >
-                      {exam.papers ? `${exam.papers} Papers` : "-- Papers"}
-                    </Text>
-                  </View>
-                </View>
-                <View
-                  style={[
-                    styles.examBottomAccent,
-                    { backgroundColor: colors.surfaceAccent },
-                  ]}
-                />
+                  <Text
+                    style={[
+                      styles.syncText,
+                      { color: syncVisual.textColor },
+                    ]}
+                  >
+                    {syncVisual.text}
+                  </Text>
+                </TouchableOpacity>
+              </Animated.View>
+            ) : (
+              <View style={styles.topSpacer} />
+            )}
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => setSettingsMenuVisible(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="settings-outline" size={20} color="#111827" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.greetingBlock}>
+            <Text style={styles.dateText}>{formatHeaderDate(new Date())}</Text>
+            <Text style={styles.greetingText}>Good morning, {teacherName}</Text>
+          </View>
+
+          <View style={styles.statsRow}>
+            {statCards.map((card) => (
+              <TouchableOpacity
+                key={card.key}
+                style={[
+                  styles.statCard,
+                  styles.statCardStatic,
+                  Platform.OS === "web"
+                    ? ({ cursor: card.route ? "pointer" : "auto" } as any)
+                    : null,
+                ]}
+                activeOpacity={card.route ? 0.82 : 1}
+                disabled={!card.route}
+                onPress={() => {
+                  if (card.route) {
+                    router.push(card.route);
+                  }
+                }}
+              >
+                <Ionicons name={card.icon} size={22} color="#19B97C" />
+                {loading ? (
+                  <ActivityIndicator
+                    style={styles.statLoader}
+                    size="small"
+                    color="#19B97C"
+                  />
+                ) : (
+                  <Text style={styles.statValue}>
+                    {card.key === "averageScore"
+                      ? `${stats.averageScore}%`
+                      : stats[card.key as keyof SummaryStats]}
+                  </Text>
+                )}
+                <Text style={styles.statLabel}>{card.label}</Text>
               </TouchableOpacity>
-            ))
-          )}
-        </View>
+            ))}
+          </View>
 
-        <View style={{ height: 80 }} />
-      </ScrollView>
+          <TouchableOpacity
+            style={styles.quickScanButton}
+            onPress={() => router.push(`/scanner?quick=${Date.now()}`)}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
+            <Text style={styles.quickScanText}>Quick Scan</Text>
+          </TouchableOpacity>
 
-      {/* Floating New Quiz Button */}
-      <TouchableOpacity
-        style={[
-          styles.fab,
-          {
-            backgroundColor: darkModeEnabled ? "#1f3a2f" : colors.primary,
-            shadowColor: darkModeEnabled ? "#000" : colors.primary,
-            borderWidth: darkModeEnabled ? 1 : 0,
-            borderColor: darkModeEnabled ? "#4f7a67" : "transparent",
-          },
-        ]}
-        onPress={() => router.push("/(tabs)/create-quiz")}
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Scans</Text>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/quizzes")}>
+              <Text style={styles.seeAllText}>See all</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.listWrap}>
+            {loading ? (
+              <>
+                <View style={styles.placeholderCard} />
+                <View style={styles.placeholderCard} />
+                <View style={styles.placeholderCard} />
+              </>
+            ) : (
+              displayRecentScans.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.scanCard}
+                  onPress={() => router.push("/(tabs)/quizzes")}
+                  activeOpacity={0.85}
+                >
+                  <View
+                    style={[
+                      styles.scoreBubble,
+                      { backgroundColor: item.color },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.scoreBubbleText,
+                        { color: item.textColor },
+                      ]}
+                    >
+                      {item.score}
+                    </Text>
+                  </View>
+                  <View style={styles.scanTextWrap}>
+                    <Text style={styles.scanName} numberOfLines={1}>
+                      {item.studentName}
+                    </Text>
+                    <View style={styles.scanMetaRow}>
+                      <Text style={styles.scanMeta} numberOfLines={1}>
+                        {item.examLabel}
+                      </Text>
+                      <Text style={styles.scanMetaDot}>•</Text>
+                      <Text style={styles.scanTime}>{item.timeLabel}</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#C5CBD6" />
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      </View>
+
+      <Modal
+        visible={settingsMenuVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSettingsMenuVisible(false)}
       >
-        <Ionicons name="add-circle" size={22} color="#fff" />
-        <Text style={styles.fabText}>New Quiz</Text>
-      </TouchableOpacity>
-    </View>
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setSettingsMenuVisible(false)}
+        >
+          <View style={styles.accountMenu}>
+            <View style={styles.accountMenuHeader}>
+              <Text style={styles.accountMenuTitle}>Teacher Account</Text>
+              <Text style={styles.accountMenuEmail} numberOfLines={1}>
+                {teacherEmail ||
+                  auth.currentUser?.email ||
+                  "teacher@school.edu"}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.accountMenuAction}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setLogoutConfirmVisible(true);
+              }}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#D7426B" />
+              <Text style={styles.accountMenuActionText}>Log Out</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <ConfirmationModal
+        visible={logoutConfirmVisible}
+        title="Log Out"
+        message="Are you sure you want to log out of your account?"
+        cancelText="Cancel"
+        confirmText="Log Out"
+        destructive
+        onCancel={() => setLogoutConfirmVisible(false)}
+        onConfirm={handleLogout}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#F7F7F8",
+  },
   container: {
     flex: 1,
-    backgroundColor: "#eef1ef",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingTop: 56,
-    paddingBottom: 10,
-    backgroundColor: "#fff",
-    borderBottomWidth: 1,
-    borderBottomColor: "#d8dfda",
-    elevation: 2,
-  },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  logo: {
-    width: 30,
-    height: 30,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#24362f",
-  },
-  headerRight: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  iconButton: {
-    padding: 6,
+    backgroundColor: "#F7F7F8",
   },
   content: {
-    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 120,
   },
-  scrollContent: {
-    paddingBottom: 20,
+  topRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18,
   },
-  welcomeSection: {
+  topSpacer: {
+    width: 28,
+  },
+  syncPill: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#ECEEF2",
+    borderRadius: 999,
     paddingHorizontal: 12,
-    paddingTop: 14,
-    paddingBottom: 10,
+    paddingVertical: 8,
+    shadowColor: "#0E1628",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#2a3b33",
-    marginBottom: 4,
-  },
-  subtitleText: {
-    fontSize: 14,
-    color: "#6c7d74",
-  },
-  scanButton: {
+  syncPillTouch: {
     flexDirection: "row",
-    backgroundColor: "#3d5a3d",
-    marginHorizontal: 10,
-    paddingVertical: 14,
-    borderRadius: 12,
-    justifyContent: "center",
     alignItems: "center",
     gap: 8,
-    marginBottom: 14,
-    elevation: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  historyButton: {
-    flexDirection: "row",
-    backgroundColor: "#3d5a3d",
-    marginHorizontal: 10,
-    paddingVertical: 14,
-    borderRadius: 12,
-    justifyContent: "center",
+  syncIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
-    gap: 8,
-    marginBottom: 14,
-    elevation: 3,
+    justifyContent: "center",
+    position: "relative",
   },
-  scanButtonText: {
-    color: "#fff",
+  syncDot: {
+    position: "absolute",
+    right: -2,
+    top: -2,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+  syncText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  settingsButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.06)",
+    paddingTop: 84,
+    paddingRight: 24,
+    alignItems: "flex-end",
+  },
+  accountMenu: {
+    width: 246,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    overflow: "hidden",
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  accountMenuHeader: {
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+  },
+  accountMenuTitle: {
     fontSize: 16,
     fontWeight: "700",
+    color: "#1D2433",
   },
-
-  // Stats
-  statsContainer: {
+  accountMenuEmail: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#7E8797",
+  },
+  accountMenuAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+  },
+  accountMenuActionText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#D7426B",
+  },
+  greetingBlock: {
+    marginBottom: 28,
+  },
+  dateText: {
+    fontSize: 13,
+    color: "#858D9D",
+    marginBottom: 6,
+  },
+  greetingText: {
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: "800",
+    color: "#1D2433",
+    letterSpacing: -0.8,
+  },
+  statsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 10,
-    marginBottom: 14,
+    marginBottom: 24,
   },
   statCard: {
     width: "31.5%",
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 6,
-    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#8cb09a",
+    borderColor: "#E9ECF1",
+    alignItems: "center",
+    paddingVertical: 18,
+    paddingHorizontal: 8,
+    shadowColor: "#111827",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
     elevation: 2,
   },
-  statIcon: {
-    marginBottom: 6,
+  statCardStatic: {
+    opacity: 1,
   },
-  statIconContainer: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
+  statLoader: {
+    marginTop: 14,
     marginBottom: 8,
   },
   statValue: {
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: "800",
-    color: "#2f6a50",
-    marginBottom: 2,
+    color: "#1D2433",
+    marginTop: 14,
+    marginBottom: 4,
   },
   statLabel: {
-    fontSize: 11,
-    color: "#435950",
+    fontSize: 12,
+    color: "#9AA2B1",
     textAlign: "center",
   },
-
-  // Quick Actions
-  quickActionsSection: {
-    paddingHorizontal: 10,
-    marginBottom: 16,
-  },
-  quickActions: {
+  quickScanButton: {
+    height: 62,
+    borderRadius: 18,
+    backgroundColor: "#1FC27D",
+    alignItems: "center",
+    justifyContent: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: 8,
-    marginTop: 10,
+    gap: 10,
+    marginBottom: 28,
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 6,
   },
-  quickActionCard: {
-    width: "48.5%",
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    alignItems: "flex-start",
-    justifyContent: "flex-start",
-    borderWidth: 1,
-    borderColor: "#8cb09a",
-    minHeight: 96,
+  quickScanText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
   },
-  quickActionCardWide: {
-    width: "100%",
-  },
-  quickActionCenterCard: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 56,
-  },
-  quickActionText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#3d5a3d",
-    textAlign: "left",
-  },
-  quickActionSubtext: {
-    fontSize: 11,
-    marginTop: 4,
-    opacity: 0.85,
-  },
-  quickActionCenterText: {
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  quickActionIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#dbe7df",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 8,
-  },
-
-  // Section header
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 10,
-    marginBottom: 10,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: "800",
-    color: "#24362f",
+    color: "#1D2433",
   },
-  viewAllText: {
+  seeAllText: {
     fontSize: 14,
-    color: "#24362f",
     fontWeight: "700",
+    color: "#35C78A",
   },
-
-  // Exam cards
-  examsContainer: {
-    paddingHorizontal: 10,
-    gap: 8,
+  listWrap: {
+    gap: 14,
   },
-  examSkeleton: {
-    height: 80,
-    backgroundColor: "#dbe7df",
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  emptyExams: {
-    alignItems: "center",
-    paddingVertical: 32,
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#8cb09a",
-    gap: 6,
-  },
-  emptyExamsText: {
-    fontSize: 15,
-    color: "#666",
-    fontWeight: "600",
-  },
-  emptyExamsLink: {
-    fontSize: 13,
-    color: "#2f8a74",
-    fontWeight: "700",
-  },
-  examCard: {
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#5d6c62",
-    overflow: "hidden",
-  },
-  examHeader: {
+  scanCard: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  examTitle: {
+  scoreBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+  },
+  scoreBubbleText: {
     fontSize: 16,
     fontWeight: "800",
-    color: "#333",
+  },
+  scanTextWrap: {
     flex: 1,
-    marginRight: 8,
+    gap: 2,
   },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  examSubject: {
-    fontSize: 12,
-    color: "#4e6057",
-    marginBottom: 8,
-  },
-  examFooter: {
-    flexDirection: "row",
-    gap: 16,
-  },
-  examInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  examInfoText: {
-    fontSize: 12,
-    color: "#666",
-  },
-  examBottomAccent: {
-    height: 4,
-    backgroundColor: "#2f8a74",
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginHorizontal: 20,
-    marginTop: 18,
-    marginBottom: 20,
-  },
-  newQuizButton: {
-    flexDirection: "row",
-    backgroundColor: "#2f8a74",
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-    borderRadius: 14,
-    alignItems: "center",
-    gap: 8,
-    elevation: 6,
-    shadowColor: "#3d5a3d",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-  },
-  fab: {
-    position: "absolute",
-    bottom: 80,
-    right: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 30,
-    elevation: 8,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    gap: 8,
-  },
-  fabText: {
-    color: "#fff",
+  scanName: {
     fontSize: 16,
     fontWeight: "700",
+    color: "#222938",
+  },
+  scanMeta: {
+    fontSize: 13,
+    color: "#8B93A3",
+    flexShrink: 1,
+  },
+  scanMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+  },
+  scanMetaDot: {
+    fontSize: 12,
+    color: "#A8AFBC",
+    marginHorizontal: 7,
+  },
+  scanTime: {
+    fontSize: 12,
+    color: "#A8AFBC",
+  },
+  placeholderCard: {
+    height: 76,
+    backgroundColor: "#EEF1F5",
+    borderRadius: 18,
+  },
+  emptyCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    alignItems: "center",
+  },
+  emptyTitle: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#202738",
+  },
+  emptyText: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#8B93A3",
+    textAlign: "center",
   },
 });

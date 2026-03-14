@@ -1,11 +1,39 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { Tabs, useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { DeviceEventEmitter, View } from "react-native";
+import { DeviceEventEmitter, StyleSheet, Text, View } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+
+function ScannerTabButton(props: BottomTabBarButtonProps) {
+  const { accessibilityState, onPress, onLongPress } = props;
+  const focused = Boolean(accessibilityState?.selected);
+
+  return (
+    <View style={styles.scannerTabWrap}>
+      <HapticTab
+        {...props}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        style={styles.scannerPressable}
+      >
+        <View
+          style={[styles.scannerButton, focused && styles.scannerButtonFocused]}
+        >
+          <Ionicons name="scan-outline" size={26} color="#FFFFFF" />
+        </View>
+        <Text
+          style={[styles.scannerLabel, focused && styles.scannerLabelFocused]}
+        >
+          Scanner
+        </Text>
+      </HapticTab>
+    </View>
+  );
+}
 
 export default function TabLayout() {
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
@@ -44,25 +72,25 @@ export default function TabLayout() {
 
   const tabColors = darkModeEnabled
     ? {
-        active: "#8fd1ad",
-        inactive: "#9db1a6",
-        bg: "#1a2520",
-        border: "#2b3b34",
-        shadow: "#000000",
+        active: "#20BE7B",
+        inactive: "#A7B0BE",
+        bg: "#FFFFFF",
+        border: "#ECEEF2",
+        shadow: "#0F172A",
       }
     : {
-        active: "#00a550",
-        inactive: "#666",
-        bg: "#f5f5f5",
-        border: "#e0e0e0",
-        shadow: "#000000",
+        active: "#20BE7B",
+        inactive: "#A7B0BE",
+        bg: "#FFFFFF",
+        border: "#ECEEF2",
+        shadow: "#0F172A",
       };
 
   return (
     <Tabs
       screenOptions={{
         sceneStyle: {
-          backgroundColor: darkModeEnabled ? "#111815" : "#f5f5f5",
+          backgroundColor: "#F7F7F8",
         },
         tabBarActiveTintColor: tabColors.active,
         tabBarInactiveTintColor: tabColors.inactive,
@@ -75,17 +103,17 @@ export default function TabLayout() {
           backgroundColor: tabColors.bg,
           borderTopWidth: 1,
           borderTopColor: tabColors.border,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
-          paddingHorizontal: 0,
+          height: 96,
+          paddingBottom: 12,
+          paddingTop: 12,
           borderTopLeftRadius: 0,
           borderTopRightRadius: 0,
           shadowColor: tabColors.shadow,
-          shadowOffset: { width: 0, height: -3 },
-          shadowOpacity: darkModeEnabled ? 0.35 : 0.08,
-          shadowRadius: 8,
-          elevation: 12,
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.08,
+          shadowRadius: 12,
+          elevation: 14,
+          overflow: "visible",
         },
         tabBarLabelStyle: {
           fontSize: 11,
@@ -116,47 +144,43 @@ export default function TabLayout() {
           title: "Classes",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? "school" : "school-outline"}
-              size={26}
+              name={focused ? "book" : "book-outline"}
+              size={24}
               color={color}
             />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="scanner"
+        options={{
+          title: "Scanner",
+          tabBarButton: (props) => <ScannerTabButton {...props} />,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="quizzes"
         options={{
-          title: "Quizzes",
+          title: "Results",
+          unmountOnBlur: true,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? "book" : "book-outline"}
-              size={26}
+              name={focused ? "clipboard" : "clipboard-outline"}
+              size={24}
               color={color}
             />
           ),
         }}
       />
       <Tabs.Screen
-        name="students"
+        name="batch-history"
         options={{
-          title: "Students",
+          title: "Archive",
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? "people" : "people-outline"}
-              size={26}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: "Settings",
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? "settings" : "settings-outline"}
-              size={26}
+              name={focused ? "archive" : "archive-outline"}
+              size={24}
               color={color}
             />
           ),
@@ -165,31 +189,31 @@ export default function TabLayout() {
 
       {/* Hidden tabs - accessible via navigation but not shown in tab bar */}
       <Tabs.Screen
-        name="scanner"
+        name="students"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="generator"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="demo"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           href: null,
-          tabBarStyle: { display: 'none' },
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
@@ -197,24 +221,28 @@ export default function TabLayout() {
         options={{
           href: null,
           unmountOnBlur: true,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="edit-answer-key"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="exam-preview"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
         name="class-details"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen
@@ -224,7 +252,7 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="batch-history"
+        name="settings"
         options={{
           href: null,
         }}
@@ -247,6 +275,58 @@ export default function TabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="templates"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="template-preview"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  scannerTabWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    marginTop: -22,
+  },
+  scannerPressable: {
+    alignItems: "center",
+    justifyContent: "flex-start",
+    minWidth: 72,
+  },
+  scannerButton: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#20BE7B",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#20BE7B",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.24,
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  scannerButtonFocused: {
+    transform: [{ scale: 1.03 }],
+  },
+  scannerLabel: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#A7B0BE",
+    paddingBottom: 2,
+  },
+  scannerLabelFocused: {
+    color: "#20BE7B",
+  },
+});

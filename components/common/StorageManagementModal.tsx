@@ -1,20 +1,20 @@
 import { Ionicons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { OfflineStorageService } from "../../services/offlineStorageService";
 import {
-    StorageInfo,
-    StorageMonitorService,
+  StorageInfo,
+  StorageMonitorService,
 } from "../../services/storageMonitorService";
 
 interface StorageManagementModalProps {
@@ -120,7 +120,7 @@ export default function StorageManagementModal({
       Alert.alert(
         "Storage Test Complete",
         `Max item size: ${StorageMonitorService.formatBytes(result.maxItemSize)}\n` +
-          `Estimated limit: ${StorageMonitorService.formatBytes(result.estimatedLimit)}`,
+        `Estimated limit: ${StorageMonitorService.formatBytes(result.estimatedLimit)}`,
       );
     } catch (error) {
       Alert.alert("Error", "Failed to test storage limits");

@@ -1,13 +1,18 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    Animated,
+    Dimensions,
     FlatList,
-    LayoutAnimation,
+    GestureResponderEvent,
+    KeyboardAvoidingView,
     Modal,
     Platform,
     ScrollView,
@@ -23,22 +28,81 @@ import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { Class } from "../../types/class";
 
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const CLASS_MENU_WIDTH = 190;
+const CLASS_MENU_HEIGHT = 116;
+const MAX_FIELD_LENGTH = 50;
+
+type RecentQuiz = {
+  id: string;
+  title: string;
+  date: string;
+};
+
+function AnimatedFillBar({
+  progress,
+  color,
+  height = 4,
+}: {
+  progress: number;
+  color: string;
+  height?: number;
+}) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const animatedWidth = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!trackWidth) return;
+    animatedWidth.setValue(0);
+    Animated.timing(animatedWidth, {
+      toValue: trackWidth * Math.max(0, Math.min(progress, 1)),
+      duration: 650,
+      useNativeDriver: false,
+    }).start();
+  }, [animatedWidth, progress, trackWidth]);
+
+  return (
+    <View
+      style={[styles.scoreTrack, { height }]}
+      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+    >
+      <Animated.View
+        style={[
+          styles.scoreBar,
+          {
+            width: animatedWidth,
+            backgroundColor: color,
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
 export default function ClassesScreen() {
   const router = useRouter();
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
+  const [recentQuizzes, setRecentQuizzes] = useState<
+    Record<string, RecentQuiz[]>
+  >({});
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [creating, setCreating] = useState(false);
   const [classMenuVisible, setClassMenuVisible] = useState(false);
-  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
-  const [collapsedRecent, setCollapsedRecent] = useState<
-    Record<string, boolean>
-  >({});
-  const [blockPickerVisible, setBlockPickerVisible] = useState(false);
+  const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
+const [blockPickerVisible, setBlockPickerVisible] = useState(false);
+const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+const [deleting, setDeleting] = useState(false);
+
+const [classMenuPosition, setClassMenuPosition] = useState({
+  top: 0,
+  left: 0,
+});
 
   useEffect(() => {
     if (
@@ -50,7 +114,28 @@ export default function ClassesScreen() {
   }, []);
 
   const openClassList = (classId: string) => {
-    router.push(`/(tabs)/class-details?classId=${classId}&mode=list`);
+    router.push(`/(tabs)/class-details?classId=${classId}`);
+  };
+
+  const formatShortDate = (value?: Date) => {
+    if (!value) return "No date";
+    return value.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const getMockAverage = (studentCount: number) => {
+    if (studentCount <= 1) return 100;
+    if (studentCount === 2) return 100;
+    if (studentCount === 3) return 100;
+    return 92;
+  };
+
+  const getAccentColor = (score: number) => {
+    if (score >= 85) return "#20BE7B";
+    if (score >= 70) return "#F59E0B";
+    return "#EF4444";
   };
 
   // Form state
@@ -61,12 +146,61 @@ export default function ClassesScreen() {
     section_block: "",
   });
 
+  // Fetch recent quizzes for each class
+  const loadRecentQuizzes = async (classIds: string[]) => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser || classIds.length === 0) return;
+
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", currentUser.uid),
+      );
+      const snapshot = await getDocs(q);
+
+      const byClass: Record<string, RecentQuiz[]> = {};
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const cid: string | undefined = data.classId;
+        if (!cid || !classIds.includes(cid)) return;
+
+        const rawDate =
+          data.createdAt?.toDate?.() ||
+          (data.created_at ? new Date(data.created_at) : null);
+        const dateStr = rawDate
+          ? rawDate.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "";
+
+        if (!byClass[cid]) byClass[cid] = [];
+        byClass[cid].push({
+          id: docSnap.id,
+          title: data.title || "Untitled",
+          date: dateStr,
+        });
+      });
+
+      // Keep only 5 most recent per class (already sorted by Firestore insertion order)
+      Object.keys(byClass).forEach((cid) => {
+        byClass[cid] = byClass[cid].slice(0, 5);
+      });
+
+      setRecentQuizzes(byClass);
+    } catch (error) {
+      console.error("Error loading recent quizzes:", error);
+    }
+  };
+
   // Load classes from Firebase
-  const loadClasses = async () => {
+  const loadClasses = useCallback(async () => {
     try {
       setLoading(true);
       const fetchedClasses = await ClassService.getClassesByUser();
       setClasses(fetchedClasses);
+      await loadRecentQuizzes(fetchedClasses.map((c) => c.id));
     } catch (error) {
       console.error("Error loading classes:", error);
       Toast.show({
@@ -77,7 +211,7 @@ export default function ClassesScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Reload classes when screen comes into focus
   useFocusEffect(
@@ -93,7 +227,7 @@ export default function ClassesScreen() {
           console.warn("Failed to load dark mode preference:", error);
         }
       })();
-    }, []),
+    }, [loadClasses]),
   );
 
   const colors = darkModeEnabled
@@ -102,7 +236,7 @@ export default function ClassesScreen() {
         headerBg: "#1a2520",
         headerBorder: "#2b3b34",
         title: "#e7f1eb",
-        primary: "#1f3a2f",
+        primary: "#20BE7B",
         primaryDark: "#2b3b34",
         cardBg: "#1f2b26",
         cardBorder: "#34483f",
@@ -119,7 +253,7 @@ export default function ClassesScreen() {
         headerBg: "#fff",
         headerBorder: "#d8dfda",
         title: "#24362f",
-        primary: "#3d5a3d",
+        primary: "#7EE0B6",
         primaryDark: "#2f4a38",
         cardBg: "#3d5a3d",
         cardBorder: "#2f4a38",
@@ -132,27 +266,23 @@ export default function ClassesScreen() {
         recentQuizTitle: "#4f4538",
       };
 
-  const modalColors = darkModeEnabled
-    ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        panelSoft: "#2a3a33",
-        border: "#34483f",
-        text: "#e7f1eb",
-        subtext: "#b9c9c0",
-        accent: "#1f3a2f",
-        accentStrong: "#8fd1ad",
-      }
-    : {
-        bg: COLORS.white,
-        headerBg: "#3d5a3d",
-        panelSoft: "#3d5a3d",
-        border: "#2f6b49",
-        text: "#E8F5E9",
-        subtext: "#B8D4B8",
-        accent: "#2d7a5f",
-        accentStrong: "#4CAF50",
-      };
+  const trimmedForm = {
+    class_name: formData.class_name.trim(),
+    course_subject: formData.course_subject.trim(),
+    section_block: formData.section_block.trim(),
+    room: formData.room.trim(),
+  };
+  const requiredFields = [
+    trimmedForm.class_name,
+    trimmedForm.course_subject,
+    trimmedForm.section_block,
+    trimmedForm.room,
+  ];
+  const hasMissingRequired = requiredFields.some((value) => !value);
+  const hasTooLong = requiredFields.some(
+    (value) => value.length > MAX_FIELD_LENGTH,
+  );
+  const canCreateClass = !hasMissingRequired && !hasTooLong && !creating;
 
   // Delete class
   const handleDeleteClass = async () => {
@@ -185,7 +315,7 @@ export default function ClassesScreen() {
   // Create new class
   const handleCreateClass = async () => {
     // Validation
-    if (!formData.class_name.trim()) {
+    if (!trimmedForm.class_name) {
       Toast.show({
         type: "error",
         text1: "Validation Error",
@@ -194,11 +324,20 @@ export default function ClassesScreen() {
       return;
     }
 
-    if (!formData.course_subject.trim()) {
+    if (!trimmedForm.course_subject) {
       Toast.show({
         type: "error",
         text1: "Validation Error",
         text2: "Course subject is required",
+      });
+      return;
+    }
+
+    if (!trimmedForm.section_block) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course block is required",
       });
       return;
     }
@@ -212,9 +351,24 @@ export default function ClassesScreen() {
       return;
     }
 
+    if (hasTooLong) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Each field must be 50 characters or fewer",
+      });
+      return;
+    }
+
     try {
       setCreating(true);
-      await ClassService.createClass(formData);
+      await ClassService.createClass({
+        ...formData,
+        class_name: trimmedForm.class_name,
+        course_subject: trimmedForm.course_subject,
+        section_block: trimmedForm.section_block,
+        room: trimmedForm.room,
+      });
 
       Toast.show({
         type: "success",
@@ -246,153 +400,138 @@ export default function ClassesScreen() {
 
   const filteredClasses = classes.filter(
     (cls) =>
-      cls.class_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      cls.course_subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      cls.section_block.toLowerCase().includes(searchQuery.toLowerCase()),
+      !cls.isArchived &&
+      (cls.class_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        cls.course_subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        cls.section_block.toLowerCase().includes(searchQuery.toLowerCase())),
   );
 
-  const renderClassCard = ({ item }: { item: Class }) => (
-    <TouchableOpacity
-      style={[
-        styles.classCard,
-        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
-      ]}
-      onPress={() => openClassList(item.id)}
-      activeOpacity={0.9}
-    >
-      <View style={styles.classHeader}>
-        <View style={styles.classHeaderLeft}>
-          <Text style={styles.className}>{item.class_name}</Text>
-          <Text style={styles.classSubject}>
-            {item.course_subject} • {item.section_block}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={styles.cardMenuButton}
-          onPress={() => {
-            setSelectedClass(item);
-            setClassMenuVisible(true);
-          }}
-        >
-          <Ionicons name="ellipsis-horizontal" size={18} color={COLORS.white} />
-        </TouchableOpacity>
-      </View>
+  const renderClassCard = ({ item }: { item: Class }) => {
+    const avgScore = getMockAverage(item.students.length);
+    const accentColor = getAccentColor(avgScore);
 
-      <View style={styles.classFooter}>
-        <View style={styles.classInfo}>
-          <Ionicons name="people-outline" size={14} color="#d9efe2" />
-          <Text style={styles.classInfoText}>
-            {item.students.length} Students
-          </Text>
-        </View>
-        <View style={styles.classInfo}>
-          <Ionicons name="location-outline" size={14} color="#d9efe2" />
-          <Text style={styles.classInfoText}>Room {item.room}</Text>
-        </View>
-      </View>
-
-        <TouchableOpacity
-          style={[
-            styles.viewButton,
-            { backgroundColor: colors.primary, borderColor: colors.primaryDark },
-          ]}
-          onPress={() => openClassList(item.id)}
-        >
-        <Ionicons name="people-outline" size={14} color={COLORS.white} />
-        <Text style={styles.viewButtonText}>View Class List</Text>
-      </TouchableOpacity>
-
-      <View
-        style={[
-          styles.recentRow,
-          { backgroundColor: colors.recentHeaderBg },
-        ]}
+    return (
+      <TouchableOpacity
+        style={styles.classCardWrap}
+        onPress={() => openClassList(item.id)}
+        activeOpacity={0.9}
       >
-        <Text
-          style={[
-            styles.recentTitle,
-            { color: colors.recentHeaderText },
-          ]}
-        >
-          Recent Quizzes
-        </Text>
-        <TouchableOpacity
-          style={styles.recentToggle}
-          onPress={() => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setCollapsedRecent((prev) => ({
-              ...prev,
-              [item.id]: !prev[item.id],
-            }));
-          }}
-        >
-          <Ionicons
-            name={collapsedRecent[item.id] ? "chevron-up" : "chevron-down"}
-            size={16}
-            color={colors.recentChevron}
-          />
-        </TouchableOpacity>
-      </View>
-      {!collapsedRecent[item.id] && (
-        <>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={true}
-            contentContainerStyle={styles.quizCardsRow}
-          >
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
-            >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
+        <View style={[styles.cardAccent, { backgroundColor: accentColor }]} />
+        <View style={styles.classCardSurface}>
+          <View style={styles.classHeader}>
+            <View style={styles.classHeaderLeft}>
+              <Text style={styles.className}>{item.class_name}</Text>
+            </View>
+            <View style={styles.classHeaderRight}>
+              <Text style={[styles.classRate, { color: accentColor }]}>
+                {avgScore} %
               </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 1
+              <TouchableOpacity
+                style={styles.cardMenuButton}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                onPress={(event) => openClassMenu(event, item)}
+              >
+                <Ionicons name="ellipsis-vertical" size={18} color="#99A1B2" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.classMetaRow}>
+            <View style={styles.metaItem}>
+              <Ionicons name="people-outline" size={14} color="#7E8798" />
+              <Text style={styles.metaText}>
+                {item.students.length} students
               </Text>
             </View>
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
-            >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
-              </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 2
+            <View style={styles.metaItem}>
+              <Ionicons name="calendar-outline" size={14} color="#7E8798" />
+              <Text style={styles.metaText}>
+                {formatShortDate(item.createdAt)}
               </Text>
             </View>
-            <View
-              style={[
-                styles.quizMiniCard,
-                {
-                  backgroundColor: colors.recentQuizCardBg,
-                  borderColor: colors.recentQuizCardBorder,
-                },
-              ]}
-            >
-              <Text style={[styles.quizMiniDate, { color: colors.recentQuizDate }]}>
-                Feb 14, 2026
-              </Text>
-              <Text style={[styles.quizMiniTitle, { color: colors.recentQuizTitle }]}>
-                Template 3
-              </Text>
-            </View>
-          </ScrollView>
-        </>
-      )}
-    </TouchableOpacity>
-  );
+          </View>
+
+          <AnimatedFillBar progress={avgScore / 100} color={accentColor} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const openClassMenu = (event: GestureResponderEvent, classItem: Class) => {
+    const { pageX, pageY } = event.nativeEvent;
+    const left = Math.min(
+      Math.max(12, pageX - CLASS_MENU_WIDTH + 28),
+      SCREEN_WIDTH - CLASS_MENU_WIDTH - 12,
+    );
+    const top = Math.min(
+      Math.max(80, pageY - 8),
+      SCREEN_HEIGHT - CLASS_MENU_HEIGHT - 24,
+    );
+
+    setSelectedClass(classItem);
+    setClassMenuPosition({ top, left });
+    setClassMenuVisible(true);
+  };
+
+  const closeClassMenu = () => {
+    setClassMenuVisible(false);
+    setSelectedClass(null);
+  };
+
+  const archiveClass = async (classItem: Class) => {
+    try {
+      await ClassService.updateClass(classItem.id, { isArchived: true });
+      setClassMenuVisible(false);
+      setSelectedClass(null);
+      Toast.show({
+        type: "success",
+        text1: "Archived",
+        text2: `${classItem.class_name} moved to Archived`,
+      });
+      await loadClasses();
+      router.push("/(tabs)/batch-history");
+    } catch (error) {
+      console.error("Error archiving class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to archive class",
+      });
+    }
+  };
+
+  const handleArchiveClass = (classItem: Class) => {
+    setSelectedClass(classItem);
+    setClassMenuVisible(false);
+    setArchiveConfirmVisible(true);
+  };
+
+  const deleteClass = async (classItem: Class) => {
+    try {
+      await ClassService.deleteClass(classItem.id);
+      setClassMenuVisible(false);
+      setSelectedClass(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: `${classItem.class_name} deleted successfully`,
+      });
+      await loadClasses();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
+    }
+  };
+
+  const handleDeleteClass = (classItem: Class) => {
+    setSelectedClass(classItem);
+    setClassMenuVisible(false);
+    setDeleteConfirmVisible(true);
+  };
 
   if (loading) {
     return (
@@ -408,14 +547,26 @@ export default function ClassesScreen() {
         >
           <View>
             <Text style={[styles.headerTitle, { color: colors.title }]}>
-              Classes
+              My Classes
             </Text>
           </View>
           <TouchableOpacity
-            style={[styles.addButton, { backgroundColor: colors.primary }]}
+            style={[
+              styles.addButton,
+              darkModeEnabled ? styles.addButtonDark : styles.addButtonLight,
+            ]}
             onPress={() => setModalVisible(true)}
           >
-            <Ionicons name="add" size={22} color={COLORS.white} />
+            <Text
+              style={[
+                styles.addButtonPlusText,
+                darkModeEnabled
+                  ? styles.addButtonPlusTextDark
+                  : styles.addButtonPlusTextLight,
+              ]}
+            >
+              +
+            </Text>
           </TouchableOpacity>
         </View>
         <View style={styles.loadingContainer}>
@@ -439,34 +590,39 @@ export default function ClassesScreen() {
         ]}
       >
         <View>
-          <Text style={[styles.headerTitle, { color: colors.title }]}>Classes</Text>
+          <Text style={[styles.headerTitle, { color: colors.title }]}>
+            My Classes
+          </Text>
         </View>
         <TouchableOpacity
-          style={[styles.addButton, { backgroundColor: colors.primary }]}
+          style={[
+            styles.addButton,
+            darkModeEnabled ? styles.addButtonDark : styles.addButtonLight,
+          ]}
           onPress={() => setModalVisible(true)}
         >
-          <Ionicons name="add" size={22} color={COLORS.white} />
+          <Text
+            style={[
+              styles.addButtonPlusText,
+              darkModeEnabled
+                ? styles.addButtonPlusTextDark
+                : styles.addButtonPlusTextLight,
+            ]}
+          >
+            +
+          </Text>
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.searchContainer, { backgroundColor: colors.primary }]}>
-        <Ionicons
-          name="search"
-          size={16}
-          color="#d6e9de"
-          style={styles.searchIcon}
-        />
+      <View style={styles.searchContainer}>
+        <Ionicons name="search-outline" size={18} color="#9CA3AF" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search classes..."
-          placeholderTextColor="#b8d4c4"
+          placeholderTextColor="#7B8794"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
-        <View style={styles.searchBadge}>
-          <Ionicons name="school-outline" size={12} color="#2f5f49" />
-          <Text style={styles.searchBadgeText}>{filteredClasses.length}</Text>
-        </View>
       </View>
 
       {/* Classes List */}
@@ -494,88 +650,64 @@ export default function ClassesScreen() {
         transparent={false}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={[styles.modalContent, { backgroundColor: modalColors.bg }]}>
-          <View style={[styles.modalHeader, { backgroundColor: modalColors.headerBg }]}>
+        <KeyboardAvoidingView
+          style={styles.createScreen}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          <View style={styles.createScreenHeader}>
+            <View style={styles.createScreenHeaderSpacer} />
+            <Text style={styles.createSheetTitle}>Create Class</Text>
             <TouchableOpacity
-              style={styles.modalCloseButton}
+              style={styles.createSheetClose}
               onPress={() => setModalVisible(false)}
+              disabled={creating}
             >
-              <Ionicons name="arrow-back" size={24} color="#fff" />
+              <Ionicons name="close" size={24} color="#A8AFBC" />
             </TouchableOpacity>
-            <Text style={[styles.modalTitle, { color: modalColors.text }]}>Create New Class</Text>
-            <View style={styles.modalHeaderPlaceholder} />
           </View>
 
           <ScrollView
-            style={[
-              styles.modalBody,
-              { backgroundColor: darkModeEnabled ? modalColors.bg : "#f5f5f5" },
-            ]}
-            contentContainerStyle={styles.modalBodyContent}
+            style={styles.createSheetBody}
+            contentContainerStyle={styles.createSheetBodyContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Program *</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., CS 101"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.class_name}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, class_name: text })
-                }
-              />
+            <Text style={styles.sheetLabel}>Class Name</Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="e.g. Biology 101"
+              placeholderTextColor="#B5BCC8"
+              maxLength={MAX_FIELD_LENGTH}
+              value={formData.class_name}
+              onChangeText={(text) =>
+                setFormData({ ...formData, class_name: text })
+              }
+            />
 
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Course Subject *</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., Computer Science"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.course_subject}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, course_subject: text })
-                }
-              />
+            <Text style={styles.sheetLabel}>Program</Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="e.g. Science Dept"
+              placeholderTextColor="#B5BCC8"
+              maxLength={MAX_FIELD_LENGTH}
+              value={formData.course_subject}
+              onChangeText={(text) =>
+                setFormData({ ...formData, course_subject: text })
+              }
+            />
 
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Block</Text>
-              <TouchableOpacity
-                style={[
-                  styles.dropdownButton,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                  },
-                ]}
-                onPress={() => setBlockPickerVisible(true)}
-              >
-                <Text
-                  style={[
-                    styles.dropdownButtonText,
-                    darkModeEnabled && { color: modalColors.text },
-                    !formData.section_block && styles.dropdownPlaceholder,
-                    !formData.section_block && darkModeEnabled && { color: "#8fa39a" },
-                  ]}
-                >
-                  {formData.section_block ? `Block ${formData.section_block}` : "Select a block..."}
-                </Text>
-                <Ionicons 
-                  name="chevron-down" 
-                  size={20} 
-                  color={darkModeEnabled ? modalColors.subtext : "#B8D4B8"} 
+            <View style={styles.sheetRow}>
+              <View style={styles.sheetHalf}>
+                <Text style={styles.sheetLabel}>Course Block</Text>
+                <TextInput
+                  style={styles.sheetInput}
+                  placeholder="e.g. Period 1"
+                  placeholderTextColor="#B5BCC8"
+                  maxLength={MAX_FIELD_LENGTH}
+                  value={formData.section_block}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, section_block: text })
+                  }
                 />
               </TouchableOpacity>
 
@@ -601,159 +733,142 @@ export default function ClassesScreen() {
                   })
                 }
               />
+              </View>
+              <View style={styles.sheetHalf}>
+                <Text style={styles.sheetLabel}>Room</Text>
+                <TextInput
+                  style={styles.sheetInput}
+                  placeholder="e.g. Room 402"
+                  placeholderTextColor="#B5BCC8"
+                  maxLength={MAX_FIELD_LENGTH}
+                  value={formData.room}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, room: text })
+                  }
+                />
+              </View>
+            </View>
           </ScrollView>
 
-          <View
-            style={[
-              styles.modalFooter,
-              {
-                backgroundColor: darkModeEnabled ? modalColors.bg : COLORS.white,
-                borderTopColor: darkModeEnabled ? modalColors.border : "#e4e8e6",
-              },
-            ]}
-          >
+          <View style={styles.createScreenFooter}>
+            {!canCreateClass && (
+              <Text style={styles.validationText}>
+                {hasTooLong
+                  ? "Keep each field under 50 characters."
+                  : "Complete all required fields to continue."}
+              </Text>
+            )}
             <TouchableOpacity
               style={[
-                styles.cancelButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: modalColors.border,
-                },
-              ]}
-              onPress={() => setModalVisible(false)}
-              disabled={creating}
-            >
-              <Text style={[styles.cancelButtonText, darkModeEnabled && { color: "#b9c9c0" }]}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.createButton,
-                darkModeEnabled && {
-                  backgroundColor: modalColors.accent,
-                },
-                creating && styles.createButtonDisabled,
+                styles.sheetPrimaryButton,
+                (!canCreateClass || creating) && styles.createButtonDisabled,
               ]}
               onPress={handleCreateClass}
-              disabled={creating}
+              disabled={!canCreateClass}
             >
               {creating ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.createButtonText}>Create Class</Text>
+                <Text style={styles.sheetPrimaryButtonText}>Create Class</Text>
               )}
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal
         visible={classMenuVisible}
         animationType="fade"
         transparent
-        onRequestClose={() => setClassMenuVisible(false)}
+        onRequestClose={closeClassMenu}
       >
         <TouchableOpacity
           style={styles.menuOverlay}
           activeOpacity={1}
-          onPress={() => setClassMenuVisible(false)}
+          onPress={closeClassMenu}
         >
-          <View style={styles.menuContent}>
-            <Text style={styles.menuTitle}>
-              {selectedClass?.class_name ?? "Class"}
-            </Text>
+          <View
+            style={[
+              styles.menuContent,
+              {
+                top: classMenuPosition.top,
+                left: classMenuPosition.left,
+              },
+            ]}
+          >
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle}>
+                {selectedClass?.class_name ?? "Class"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={closeClassMenu}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
             <TouchableOpacity
               style={styles.menuAction}
               onPress={() => {
-                setClassMenuVisible(false);
-                Toast.show({
-                  type: "info",
-                  text1: "Edit",
-                  text2: "Edit action is available in frontend menu.",
-                });
+                if (selectedClass) {
+                  handleArchiveClass(selectedClass);
+                }
               }}
             >
-              <Ionicons name="create-outline" size={18} color="#2f6550" />
-              <Text style={styles.menuActionText}>Edit</Text>
+              <Text style={[styles.menuActionText, { color: "#F59E0B" }]}>
+                Archive Class
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuAction}
               onPress={() => {
                 setClassMenuVisible(false);
                 setDeleteConfirmVisible(true);
+                if (selectedClass) {
+                  handleDeleteClass(selectedClass);
+                }
               }}
             >
-              <Ionicons name="trash-outline" size={18} color={COLORS.error} />
-              <Text style={[styles.menuActionText, { color: COLORS.error }]}>
-                Delete
+              <Text style={[styles.menuActionText, { color: "#EF4444" }]}>
+                Delete Class
               </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      {/* Block Picker Modal */}
-      <Modal
-        visible={blockPickerVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setBlockPickerVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.pickerOverlay}
-          activeOpacity={1}
-          onPress={() => setBlockPickerVisible(false)}
-        >
-          <View style={[styles.pickerContainer, darkModeEnabled && { backgroundColor: modalColors.bg }]}>
-            <View style={[styles.pickerHeader, darkModeEnabled && { borderBottomColor: modalColors.border }]}>
-              <Text style={[styles.pickerTitle, darkModeEnabled && { color: modalColors.text }]}>
-                Select a block...
-              </Text>
-              <TouchableOpacity onPress={() => setBlockPickerVisible(false)}>
-                <Ionicons name="close" size={24} color={darkModeEnabled ? modalColors.text : "#333"} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.pickerList}>
-              {Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)).map((letter) => (
-                <TouchableOpacity
-                  key={letter}
-                  style={[
-                    styles.pickerItem,
-                    darkModeEnabled && { borderBottomColor: modalColors.border },
-                    formData.section_block === letter && styles.pickerItemSelected,
-                    darkModeEnabled && formData.section_block === letter && {
-                      backgroundColor: modalColors.accent,
-                    },
-                  ]}
-                  onPress={() => {
-                    setFormData({ ...formData, section_block: letter });
-                    setBlockPickerVisible(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.pickerItemText,
-                      darkModeEnabled && { color: modalColors.text },
-                      formData.section_block === letter && styles.pickerItemTextSelected,
-                      darkModeEnabled && formData.section_block === letter && {
-                        color: modalColors.accentStrong,
-                      },
-                    ]}
-                  >
-                    {letter}
-                  </Text>
-                  {formData.section_block === letter && (
-                    <Ionicons 
-                      name="checkmark" 
-                      size={20} 
-                      color={darkModeEnabled ? modalColors.accentStrong : "#4CAF50"} 
-                    />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <ConfirmationModal
+        visible={archiveConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${selectedClass?.class_name ?? "this class"}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveConfirmVisible(false)}
+        onConfirm={() => {
+          if (selectedClass) {
+            setArchiveConfirmVisible(false);
+            archiveClass(selectedClass);
+          }
+        }}
+      />
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${selectedClass?.class_name ?? "this class"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteConfirmVisible(false)}
+        onConfirm={() => {
+          if (selectedClass) {
+            setDeleteConfirmVisible(false);
+            deleteClass(selectedClass);
+          }
+        }}
+      />
 
       <ConfirmationModal
         visible={deleteConfirmVisible}
@@ -789,9 +904,9 @@ const styles = StyleSheet.create({
     borderBottomColor: "#d8dfda",
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: "800",
-    color: "#1f2f2a",
+    color: "#1F2937",
   },
   headerSubtitle: {
     fontSize: 12,
@@ -802,162 +917,141 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
   addButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#2d7a5f",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  addButtonLight: {
+    backgroundColor: "#20BE7B",
+    borderColor: "#57D7A0",
+    shadowColor: "#20BE7B",
+  },
+  addButtonDark: {
+    backgroundColor: "#20BE7B",
+    borderColor: "#57D7A0",
+    shadowColor: "#20BE7B",
+  },
+  addButtonPlusText: {
+    fontSize: 26,
+    lineHeight: 26,
+    fontWeight: "400",
+    marginTop: -2,
+    textAlign: "center",
+    includeFontPadding: false,
+  },
+  addButtonPlusTextLight: {
+    color: "#F2FFF8",
+  },
+  addButtonPlusTextDark: {
+    color: "#E9F8F1",
   },
   searchContainer: {
+    marginHorizontal: 22,
+    marginTop: 6,
+    marginBottom: 18,
+    height: 40,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    borderRadius: 12,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3d5a3d",
-    marginHorizontal: 10,
-    marginTop: 8,
-    marginBottom: 10,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 42,
-  },
-  searchIcon: {
-    marginRight: 8,
+    gap: 8,
   },
   searchInput: {
     flex: 1,
+    height: 40,
+    paddingHorizontal: 2,
     fontSize: 14,
-    color: "#ecf7f1",
-  },
-  searchBadge: {
-    minWidth: 34,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 6,
-    backgroundColor: "#95bba6",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  searchBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#2f5f49",
+    color: "#111827",
+    fontWeight: "600",
   },
   listContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 28,
+    paddingHorizontal: 22,
+    paddingBottom: 120,
   },
-  classCard: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: RADIUS.medium,
-    padding: 14,
-    marginBottom: 10,
+  classCardWrap: {
+    flexDirection: "row",
+    marginBottom: 16,
+    minHeight: 96,
+  },
+  cardAccent: {
+    width: 6,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+  },
+  classCardSurface: {
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#2f4a38",
+    borderColor: "#E7EBF0",
+    borderLeftWidth: 0,
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
   },
   classHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  className: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1F2937",
+    lineHeight: 24,
   },
   classHeaderLeft: {
     flex: 1,
+    paddingRight: 8,
+  },
+  classHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  classRate: {
+    fontSize: 18,
+    fontWeight: "800",
   },
   cardMenuButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(0,0,0,0.12)",
-  },
-  className: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: COLORS.white,
-    marginBottom: 4,
-  },
-  classSubject: {
-    fontSize: 14,
-    color: "#b8d4c4",
-    fontWeight: "500",
-  },
-  classFooter: {
-    gap: 6,
-    marginBottom: 10,
-  },
-  classInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  classInfoText: {
-    fontSize: 12,
-    color: "#e3f2ea",
-  },
-  viewButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#3d5a3d",
-    paddingVertical: 10,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#2f4a38",
-    marginBottom: 12,
-  },
-  viewButtonText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  recentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-    backgroundColor: "#324742",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  recentTitle: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#d4e8dd",
-  },
-  recentToggle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 24,
+    height: 24,
     alignItems: "center",
     justifyContent: "center",
   },
-  quizCardsRow: {
-    gap: 8,
-    paddingBottom: 8,
+  classMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 20,
+    marginBottom: 16,
   },
-  quizMiniCard: {
-    width: 98,
-    backgroundColor: "#d6c4ac",
-    borderWidth: 1,
-    borderColor: "#cab295",
-    borderRadius: RADIUS.small,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
   },
-  quizMiniDate: {
-    fontSize: 10,
-    color: "#6f624f",
-    marginBottom: 4,
-  },
-  quizMiniTitle: {
+  metaText: {
     fontSize: 13,
-    fontWeight: "700",
-    color: "#4f4538",
+    color: "#7E8798",
+  },
+  scoreTrack: {
+    height: 4,
+    borderRadius: 0,
+    backgroundColor: "#E6ECE8",
+    overflow: "hidden",
+  },
+  scoreBar: {
+    height: "100%",
+    borderRadius: 0,
   },
   loadingContainer: {
     flex: 1,
@@ -984,6 +1078,95 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#8da096",
     marginTop: 4,
+  },
+  createScreen: {
+    flex: 1,
+    backgroundColor: "#F7F7F8",
+  },
+  createScreenHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    paddingTop: 56,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+  },
+  createScreenHeaderSpacer: {
+    width: 44,
+    height: 44,
+  },
+  createSheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  createSheetClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#F3F5F8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  createSheetBody: {
+    flex: 1,
+  },
+  createSheetBodyContent: {
+    padding: 20,
+    paddingBottom: 120,
+  },
+  sheetLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginBottom: 10,
+    marginTop: 14,
+  },
+  sheetInput: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetRow: {
+    flexDirection: "row",
+    gap: 14,
+  },
+  sheetHalf: {
+    flex: 1,
+  },
+  sheetPrimaryButton: {
+    height: 58,
+    borderRadius: 16,
+    backgroundColor: "#1FC27D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetPrimaryButtonText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  validationText: {
+    marginBottom: 10,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#EF4444",
+    textAlign: "center",
+  },
+  createScreenFooter: {
+    padding: 20,
+    backgroundColor: "#F7F7F8",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F5",
   },
   modalContent: {
     backgroundColor: COLORS.white,
@@ -1142,39 +1325,54 @@ const styles = StyleSheet.create({
   },
   menuOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.28)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.08)",
+    position: "relative",
   },
   menuContent: {
-    width: "100%",
-    maxWidth: 320,
+    position: "absolute",
+    width: CLASS_MENU_WIDTH,
     backgroundColor: COLORS.white,
-    borderRadius: RADIUS.medium,
-    borderWidth: 1,
-    borderColor: "#d8dfda",
-    paddingVertical: 8,
-    paddingHorizontal: 10,
+    borderRadius: 14,
+    paddingVertical: 10,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 4,
   },
   menuTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: "#2f433a",
-    marginBottom: 6,
-    paddingHorizontal: 6,
+    flex: 1,
     paddingVertical: 6,
+    paddingRight: 8,
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
   },
   menuAction: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderRadius: RADIUS.small,
   },
   menuActionText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
     color: "#2f6550",
   },

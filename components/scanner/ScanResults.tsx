@@ -7,7 +7,10 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
+  SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -40,26 +43,19 @@ export default function ScanResults({
     result.studentId || "",
   );
 
-  // Get details from result, or generate from answers if missing
   const details = result?.details || result?.answers || [];
-
   const totalQuestions =
     questionCount ??
     (details.length > 0 ? details.length : (result?.totalPoints ?? 20));
 
-  console.log("[ScanResults] Rendering with details:", details.length);
-  console.log("[ScanResults] First 3 details:", details.slice(0, 3));
-
   const handleSaveId = async () => {
     setIsEditingId(false);
-
     try {
       if (result.metadata?.timestamp) {
         await StorageService.updateStudentId(
           result.metadata.timestamp,
           editedStudentId,
         );
-        // We also want to update the local result object so the UI reflects it immediately
         result.studentId = editedStudentId;
       }
     } catch (error) {
@@ -72,145 +68,51 @@ export default function ScanResults({
     setIsEditingId(false);
   };
 
-  // REQ 14, 15: Handle NULL grades
-  const isNullGrade = result.score === null;
-
-  const exportToPDF = async () => {
-    try {
-      let imageHtml = "";
-      if (imageUri) {
-        let base64Image = "";
-        try {
-          base64Image = await FileSystem.readAsStringAsync(imageUri, {
-            encoding: "base64",
-          });
-          imageHtml = `<img src="data:image/jpeg;base64,${base64Image}" style="max-height: 400px; max-width: 100%; border: 1px solid #ddd; border-radius: 8px; object-fit: contain;" />`;
-        } catch (e) {
-          console.warn("Failed to load image for PDF:", e);
-        }
-      }
-
-      const answersHtml = details
-        .map((item: any) => {
-          const studentAns = item.studentAnswer || item.selectedAnswer || "—";
-          const correctAns = item.correctAnswer || "—";
-          const isCorrect = item.isCorrect ?? false;
-          const color = isCorrect ? "#4CAF50" : "#F44336";
-          return `
-          <tr style="border-bottom: 1px solid #eee;">
-            <td style="padding: 10px; text-align: center;"><b>${item.questionNumber}</b></td>
-            <td style="padding: 10px; text-align: center; color: ${color}; font-weight: bold;">${studentAns}</td>
-            <td style="padding: 10px; text-align: center;">${correctAns}</td>
-          </tr>
-        `;
-        })
-        .join("");
-
-      const htmlContent = `
-        <html>
-          <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
-            <style>
-              body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 20px; color: #333; }
-              h1 { color: #3B5943; text-align: center; margin-bottom: 5px; font-size: 24px; }
-              h2 { text-align: center; color: #666; font-size: 16px; margin-top: 0; font-weight: normal; }
-              .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #3B5943; padding-bottom: 15px; margin-bottom: 25px; }
-              .score-box { background-color: #3B5943; color: white; padding: 15px 20px; border-radius: 8px; text-align: center; min-width: 100px; }
-              .score-text { font-size: 28px; font-weight: bold; }
-              .student-info { background-color: #f5f5f5; padding: 15px 20px; border-radius: 8px; font-size: 18px; font-weight: bold; text-align: center; flex: 1; margin-right: 20px; }
-              .section-title { font-size: 18px; margin-bottom: 15px; font-weight: bold; border-bottom: 2px solid #eee; padding-bottom: 8px; color: #444; }
-              .image-container { text-align: center; margin-bottom: 40px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-              th { background-color: #f5f5f5; padding: 12px; text-align: center; border-bottom: 2px solid #ddd; font-weight: bold; color: #555; }
-            </style>
-          </head>
-          <body>
-            <h1>GORDON COLLEGE</h1>
-            <h2>OLONGAPO CITY &mdash; SmartCheck Result</h2>
-            
-            <div class="header">
-              <div class="student-info">
-                Student ID:<br/>
-                <span style="font-size: 24px; color: #1A237E; letter-spacing: 2px;">
-                  ${result.studentId && result.studentId !== "00000000" ? result.studentId : "N/A"}
-                </span>
-              </div>
-              <div class="score-box">
-                <div style="font-size: 12px; margin-bottom: 5px; opacity: 0.9;">SCORE</div>
-                <span class="score-text">${result.score} / ${result.totalPoints}</span>
-              </div>
-            </div>
-
-            ${imageHtml
-          ? `
-            <div class="image-container">
-              <div class="section-title">Original Scanned Sheet</div>
-              ${imageHtml}
-            </div>`
-          : ""
-        }
-
-            <div class="answers-container">
-              <div class="section-title">Scan Breakdown (${totalQuestions} Questions)</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Item #</th>
-                    <th>Scanned</th>
-                    <th>Key</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${answersHtml}
-                </tbody>
-              </table>
-            </div>
-          </body>
-        </html>
-      `;
-
-      const { uri: pdfUri } = await Print.printToFileAsync({ html: htmlContent });
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(pdfUri, {
-          mimeType: "application/pdf",
-          dialogTitle: "Share Scan Result",
-          UTI: "com.adobe.pdf",
-        });
-      }
-    } catch (error) {
-      console.error("PDF Export failed:", error);
-      Alert.alert("Export Error", "Failed to generate PDF. Please try again.");
-    }
-  };
-
   return (
     <View style={styles.container}>
-      {/* Institution Header */}
+      <StatusBar barStyle="dark-content" backgroundColor="#FFF" translucent />
+
+      {/* Premium Header - Optimized Spacing */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Ionicons name="close" size={28} color="white" />
+        <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
         </TouchableOpacity>
-        <View style={styles.headerContent}>
+
+        <View style={styles.headerTitleContainer}>
           <Text style={styles.institution}>GORDON COLLEGE</Text>
           <Text style={styles.location}>OLONGAPO CITY</Text>
         </View>
+
         <View style={styles.scoreBadge}>
-          <Text style={styles.scoreText}>
-            {result.score}/{result.totalPoints}
-          </Text>
+          <Text style={styles.scoreValue}>{result.score}</Text>
+          <Text style={styles.scoreDivider}>/</Text>
+          <Text style={styles.scoreTotal}>{result.totalPoints}</Text>
         </View>
       </View>
 
-      <ScrollView style={styles.content}>
-        {/* Scanned Image Thumbnail */}
+      <ScrollView
+        style={styles.content}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.titleContainer}>
+          <Text style={styles.screenGreeting}>Scan Result</Text>
+          <Text style={styles.screenSubtext}>Review and verify the captured data</Text>
+        </View>
+
+        {/* Scanned Image Section */}
         {imageUri && (
-          <View style={styles.imageSection}>
-            <Text style={styles.sectionTitle}>Original Capture</Text>
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionIconContainer}>
+                <Ionicons name="camera" size={16} color="#1FC27D" />
+              </View>
+              <Text style={styles.sectionTitle}>Source Image</Text>
+            </View>
             <TouchableOpacity
               onPress={() => setImageModalVisible(true)}
               style={styles.thumbnailContainer}
+              activeOpacity={0.9}
             >
               <Image
                 source={{ uri: imageUri }}
@@ -218,333 +120,430 @@ export default function ScanResults({
                 resizeMode="cover"
               />
               <View style={styles.imageOverlay}>
-                <Ionicons name="expand" size={20} color="white" />
-                <Text style={styles.overlayText}>Tap to Enlarge</Text>
+                <Ionicons name="expand" size={14} color="white" />
+                <Text style={styles.overlayText}>Enlarge</Text>
               </View>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Student ID - Editable Section */}
-        {result.studentId && result.studentId !== "00000000" && (
-          <View
-            style={[
-              styles.studentIdSection,
-              isEditingId && styles.studentIdSectionEditing,
-            ]}
-          >
-            <View style={styles.studentIdLeft}>
-              <Text style={styles.studentIdLabel}>Student ZipGrade ID</Text>
-              {isEditingId ? (
-                <TextInput
-                  style={styles.studentIdInput}
-                  value={editedStudentId}
-                  onChangeText={setEditedStudentId}
-                  placeholder="Enter Student ID"
-                  placeholderTextColor="#999"
-                  maxLength={20}
-                  autoFocus
-                />
-              ) : (
-                <Text style={styles.studentIdValue}>{editedStudentId}</Text>
+        {/* Student ID Section */}
+        {result.studentId && (
+          <View style={[styles.section, isEditingId && styles.sectionEditing]}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIconContainer, { backgroundColor: '#E8F5E9' }]}>
+                <Ionicons name="person" size={16} color="#1FC27D" />
+              </View>
+              <Text style={styles.sectionTitle}>Student Identity</Text>
+              {!isEditingId && (
+                <TouchableOpacity
+                  style={styles.editIcon}
+                  onPress={() => setIsEditingId(true)}
+                >
+                  <Ionicons name="create-outline" size={18} color="#999" />
+                </TouchableOpacity>
               )}
             </View>
 
             {isEditingId ? (
-              <View style={styles.editButtonsContainer}>
-                <TouchableOpacity
-                  style={styles.iconButtonCancel}
-                  onPress={handleCancelEdit}
-                >
-                  <Ionicons name="close" size={18} color="#F44336" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.iconButtonSave}
-                  onPress={handleSaveId}
-                >
-                  <Ionicons name="checkmark" size={18} color="#4CAF50" />
-                </TouchableOpacity>
+              <View style={styles.editRow}>
+                <TextInput
+                  style={styles.studentIdInput}
+                  value={editedStudentId}
+                  onChangeText={setEditedStudentId}
+                  placeholder="ID Number"
+                  placeholderTextColor="#BBB"
+                  maxLength={20}
+                  autoFocus
+                />
+                <View style={styles.editActions}>
+                  <TouchableOpacity onPress={handleCancelEdit} style={styles.actionBtnCancel}>
+                    <Ionicons name="close" size={20} color="#FF4B4B" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleSaveId} style={styles.actionBtnSave}>
+                    <Ionicons name="checkmark" size={20} color="#1FC27D" />
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.editButton}
-                onPress={() => setIsEditingId(true)}
-              >
-                <Ionicons name="pencil" size={18} color="#5C6BC0" />
-              </TouchableOpacity>
+              <Text style={styles.studentIdValue}>{editedStudentId || "Unknown"}</Text>
             )}
           </View>
         )}
 
-        {/* Scanned Items Breakdown */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Scanned {totalQuestions}-Question Sheet
-          </Text>
-          {details.length > 0 ? (
-            details.map((item: any) => {
-              // Handle both field name variations
-              const studentAns =
-                item.studentAnswer || item.selectedAnswer || "—";
-              const correctAns = item.correctAnswer || "—";
-              const isCorrect = item.isCorrect ?? false;
+        {/* Breakdown Section */}
+        <View style={[styles.section, styles.breakdownSection]}>
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionIconContainer, { backgroundColor: '#E3F2FD' }]}>
+              <Ionicons name="help-circle-outline" size={18} color="#2196F3" />
+            </View>
+            <Text style={styles.sectionTitle}>Point Breakdown ({totalQuestions} items)</Text>
+          </View>
 
-              return (
-                <View key={item.questionNumber} style={styles.row}>
-                  <View style={styles.qBox}>
-                    <Text style={styles.qLabel}>{item.questionNumber}</Text>
-                  </View>
-                  <View style={styles.comparisonContainer}>
-                    <View style={styles.scanGroup}>
-                      <Text style={styles.miniLabel}>SCANNED</Text>
-                      <Text
-                        style={[
-                          styles.bubbleValue,
-                          isCorrect ? styles.correctColor : styles.errorColor,
-                        ]}
-                      >
-                        {studentAns}
-                      </Text>
+          <View style={styles.breakdownList}>
+            {details.length > 0 ? (
+              details.map((item, index) => {
+                const studentAns = item.studentAnswer || (item as any).selectedAnswer || "—";
+                const correctAns = item.correctAnswer || "—";
+                const isCorrect = item.isCorrect ?? false;
+
+                return (
+                  <View key={index} style={[styles.row, index === details.length - 1 && styles.lastRow]}>
+                    <View style={styles.qIndicator}>
+                      <Text style={styles.qNumber}>{item.questionNumber}</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={14} color="#DDD" />
-                    <View style={styles.scanGroup}>
-                      <Text style={styles.miniLabel}>KEY</Text>
-                      <Text style={styles.bubbleValue}>{correctAns}</Text>
+
+                    <View style={styles.comparison}>
+                      <View style={styles.ansBlock}>
+                        <Text style={styles.ansLabel}>SCANNED</Text>
+                        <Text style={[styles.ansValue, !isCorrect && styles.textError]}>{studentAns}</Text>
+                      </View>
+
+                      <Ionicons name="arrow-forward" size={12} color="#DDD" />
+
+                      <View style={styles.ansBlock}>
+                        <Text style={styles.ansLabel}>KEY</Text>
+                        <Text style={styles.ansValue}>{correctAns}</Text>
+                      </View>
+                    </View>
+
+                    <View style={[styles.statusTag, isCorrect ? styles.bgSuccess : styles.bgError]}>
+                      <Ionicons
+                        name={isCorrect ? "checkmark" : "close"}
+                        size={12}
+                        color="#FFF"
+                      />
                     </View>
                   </View>
-                  <Ionicons
-                    name={isCorrect ? "checkmark-circle" : "close-circle"}
-                    size={22}
-                    color={isCorrect ? "#4CAF50" : "#F44336"}
-                  />
-                </View>
-              );
-            })
-          ) : (
-            <Text style={styles.noDataText}>No answer details available</Text>
-          )}
+                );
+              })
+            ) : (
+              <Text style={styles.emptyText}>No analysis data for this sheet.</Text>
+            )}
+          </View>
         </View>
       </ScrollView>
 
-      {/* Full Screen Image Modal */}
-      <Modal
-        visible={isImageModalVisible}
-        transparent={true}
-        animationType="fade"
-      >
-        <View style={styles.modalBackground}>
-          <TouchableOpacity
-            style={styles.closeModal}
-            onPress={() => setImageModalVisible(false)}
-          >
-            <Ionicons name="close-circle" size={40} color="white" />
-          </TouchableOpacity>
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.fullImage}
-            resizeMode="contain"
-          />
-        </View>
-      </Modal>
-
-      {/* Footer */}
+      {/* Footer Actions */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.btnSecondary} onPress={onClose}>
-          <Text style={styles.btnTextSecondary}>Discard</Text>
+        <TouchableOpacity style={styles.discardBtn} onPress={onClose}>
+          <Text style={styles.discardText}>Discard</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.btnExport} onPress={exportToPDF}>
-          <Ionicons name="document-text" size={18} color="white" />
-          <Text style={styles.btnTextExport}>Export</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.btnPrimary} onPress={onScanAnother}>
-          <Text style={styles.btnTextPrimary}>Next Scan</Text>
+        <TouchableOpacity style={styles.nextBtn} onPress={onScanAnother}>
+          <Text style={styles.nextText}>Quick Scan</Text>
+          <Ionicons name="scan-outline" size={18} color="#FFF" style={{ marginLeft: 6 }} />
         </TouchableOpacity>
       </View>
+
+      {/* Image Preview Modal */}
+      <Modal visible={isImageModalVisible} transparent animationType="fade">
+        <View style={styles.modalBg}>
+          <TouchableOpacity
+            style={styles.modalClose}
+            onPress={() => setImageModalVisible(false)}
+          >
+            <Ionicons name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Image source={{ uri: imageUri }} style={styles.fullImage} resizeMode="contain" />
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F2F4F7" },
-  header: {
-    padding: 30,
-    backgroundColor: "#3B5943",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  headerContent: {
+  container: {
     flex: 1,
-    alignItems: "center",
+    backgroundColor: "#F8F9FB",
   },
-  institution: { color: "white", fontSize: 18, fontWeight: "800" },
-  location: { color: "#BBDEFB", fontSize: 12 },
-  scoreBadge: { backgroundColor: "white", padding: 8, borderRadius: 8 },
-  scoreText: { fontWeight: "bold", fontSize: 18, color: "#3B5943" },
-  closeButton: { padding: 8 },
-  content: { flex: 1, padding: 15 },
-
-  // Image styles
-  imageSection: { marginBottom: 15 },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16, // Reduced from 20 for better edge fit
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 55,
+    paddingBottom: 15,
+    backgroundColor: "#FFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.05)",
+  },
+  backButton: {
+    padding: 6,
+    marginRight: 8,
+  },
+  headerTitleContainer: {
+    flex: 1,
+  },
+  institution: {
+    color: "#1A1A1A",
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: -0.2,
+  },
+  location: {
+    color: "#717171",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  scoreBadge: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    backgroundColor: "#1A1A1A",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 14,
+  },
+  scoreValue: {
+    color: "#1FC27D", // Theme Green Color
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  scoreDivider: {
+    color: "rgba(255,255,255,0.3)",
+    fontSize: 14,
+    marginHorizontal: 3,
+  },
+  scoreTotal: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  content: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16, // Reduced from 20 to avoid excessive blank space
+    paddingTop: 24,
+    paddingBottom: 40,
+  },
+  titleContainer: {
+    marginBottom: 28,
+  },
+  screenGreeting: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#1A1A1A",
+    letterSpacing: -0.5,
+  },
+  screenSubtext: {
+    fontSize: 14,
+    color: "#717171",
+    marginTop: 6,
+  },
+  section: {
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 18,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 12,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.02)",
+  },
+  sectionEditing: {
+    borderColor: "#1FC27D",
+    borderWidth: 2,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  sectionIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#E8F5E9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sectionTitle: {
+    color: "#1A1A1A",
+    fontSize: 15,
+    fontWeight: "700",
+    marginLeft: 12,
+    flex: 1,
+  },
+  editIcon: {
+    padding: 6,
+  },
   thumbnailContainer: {
-    height: 180,
-    borderRadius: 15,
+    height: 220,
+    borderRadius: 18,
     overflow: "hidden",
     backgroundColor: "#000",
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
   },
-  thumbnail: { width: "100%", height: "100%", opacity: 0.8 },
+  thumbnail: {
+    width: "100%",
+    height: "100%",
+    opacity: 0.95,
+  },
   imageOverlay: {
     position: "absolute",
-    bottom: 10,
-    right: 10,
+    bottom: 12,
+    right: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
-    padding: 6,
-    borderRadius: 8,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
   },
   overlayText: {
     color: "white",
-    fontSize: 12,
-    marginLeft: 5,
-    fontWeight: "600",
+    fontSize: 11,
+    fontWeight: "700",
+    marginLeft: 6,
   },
-
-  // Student ID
-  studentIdSection: {
-    backgroundColor: "#E8EAF6",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 15,
+  studentIdValue: {
+    color: "#1A1A1A",
+    fontSize: 26,
+    fontWeight: "900",
+    letterSpacing: 2,
+  },
+  editRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-  },
-  studentIdSectionEditing: {
-    backgroundColor: "#F3E5F5",
-    borderWidth: 2,
-    borderColor: "#5C6BC0",
-  },
-  studentIdLeft: {
-    flex: 1,
-  },
-  studentIdLabel: { fontSize: 12, color: "#5C6BC0", fontWeight: "700" },
-  studentIdValue: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1A237E",
-    letterSpacing: 2,
-    marginTop: 4,
   },
   studentIdInput: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#1A237E",
-    letterSpacing: 2,
-    marginTop: 4,
-    borderBottomWidth: 2,
-    borderBottomColor: "#5C6BC0",
-    paddingVertical: 4,
-    paddingHorizontal: 0,
-  },
-  editButton: {
-    padding: 8,
-    marginLeft: 10,
-  },
-  editButtonsContainer: {
-    flexDirection: "row",
-    gap: 8,
-    marginLeft: 10,
-  },
-  iconButtonSave: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#E8F5E9",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  iconButtonCancel: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#FFEBEE",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  // Modal
-  modalBackground: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.9)",
-    justifyContent: "center",
+    color: "#1FC27D",
+    fontSize: 26,
+    fontWeight: "900",
+    letterSpacing: 2,
+    paddingVertical: 6,
   },
-  fullImage: { width: "100%", height: "80%" },
-  closeModal: { position: "absolute", top: 50, right: 20, zIndex: 10 },
-
-  // List
-  section: {
-    backgroundColor: "white",
-    borderRadius: 15,
-    padding: 15,
-    elevation: 2,
+  editActions: {
+    flexDirection: "row",
+    gap: 12,
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#666",
-    marginBottom: 15,
+  actionBtnCancel: {
+    padding: 10,
+    backgroundColor: "#FFEBEE",
+    borderRadius: 12,
   },
-  noDataText: {
-    fontSize: 14,
-    color: "#999",
-    textAlign: "center",
-    paddingVertical: 20,
-    fontStyle: "italic",
+  actionBtnSave: {
+    padding: 10,
+    backgroundColor: "#E8F5E9",
+    borderRadius: 12,
+  },
+  breakdownSection: {
+    paddingBottom: 8,
+  },
+  breakdownList: {
+    marginTop: 4,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
+    borderBottomColor: "#F8F9FA",
   },
-  qBox: { width: 35 },
-  qLabel: { fontWeight: "bold", color: "#333" },
-  comparisonContainer: {
+  lastRow: {
+    borderBottomWidth: 0,
+  },
+  qIndicator: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#F1F3F5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  qNumber: {
+    color: "#495057",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  comparison: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-evenly",
+    justifyContent: "space-around",
+    paddingHorizontal: 12,
   },
-  scanGroup: { alignItems: "center" },
-  miniLabel: { fontSize: 8, color: "#AAA", fontWeight: "bold" },
-  bubbleValue: { fontSize: 18, fontWeight: "700" },
-  correctColor: { color: "#4CAF50" },
-  errorColor: { color: "#F44336" },
+  ansBlock: {
+    alignItems: "center",
+  },
+  ansLabel: {
+    fontSize: 9,
+    color: "#ADB5BD",
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  ansValue: {
+    color: "#1A1A1A",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  textError: {
+    color: "#FF4B4B",
+  },
+  statusTag: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bgSuccess: { backgroundColor: "#1FC27D" },
+  bgError: { backgroundColor: "#FF4B4B" },
+  emptyText: {
+    color: "#ADB5BD",
+    textAlign: "center",
+    paddingVertical: 40,
+    fontSize: 14,
+  },
   footer: {
-    padding: 20,
     flexDirection: "row",
-    gap: 10,
-    backgroundColor: "white",
+    paddingHorizontal: 16, // Reduced from 20 to match container
+    paddingVertical: 20,
+    backgroundColor: "#FFF",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(0,0,0,0.05)",
+    gap: 12,
   },
-  btnPrimary: {
-    flex: 2,
-    backgroundColor: "#3B5943",
-    padding: 16,
-    borderRadius: 10,
-    alignItems: "center",
-  },
-  btnSecondary: {
+  discardBtn: {
     flex: 1,
-    backgroundColor: "#EEE",
-    padding: 16,
-    borderRadius: 10,
+    backgroundColor: "#F8F9FA",
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#F1F3F5",
+  },
+  discardText: {
+    color: "#717171",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  nextBtn: {
+    flex: 2,
+    backgroundColor: "#1FC27D",
+    paddingVertical: 18,
+    borderRadius: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  nextText: {
+    color: "#FFF",
+    fontWeight: "800",
+    fontSize: 16,
+  },
+  modalBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    justifyContent: "center",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -558,7 +557,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
   },
-  btnTextExport: { color: "white", fontWeight: "bold", fontSize: 13 },
-  btnTextPrimary: { color: "white", fontWeight: "bold" },
-  btnTextSecondary: { color: "#666" },
+  modalClose: {
+    position: "absolute",
+    top: 55,
+    right: 25,
+    zIndex: 10,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    padding: 10,
+    borderRadius: 24,
+  },
+  fullImage: {
+    width: "100%",
+    height: "85%",
+  },
 });

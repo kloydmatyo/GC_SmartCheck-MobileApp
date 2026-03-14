@@ -1,36 +1,36 @@
-import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  query,
-  serverTimestamp,
-  setDoc,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDocs,
+    query,
+    serverTimestamp,
+    setDoc,
+    where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
+const MAX_FIELD_LENGTH = 50;
 
 interface ClassOption {
   id: string;
@@ -43,13 +43,6 @@ interface ClassOption {
 const formatDateForStorage = (date: Date): string =>
   date.toISOString().split("T")[0];
 
-const formatDateForDisplay = (date: Date): string =>
-  date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-
 const toStartOfDay = (date: Date): Date => {
   const normalized = new Date(date);
   normalized.setHours(0, 0, 0, 0);
@@ -58,7 +51,14 @@ const toStartOfDay = (date: Date): Date => {
 
 export default function CreateQuizScreen() {
   const router = useRouter();
-  const goToQuizzes = () => router.replace("/(tabs)/quizzes");
+  const params = useLocalSearchParams();
+  const classIdParam = params.classId as string | undefined;
+  const goBack = () =>
+    classIdParam
+      ? router.replace(
+          `/(tabs)/class-details?classId=${classIdParam}&tab=exams`,
+        )
+      : router.replace("/(tabs)/quizzes");
   const [loading, setLoading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
@@ -66,17 +66,13 @@ export default function CreateQuizScreen() {
   const [quizName, setQuizName] = useState("");
   const [numQuestions, setNumQuestions] = useState<number | null>(null);
   const [subject, setSubject] = useState("");
-  const [examType, setExamType] = useState<"board" | "diagnostic" | null>(
-    null,
-  );
-  const [choicesPerItem, setChoicesPerItem] = useState<number | null>(null);
+  const [examType] = useState<"board" | "diagnostic">("board");
+  const [choicesPerItem] = useState<number>(5);
   const [examDate, setExamDate] = useState<Date | null>(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
-  const [postSaveConfirmVisible, setPostSaveConfirmVisible] = useState(false);
-  const [createdExamId, setCreatedExamId] = useState("");
+  const [createdExamId, setCreatedExamId] = useState<string | null>(null);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
     type: "success" | "error" | "info";
@@ -106,12 +102,8 @@ export default function CreateQuizScreen() {
       setQuizName("");
       setNumQuestions(null);
       setSubject("");
-      setExamType(null);
-      setChoicesPerItem(null);
       setExamDate(new Date());
-      setShowDatePicker(false);
-      setSelectedClassId(null);
-      setCreatedExamId("");
+      setSelectedClassId(classIdParam || null);
       setLoading(false);
 
       const loadClasses = async () => {
@@ -123,19 +115,69 @@ export default function CreateQuizScreen() {
 
         try {
           setClassesLoading(true);
-          const classesQuery = query(
-            collection(db, "classes"),
-            where("createdBy", "==", currentUser.uid),
-          );
-          const classesSnapshot = await getDocs(classesQuery);
-          const classes = classesSnapshot.docs
-            .map((classDoc) => ({
-              id: classDoc.id,
-              ...(classDoc.data() as Omit<ClassOption, "id">),
-            }))
-            .filter((cls) => !cls.isArchived);
+          const { NetworkService } = await import("@/services/networkService");
+          const isOnline = await NetworkService.isOnline();
+          let classes: ClassOption[] = [];
 
-          setClassOptions(classes);
+          if (isOnline) {
+            try {
+              const classesQuery = query(
+                collection(db, "classes"),
+                where("createdBy", "==", currentUser.uid),
+              );
+              // Provide a short timeout so UI won't freeze on flaky networks
+              const classesSnapshot = await Promise.race([
+                getDocs(classesQuery),
+                new Promise<any>((_, reject) =>
+                  setTimeout(() => reject(new Error("timeout")), 3000),
+                ),
+              ]);
+
+              classes = classesSnapshot.docs
+                .map((classDoc: any) => ({
+                  id: classDoc.id,
+                  ...(classDoc.data() as Omit<ClassOption, "id">),
+                }))
+                .filter((cls: any) => !cls.isArchived);
+            } catch (err) {
+              console.warn(
+                "Firestore classes fetch failed, falling back to cache",
+                err,
+              );
+            }
+          }
+
+          // Fallback to cache if offline or Firestore query failed
+          if (!isOnline || classes.length === 0) {
+            const { RealmService } = await import("@/services/realmService");
+            const cacheRealm = await RealmService.getCacheRealm();
+            const cachedClasses = cacheRealm
+              .objects<any>("ClassCache")
+              .filtered(`createdBy == "${currentUser.uid}"`);
+
+            classes = cachedClasses.map((c: any) => ({
+              id: c.id,
+              class_name: c.class_name,
+              course_subject: c.course_subject,
+              section_block: c.section_block,
+              isArchived: false, // We assume cached active ones aren't archived
+            }));
+          }
+
+          // Always add unsynced classes from the Staging Realm
+          const { RealmService } = await import("@/services/realmService");
+          const stagingRealm = await RealmService.getStagingRealm();
+          const stagingClasses = stagingRealm.objects<any>("OfflineClass");
+
+          const sClasses = stagingClasses.map((c: any) => ({
+            id: `staging_${c._id.toHexString()}`,
+            class_name: c.class_name,
+            course_subject: c.course_subject,
+            section_block: c.section_block,
+            isArchived: false,
+          }));
+
+          setClassOptions([...classes, ...sClasses]);
         } catch (error) {
           console.warn("Could not load classes:", error);
           setClassOptions([]);
@@ -145,7 +187,7 @@ export default function CreateQuizScreen() {
       };
 
       loadClasses();
-    }, []),
+    }, [classIdParam]),
   );
 
   const colors = darkModeEnabled
@@ -172,15 +214,6 @@ export default function CreateQuizScreen() {
         accent: "#4CAF50",
       };
 
-  const handleDateChange = (_event: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate) {
-      const today = toStartOfDay(new Date());
-      const picked = toStartOfDay(selectedDate);
-      setExamDate(picked < today ? today : selectedDate);
-    }
-  };
-
   const handleSave = async () => {
     // Validation
     if (!quizName.trim()) {
@@ -189,6 +222,16 @@ export default function CreateQuizScreen() {
         type: "error",
         title: "Error",
         message: "Please enter a quiz name",
+      });
+      return;
+    }
+
+    if (quizName.trim().length > MAX_FIELD_LENGTH) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Exam name must be 50 characters or fewer",
       });
       return;
     }
@@ -203,35 +246,7 @@ export default function CreateQuizScreen() {
       return;
     }
 
-    if (!selectedClassId) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select a class",
-      });
-      return;
-    }
 
-    if (!choicesPerItem) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select choices per item",
-      });
-      return;
-    }
-
-    if (!examType) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select an exam type",
-      });
-      return;
-    }
 
     if (!examDate) {
       setStatusModal({
@@ -285,55 +300,69 @@ export default function CreateQuizScreen() {
       const selectedClass =
         classOptions.find((cls) => cls.id === selectedClassId) || null;
 
-      // Generate exam code from quiz name and date
+      // Generate exam code
       const generateExamCode = (title: string, date: string): string => {
-        const words = title.trim().split(/\s+/);
-        const initials = words
-          .slice(0, 3)
-          .map((word) => word.charAt(0).toUpperCase())
-          .join("");
-
-        const dateCode = date.replace(/-/g, "");
-        const randomSuffix = Math.random()
-          .toString(36)
-          .substring(2, 5)
-          .toUpperCase();
-
-        return `${initials}-${dateCode}-${randomSuffix}`;
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars like 0/O, 1/I/L
+        let code = "";
+        for (let i = 0; i < 6; i++) {
+          code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return `EX-${code}`;
       };
 
       const examCode = generateExamCode(quizName.trim(), currentDate);
 
-      // Create exam document
-      const examData = {
+      // Prepare exam data
+      const baseExamData = {
         title: quizName.trim(),
-        subject: subject.trim() || "General",
+        subject: subject.trim() || selectedClass?.course_subject || "General",
         examType: examType,
         num_items: numQuestions,
         choices_per_item: choicesPerItem,
         status: "Draft",
         createdBy: currentUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
         created_at: currentDate,
         classId: selectedClass?.id || null,
         className: selectedClass?.class_name || null,
         instructorId: instructorId,
         examCode: examCode,
         version: 1,
-        answerKeys: [],
-        generated_sheets: [],
-        choicePoints: {},
+        // For offline staging
+        answerKeyJson: JSON.stringify({
+          questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
+            questionNumber: i + 1,
+            correctAnswer: "",
+            points: 1,
+          })),
+        }),
       };
 
-      console.log("Creating exam with data:", examData);
-      const examRef = await addDoc(collection(db, "exams"), examData);
-      console.log("Exam created with ID:", examRef.id);
+      console.log("Saving quiz via ExamService...");
+      const result = await ExamService.createExam(baseExamData);
 
-      // Create default answer key with specific ID
-      const answerKeyId = `ak_${examRef.id}_${Date.now()}`;
+      if (result.startsWith("staging_")) {
+        console.log("Quiz saved to staging realm (OFFLINE)");
+        setCreatedExamId(result);
+        setStatusModal({
+          visible: true,
+          type: "success",
+          title: "Saved Offline",
+          message: "Quiz saved locally. Redirecting to answer key...",
+        });
+        setTimeout(() => {
+          setStatusModal((prev) => ({ ...prev, visible: false }));
+          router.replace(`/(tabs)/edit-answer-key?examId=${result}`);
+        }, 1500);
+        return;
+      }
+
+      const newExamId = result;
+      setCreatedExamId(newExamId);
+
+      // Create default answer key in Firestore (Online path)
+      const answerKeyId = `ak_${newExamId}_${Date.now()}`;
       const answerKeyData = {
-        examId: examRef.id,
+        examId: newExamId,
         id: answerKeyId,
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
@@ -344,55 +373,36 @@ export default function CreateQuizScreen() {
           questionNumber: i + 1,
           correctAnswer: "",
           points: 1,
-          choiceLabels: {},
         })),
-        ...Object.fromEntries(
-          Array.from({ length: numQuestions }, (_, i) => [i.toString(), ""]),
-        ),
       };
 
-      console.log("Creating answer key with ID:", answerKeyId);
       await setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData);
-      console.log("Answer key created successfully");
 
-      // Create template automatically
+      // Create template automatically (Online path)
       try {
-        console.log("Creating template for exam...");
         const templateData = {
           name: `${quizName.trim()}_Template`,
-          description: `Answer sheet template for ${quizName.trim()}`,
-          numQuestions: numQuestions,
-          choicesPerQuestion: 5, // A-E
-          layout:
-            numQuestions === 20
-              ? "quad"
-              : numQuestions === 50
-                ? "double"
-                : "single",
-          includeStudentId: true,
-          studentIdLength: 10,
+          numQuestions,
+          choicesPerQuestion: choicesPerItem,
           createdBy: currentUser.uid,
-          instructorId: instructorId,
-          classId: selectedClass?.id || null,
-          className: selectedClass?.class_name || null,
-          examId: examRef.id,
+          examId: newExamId,
           examName: quizName.trim(),
-          examCode: examCode,
+          examCode,
           createdAt: serverTimestamp(),
-          isArchived: false,
         };
-
         await addDoc(collection(db, "templates"), templateData);
-        console.log("Template created successfully");
-      } catch (templateError) {
-        console.error("Error creating template:", templateError);
-        // Don't fail the exam creation if template fails
+      } catch (err) {
+        console.warn("Template creation failed:", err);
       }
 
       console.log("=== Quiz Creation Complete ===");
 
-      setCreatedExamId(examRef.id);
-      setPostSaveConfirmVisible(true);
+      const nextParams = classIdParam
+        ? `&classId=${encodeURIComponent(classIdParam)}&tab=exams`
+        : "";
+      router.replace(
+        `/(tabs)/edit-answer-key?examId=${newExamId}${nextParams}`,
+      );
     } catch (error) {
       console.error("Error creating quiz:", error);
       setStatusModal({
@@ -406,36 +416,27 @@ export default function CreateQuizScreen() {
     }
   };
 
-  const handleEditAnswerKey = () => {
-    setStatusModal({
-      visible: true,
-      type: "info",
-      title: "Save First",
-      message: "Please save the quiz first before editing the answer key",
-    });
-  };
-
-  const handleScanAnswerKey = () => {
-    setStatusModal({
-      visible: true,
-      type: "info",
-      title: "Save First",
-      message: "Please save the quiz first before scanning the answer key",
-    });
-  };
+  const canProceed = Boolean(
+    quizName.trim() &&
+    quizName.trim().length <= MAX_FIELD_LENGTH &&
+    numQuestions,
+  );
 
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.screenBg }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
-        <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Create New Quiz</Text>
+      <View style={styles.lightHeader}>
         <View style={styles.placeholder} />
+        <Text style={styles.lightHeaderTitle}>Create Exam</Text>
+        <TouchableOpacity
+          style={[styles.closeButton, loading && { opacity: 0.45 }]}
+          onPress={goBack}
+          disabled={loading}
+        >
+          <Ionicons name="close" size={22} color="#A8AFBC" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -443,57 +444,38 @@ export default function CreateQuizScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Quiz Name */}
         <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>QUIZ NAME *</Text>
+          <Text style={styles.formLabel}>Exam Name</Text>
           <TextInput
-            style={[
-              styles.input,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderWidth: 1,
-                borderColor: "#34483f",
-                color: "#e7f1eb",
-              },
-            ]}
-            placeholder="e.g., Midterm Exam - BSIT - 3B"
-            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#8B9D8B"}
+            style={styles.lightInput}
+            placeholder="Enter exam name"
+            placeholderTextColor="#B5BCC8"
             value={quizName}
             onChangeText={setQuizName}
             editable={!loading}
+            maxLength={MAX_FIELD_LENGTH}
           />
         </View>
 
-        {/* Number of Questions */}
         <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>NUMBER OF QUESTIONS *</Text>
-          <View style={styles.choiceButtons}>
+          <Text style={styles.formLabel}>Number of Questions</Text>
+          <View style={styles.questionOptionRow}>
             {NUM_QUESTIONS_OPTIONS.map((option) => (
               <TouchableOpacity
                 key={option}
                 style={[
-                  styles.choiceButton,
-                  darkModeEnabled && {
-                    backgroundColor: "#2a3a33",
-                    borderColor: "#34483f",
-                  },
-                  numQuestions === option && styles.choiceButtonActive,
-                  darkModeEnabled &&
-                    numQuestions === option && {
-                      backgroundColor: "#1f3a2f",
-                      borderColor: "#8fd1ad",
-                    },
+                  styles.questionOption,
+                  numQuestions === option && styles.questionOptionActive,
                 ]}
-                onPress={() => setNumQuestions(option)}
+                onPress={() => {
+                  setNumQuestions(option);
+                }}
                 disabled={loading}
               >
                 <Text
                   style={[
-                    styles.choiceButtonText,
-                    darkModeEnabled && { color: "#dbe8e1" },
-                    numQuestions === option && styles.choiceButtonTextActive,
-                    darkModeEnabled &&
-                      numQuestions === option && { color: "#8fd1ad" },
+                    styles.questionOptionText,
+                    numQuestions === option && styles.questionOptionTextActive,
                   ]}
                 >
                   {option}
@@ -503,390 +485,29 @@ export default function CreateQuizScreen() {
           </View>
         </View>
 
-        {/* Subject (Optional) */}
-        {/* Choices Per Item */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CHOICES PER ITEM *</Text>
-          <View style={styles.choiceButtons}>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                choicesPerItem === 4 && styles.choiceButtonActive,
-                darkModeEnabled &&
-                  choicesPerItem === 4 && {
-                    backgroundColor: "#1f3a2f",
-                    borderColor: "#8fd1ad",
-                  },
-              ]}
-              onPress={() => setChoicesPerItem(4)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  choicesPerItem === 4 && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                    choicesPerItem === 4 && { color: "#8fd1ad" },
-                ]}
-              >
-                A-D (4 choices)
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                choicesPerItem === 5 && styles.choiceButtonActive,
-                darkModeEnabled &&
-                  choicesPerItem === 5 && {
-                    backgroundColor: "#1f3a2f",
-                    borderColor: "#8fd1ad",
-                  },
-              ]}
-              onPress={() => setChoicesPerItem(5)}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  choicesPerItem === 5 && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                    choicesPerItem === 5 && { color: "#8fd1ad" },
-                ]}
-              >
-                A-E (5 choices)
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
-        {/* Class Selection */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>CLASS *</Text>
-          {classesLoading ? (
-            <View
-              style={[
-                styles.loadingClassesRow,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <ActivityIndicator size="small" color="#E8F5E9" />
-              <Text style={[styles.loadingClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>Loading classes...</Text>
-            </View>
-          ) : classOptions.length === 0 ? (
-            <View
-              style={[
-                styles.emptyClassesBox,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderWidth: 1,
-                  borderColor: colors.border,
-                },
-              ]}
-            >
-              <Text style={[styles.emptyClassesText, darkModeEnabled && { color: "#b9c9c0" }]}>No classes found</Text>
-            </View>
-          ) : (
-            <View style={styles.classButtons}>
-              {classOptions.map((cls) => {
-                const selected = selectedClassId === cls.id;
-                return (
-                  <TouchableOpacity
-                    key={cls.id}
-                    style={[
-                      styles.classButton,
-                      darkModeEnabled && {
-                        backgroundColor: "#2a3a33",
-                        borderColor: colors.border,
-                      },
-                      selected && styles.classButtonActive,
-                      darkModeEnabled &&
-                        selected && {
-                          backgroundColor: colors.primary,
-                          borderColor: colors.accent,
-                        },
-                    ]}
-                    onPress={() => setSelectedClassId(cls.id)}
-                    disabled={loading}
-                  >
-                    <Text
-                      style={[
-                        styles.classButtonTitle,
-                        darkModeEnabled && { color: "#e7f1eb" },
-                        selected && styles.classButtonTextActive,
-                        darkModeEnabled && selected && { color: "#8fd1ad" },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {cls.class_name}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.classButtonSubtitle,
-                        darkModeEnabled && { color: "#b9c9c0" },
-                        selected && styles.classButtonTextActive,
-                        darkModeEnabled && selected && { color: "#8fd1ad" },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {cls.section_block || cls.course_subject || "Class"}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-        </View>
-
-        {/* Exam Type */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>EXAM TYPE *</Text>
-          <View style={styles.choiceButtons}>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                examType === "board" && styles.choiceButtonActive,
-                darkModeEnabled &&
-                  examType === "board" && {
-                    backgroundColor: "#1f3a2f",
-                    borderColor: "#8fd1ad",
-                  },
-              ]}
-              onPress={() => setExamType("board")}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  examType === "board" && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                    examType === "board" && { color: "#8fd1ad" },
-                ]}
-              >
-                Board Exam
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                examType === "diagnostic" && styles.choiceButtonActive,
-                darkModeEnabled &&
-                  examType === "diagnostic" && {
-                    backgroundColor: "#1f3a2f",
-                    borderColor: "#8fd1ad",
-                  },
-              ]}
-              onPress={() => setExamType("diagnostic")}
-              disabled={loading}
-            >
-              <Text
-                style={[
-                  styles.choiceButtonText,
-                  darkModeEnabled && { color: "#dbe8e1" },
-                  examType === "diagnostic" && styles.choiceButtonTextActive,
-                  darkModeEnabled &&
-                    examType === "diagnostic" && { color: "#8fd1ad" },
-                ]}
-              >
-                Diagnostic Test
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Exam Date */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>EXAM DATE *</Text>
-          <TouchableOpacity
-            style={[
-              styles.dateButton,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderColor: "#34483f",
-              },
-            ]}
-            onPress={() => setShowDatePicker(true)}
-            disabled={loading}
-          >
-            <Ionicons name="calendar-outline" size={20} color={darkModeEnabled ? "#8fd1ad" : "#E8F5E9"} />
-            <Text style={[styles.dateButtonText, darkModeEnabled && { color: "#e7f1eb" }]}>
-              {examDate ? formatDateForDisplay(examDate) : "Select exam date"}
-            </Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={examDate || new Date()}
-              mode="date"
-              display="default"
-              onChange={handleDateChange}
-              minimumDate={new Date()}
-            />
-          )}
-        </View>
-
-        {/* Folder / Subject (Optional) */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>FOLDER / SUBJECT (OPTIONAL)</Text>
-          <TextInput
-            style={[
-              styles.input,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderWidth: 1,
-                borderColor: "#34483f",
-                color: "#e7f1eb",
-              },
-            ]}
-            placeholder="e.g., Mathematics, Science"
-            placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#8B9D8B"}
-            value={subject}
-            onChangeText={setSubject}
-            editable={!loading}
-          />
-        </View>
-
-        {/* Manual Editing Section */}
-        <View
-          style={[
-            styles.manualSection,
-            darkModeEnabled && {
-              backgroundColor: "#2a3a33",
-              borderWidth: 1,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <View style={styles.manualHeader}>
-            <Text style={[styles.manualTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Manual Editing</Text>
-            <Text style={[styles.manualSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
-              Set the correct options for each question to enable automatic
-              grading.
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              darkModeEnabled && {
-                backgroundColor: colors.primary,
-                borderColor: colors.primaryDark,
-              },
-            ]}
-            onPress={handleEditAnswerKey}
-            disabled={loading}
-          >
-            <Ionicons
-              name="create-outline"
-              size={20}
-              color={darkModeEnabled ? colors.accent : "#fff"}
-            />
-            <Text style={[styles.editButtonText, darkModeEnabled && { color: colors.accent }]}>Edit Answer Key</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Answer Key Section */}
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>ANSWER KEY</Text>
-          <TouchableOpacity
-            style={[
-              styles.scanButton,
-              darkModeEnabled && {
-                backgroundColor: "#2a3a33",
-                borderWidth: 1,
-                borderColor: colors.border,
-              },
-            ]}
-            onPress={handleScanAnswerKey}
-            disabled={loading}
-          >
-            <Ionicons
-              name="camera-outline"
-              size={32}
-              color={darkModeEnabled ? colors.accent : "#E8F5E9"}
-            />
-            <View style={styles.scanTextContainer}>
-              <Text style={[styles.scanTitle, darkModeEnabled && { color: "#e7f1eb" }]}>Scan Answer Key</Text>
-              <Text style={[styles.scanSubtitle, darkModeEnabled && { color: "#b9c9c0" }]}>
-                Use the camera scanner to scan the answer key
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
-      {/* Save Button */}
-        <View
-          style={[
-            styles.footer,
-            {
-              backgroundColor: colors.screenBg,
-              borderTopColor: darkModeEnabled ? colors.border : "#e0e0e0",
-            },
-          ]}
-        >
+      <View style={styles.lightFooter}>
         <TouchableOpacity
           style={[
-            styles.saveButton,
-            darkModeEnabled && {
-              backgroundColor: colors.primary,
-              borderWidth: 1,
-              borderColor: colors.primaryDark,
-            },
+            styles.primaryActionButton,
+            !canProceed && styles.primaryActionButtonDisabled,
             loading && styles.saveButtonDisabled,
           ]}
           onPress={handleSave}
-          disabled={loading}
+          disabled={loading || !canProceed}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color="#FFFFFF" />
           ) : (
             <>
-              <Ionicons name="save-outline" size={24} color="#fff" />
-              <Text style={styles.saveButtonText}>Save</Text>
+              <Text style={styles.primaryActionText}>Next: Set Answer Key</Text>
+              <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
             </>
           )}
         </TouchableOpacity>
       </View>
-
-      <ConfirmationModal
-        visible={postSaveConfirmVisible}
-        title="Quiz Created"
-        message="Quiz created successfully. Would you like to edit the answer key now?"
-        cancelText="Later"
-        confirmText="Edit Answer Key"
-        onCancel={() => {
-          setPostSaveConfirmVisible(false);
-          setCreatedExamId("");
-          goToQuizzes();
-        }}
-        onConfirm={() => {
-          if (!createdExamId) return;
-          setPostSaveConfirmVisible(false);
-          router.replace(`/(tabs)/edit-answer-key?examId=${createdExamId}`);
-          setCreatedExamId("");
-        }}
-      />
 
       <StatusModal
         visible={statusModal.visible}
@@ -909,223 +530,166 @@ export default function CreateQuizScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F7F7F8",
   },
-  header: {
+  lightHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#3d5a3d",
+    backgroundColor: "#FFFFFF",
     paddingTop: 56,
     paddingBottom: 16,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
   },
-  backButton: {
-    padding: 4,
-  },
-  headerTitle: {
+  lightHeaderTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    color: "#fff",
+    fontWeight: "800",
+    color: "#1D2433",
   },
   placeholder: {
-    width: 32,
+    width: 40,
+    height: 40,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F3F5F8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   scrollView: {
     flex: 1,
   },
   content: {
     padding: 20,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   section: {
     marginBottom: 24,
   },
-  label: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#666",
-    marginBottom: 8,
-    letterSpacing: 0.5,
+  formLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#30384A",
+    marginBottom: 10,
   },
-  input: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 16,
+  lightInput: {
+    height: 64,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 18,
     fontSize: 16,
-    color: "#E8F5E9",
+    color: "#1F2937",
   },
-  choiceButtons: {
+  questionOptionRow: {
     flexDirection: "row",
     gap: 12,
   },
-  choiceButton: {
+  questionOption: {
     flex: 1,
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 16,
+    height: 78,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#3d5a3d",
+    justifyContent: "center",
   },
-  choiceButtonActive: {
-    backgroundColor: "#2d4a2d",
-    borderColor: "#4CAF50",
+  questionOptionActive: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#3ED598",
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2,
   },
-  choiceButtonText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#E8F5E9",
+  questionOptionText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#31394A",
   },
-  choiceButtonTextActive: {
-    color: "#4CAF50",
+  questionOptionTextActive: {
+    color: "#1DAF72",
   },
   classButtons: {
     gap: 10,
   },
-  classButton: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
+  lightClassButton: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
     padding: 14,
-    borderWidth: 2,
-    borderColor: "#3d5a3d",
   },
-  classButtonActive: {
-    backgroundColor: "#2d4a2d",
-    borderColor: "#4CAF50",
+  lightClassButtonActive: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#3ED598",
   },
-  classButtonTitle: {
+  lightClassButtonText: {
     fontSize: 15,
-    fontWeight: "600",
-    color: "#E8F5E9",
-    marginBottom: 3,
+    fontWeight: "700",
+    color: "#31394A",
   },
-  classButtonSubtitle: {
-    fontSize: 12,
-    color: "#B8D4B8",
+  lightClassButtonTextActive: {
+    color: "#1DAF72",
   },
-  classButtonTextActive: {
-    color: "#4CAF50",
-  },
-  loadingClassesRow: {
+  inlineInfoBox: {
+    minHeight: 54,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 14,
   },
-  loadingClassesText: {
-    fontSize: 13,
-    color: "#B8D4B8",
-  },
-  emptyClassesBox: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 14,
-  },
-  emptyClassesText: {
-    fontSize: 13,
-    color: "#B8D4B8",
-  },
-  dateButton: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1.5,
-    borderColor: "#3d5a3d",
-  },
-  dateButtonText: {
-    fontSize: 15,
-    color: "#E8F5E9",
-    fontWeight: "600",
-  },
-  manualSection: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 24,
-  },
-  manualHeader: {
-    marginBottom: 16,
-  },
-  manualTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#E8F5E9",
-    marginBottom: 8,
-  },
-  manualSubtitle: {
-    fontSize: 13,
-    color: "#B8D4B8",
-    lineHeight: 18,
-  },
-  editButton: {
-    backgroundColor: "#2d4a2d",
-    borderRadius: 8,
-    padding: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1.5,
-    borderColor: "#4CAF50",
-  },
-  editButtonText: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#4CAF50",
-  },
-  scanButton: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  scanTextContainer: {
+  inlineInfoText: {
+    fontSize: 14,
+    color: "#6F7787",
     flex: 1,
   },
-  scanTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#E8F5E9",
-    marginBottom: 4,
-  },
-  scanSubtitle: {
-    fontSize: 13,
-    color: "#B8D4B8",
-    lineHeight: 18,
-  },
-  footer: {
+  lightFooter: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     padding: 20,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F7F7F8",
     borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    borderTopColor: "#EEF1F5",
   },
-  saveButton: {
-    backgroundColor: "#3d5a3d",
-    borderRadius: 12,
-    padding: 16,
+  primaryActionButton: {
+    backgroundColor: "#1FC27D",
+    borderRadius: 16,
+    padding: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 6,
+  },
+  primaryActionButtonDisabled: {
+    backgroundColor: "#C9D2DD",
+    shadowOpacity: 0,
+    elevation: 0,
   },
   saveButtonDisabled: {
     opacity: 0.6,
   },
-  saveButtonText: {
+  primaryActionText: {
     fontSize: 18,
-    fontWeight: "600",
-    color: "#fff",
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
 });

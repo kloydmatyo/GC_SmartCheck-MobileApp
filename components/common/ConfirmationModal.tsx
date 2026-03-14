@@ -44,15 +44,23 @@ export default function ConfirmationModal({
       onRequestClose={onCancel || onConfirm}
     >
       <View style={styles.overlay}>
+        <TouchableOpacity
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={onCancel}
+        />
         <View style={styles.dialog}>
-          <View style={styles.iconWrap}>
-            <Ionicons
-              name={destructive ? "warning-outline" : "help-circle-outline"}
-              size={24}
-              color={confirmColor}
-            />
+          <View style={styles.header}>
+            <Text style={styles.title}>{title}</Text>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onCancel}
+              disabled={loading}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={20} color="#A0A7B4" />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
 
           <View style={styles.actions}>
@@ -90,74 +98,85 @@ export default function ConfirmationModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    backgroundColor: "rgba(15, 23, 42, 0.26)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    paddingHorizontal: 24,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
   },
   dialog: {
     width: "100%",
     maxWidth: 360,
     backgroundColor: COLORS.white,
-    borderRadius: RADIUS.large,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 28,
+    paddingBottom: 22,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 12,
   },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#f0f9f4",
-    justifyContent: "center",
+  header: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 12,
   },
   title: {
-    fontSize: 20,
-    fontWeight: "700",
+    flex: 1,
+    fontSize: 22,
+    fontWeight: "800",
     color: COLORS.text,
-    marginBottom: 8,
+    paddingRight: 12,
   },
   message: {
     fontSize: 15,
     color: COLORS.textSecondary,
-    lineHeight: 22,
-    marginBottom: 20,
+    lineHeight: 24,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
   actions: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 10,
+    gap: 14,
+    marginTop: 28,
   },
   cancelButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    minWidth: 90,
+    flex: 1,
+    height: 58,
+    borderRadius: 18,
+    backgroundColor: "#F3F4F6",
     alignItems: "center",
+    justifyContent: "center",
   },
   cancelText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.textSecondary,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1F2937",
   },
   confirmButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: RADIUS.small,
-    minWidth: 110,
+    flex: 1,
+    height: 58,
+    borderRadius: 18,
     alignItems: "center",
+    justifyContent: "center",
   },
   confirmButtonFull: {
     flex: 1,
     minWidth: 0,
   },
   confirmText: {
-    fontSize: 14,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "800",
     color: COLORS.white,
   },
 });

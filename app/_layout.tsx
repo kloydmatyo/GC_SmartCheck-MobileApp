@@ -4,17 +4,19 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
+import * as NavigationBar from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
-import * as NavigationBar from "expo-navigation-bar";
+import "react-native-get-random-values";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 
 import { toastConfig } from "@/components/ui/ToastConfig";
+import { auth } from "@/config/firebase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { GradeStorageService } from "@/services/gradeStorageService";
+import { SyncService } from "@/services/syncService";
 
 export const unstable_settings = {
   initialRouteName: "sign-in",
@@ -41,15 +43,15 @@ export default function RootLayout() {
     try {
       isSyncingRef.current = true;
       const netState = await NetInfo.fetch();
-      if (netState.isConnected && netState.isInternetReachable) {
-        const count = await GradeStorageService.getOfflineItemCount();
-        if (count > 0) {
-          setIsSyncing(true);
-          await GradeStorageService.syncOfflineQueue();
-        }
+
+      if (netState.isConnected && netState.isInternetReachable && auth.currentUser) {
+        setIsSyncing(true);
+        console.log("[RootLayout] Triggering background sync...");
+        await SyncService.syncPendingUpdates();
+        console.log("[RootLayout] Background sync complete");
       }
     } catch (err) {
-      console.warn("Sync error:", err);
+      console.warn("Background sync error:", err);
     } finally {
       setIsSyncing(false);
       isSyncingRef.current = false;
@@ -104,7 +106,7 @@ export default function RootLayout() {
       {isSyncing && (
         <View style={styles.syncOverlay} pointerEvents="none">
           <View style={styles.syncContainer}>
-            <ActivityIndicator color="white" size="small" />
+            <ActivityIndicator color="#6B7280" size="small" />
             <Text style={styles.syncText}>Syncing Data...</Text>
           </View>
         </View>
@@ -123,20 +125,22 @@ const styles = StyleSheet.create({
   syncContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#ECEEF2',
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
+    shadowColor: '#0E1628',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   syncText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: 'bold',
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '600',
   }
 });

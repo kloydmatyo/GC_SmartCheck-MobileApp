@@ -1,408 +1,515 @@
+import { auth, db } from "@/config/firebase";
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Dimensions,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import { BatchHistoryService } from "../../services/batchHistoryService";
-import { ExamBatch } from "../../types/batch";
+import Toast from "react-native-toast-message";
 
-export default function BatchHistoryScreen() {
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false);
-  const [batches, setBatches] = useState<ExamBatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterStatus, setFilterStatus] = useState<
-    "all" | "generated" | "printed" | "deleted"
-  >("all");
-  const [statistics, setStatistics] = useState({
-    totalBatches: 0,
-    totalSheets: 0,
-    generatedBatches: 0,
-    printedBatches: 0,
-    deletedBatches: 0,
+type ArchivedMode = "classes" | "exams";
+
+type ArchivedClass = {
+  id: string;
+  title: string;
+  studentCount: number;
+  dateLabel: string;
+};
+
+type ArchivedExam = {
+  id: string;
+  title: string;
+  subtitle: string;
+  dateLabel: string;
+  questions: number;
+};
+
+type RestoreTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
+type DeleteTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
+type MenuTarget =
+  | { type: "class"; id: string; title: string }
+  | { type: "exam"; id: string; title: string }
+  | null;
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const ARCHIVE_MENU_WIDTH = 170;
+const ARCHIVE_MENU_HEIGHT = 112;
+
+function formatDateLabel(value: any) {
+  if (!value) return "No date";
+  const parsed =
+    typeof value?.toDate === "function"
+      ? value.toDate()
+      : typeof value === "string"
+        ? new Date(value)
+        : value;
+
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return "No date";
+
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
   });
+}
 
-  const loadStatistics = async () => {
-    try {
-      const stats = await BatchHistoryService.getBatchStatistics();
-      setStatistics(stats);
-    } catch (error) {
-      console.error("Error loading statistics:", error);
-    }
-  };
+export default function ArchivedScreen() {
+  const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<ArchivedMode>("classes");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [archivedClasses, setArchivedClasses] = useState<ArchivedClass[]>([]);
+  const [archivedExams, setArchivedExams] = useState<ArchivedExam[]>([]);
+  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [menuTarget, setMenuTarget] = useState<MenuTarget>(null);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
-  useEffect(() => {
-    loadBatchHistory();
-    loadStatistics();
-  }, [filterStatus]);
+  const loadArchivedItems = useCallback(() => {
+    let active = true;
 
-  const refreshAllData = useCallback(async () => {
-    await Promise.all([loadBatchHistory(), loadStatistics()]);
-  }, [filterStatus, searchQuery]);
-
-  useFocusEffect(
-    useCallback(() => {
-      (async () => {
-        try {
-          const savedDarkMode = await AsyncStorage.getItem(
-            DARK_MODE_STORAGE_KEY,
-          );
-          setDarkModeEnabled(savedDarkMode === "true");
-        } catch (error) {
-          console.warn("Failed to load dark mode preference:", error);
+    (async () => {
+      try {
+        setLoading(true);
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          if (active) {
+            setArchivedClasses([]);
+            setArchivedExams([]);
+          }
+          return;
         }
-      })();
 
-      refreshAllData();
-    }, [refreshAllData]),
-  );
+        const [classSnapshot, examSnapshot] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, "classes"),
+              where("createdBy", "==", currentUser.uid),
+              where("isArchived", "==", true),
+            ),
+          ),
+          getDocs(
+            query(
+              collection(db, "exams"),
+              where("createdBy", "==", currentUser.uid),
+              where("isArchived", "==", true),
+            ),
+          ),
+        ]);
 
-  const colors = darkModeEnabled
-    ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        headerBorder: "#2b3b34",
-        title: "#e7f1eb",
-        subtitle: "#9db1a6",
-        cardBg: "#1f2b26",
-        cardBorder: "#34483f",
-        inputBg: "#2a3a33",
-        primary: "#1f3a2f",
-        accent: "#8fd1ad",
+        if (!active) return;
+
+        setArchivedClasses(
+          classSnapshot.docs.map((item) => {
+            const data = item.data();
+            return {
+              id: item.id,
+              title: data.class_name || "Archived Class",
+              studentCount: Array.isArray(data.students) ? data.students.length : 0,
+              dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
+            };
+          }),
+        );
+
+        setArchivedExams(
+          examSnapshot.docs.map((item) => {
+            const data = item.data();
+            const questions =
+              Number(data.num_items || data.totalQuestions || 0) ||
+              (Array.isArray(data.questions) ? data.questions.length : 0) ||
+              (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0) ||
+              0;
+            const subject = String(data.subject || "Exam").trim();
+            const className = String(data.className || "").trim();
+            const subtitleParts = [subject, className].filter(Boolean);
+            return {
+              id: item.id,
+              title: data.title || "Archived Exam",
+              subtitle: subtitleParts.join(" - ") || "Exam",
+              dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
+              questions,
+            };
+          }),
+        );
+      } catch (error) {
+        console.error("Error loading archived items:", error);
+        if (active) {
+          setArchivedClasses([]);
+          setArchivedExams([]);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
       }
-    : {
-        bg: "#eef1ef",
-        headerBg: "#3d5a3d",
-        headerBorder: "#2f4a38",
-        title: "#e8f6ee",
-        subtitle: "#b8d4b8",
-        cardBg: "#3d5a3d",
-        cardBorder: "#3d5a3d",
-        inputBg: "#3d5a3d",
-        primary: "#3d5a3d",
-        accent: "#8fd1ad",
-      };
+    })();
 
-  const loadBatchHistory = async () => {
-    try {
-      setLoading(true);
-      const filter: any = {};
+    return () => {
+      active = false;
+    };
+  }, []);
 
-      if (filterStatus !== "all") {
-        filter.status = filterStatus;
-      }
+  useFocusEffect(loadArchivedItems);
 
-      if (searchQuery) {
-        filter.searchQuery = searchQuery;
-      }
+  const filteredClasses = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return archivedClasses.filter((item) => !q || item.title.toLowerCase().includes(q));
+  }, [archivedClasses, searchQuery]);
 
-      const history = await BatchHistoryService.getBatchHistory(filter);
-      setBatches(history);
-    } catch (error) {
-      console.error("Error loading batch history:", error);
-      Alert.alert("Error", "Failed to load batch history");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const handleRefresh = () => {
-    setRefreshing(true);
-    refreshAllData();
-  };
-
-  const handleDeleteBatch = async (batchId: string) => {
-    Alert.alert(
-      "Delete Batch",
-      "Are you sure you want to delete this batch? This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await BatchHistoryService.deleteBatch(batchId);
-              Alert.alert("Success", "Batch deleted successfully");
-              loadBatchHistory();
-              loadStatistics();
-            } catch (error) {
-              Alert.alert("Error", "Failed to delete batch");
-            }
-          },
-        },
-      ],
+  const filteredExams = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return archivedExams.filter(
+      (item) =>
+        !q ||
+        item.title.toLowerCase().includes(q) ||
+        item.subtitle.toLowerCase().includes(q),
     );
-  };
+  }, [archivedExams, searchQuery]);
 
-  const handleMarkAsPrinted = async (batchId: string) => {
+  const restoreClass = async (id: string) => {
     try {
-      await BatchHistoryService.updateBatchStatus(batchId, "printed");
-      Alert.alert("Success", "Batch marked as printed");
-      loadBatchHistory();
-      loadStatistics();
+      await updateDoc(doc(db, "classes", id), { isArchived: false });
+      setRestoreTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Restored",
+        text2: "Class moved out of Archived",
+      });
+      loadArchivedItems();
     } catch (error) {
-      Alert.alert("Error", "Failed to update batch status");
+      console.error("Error restoring class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to restore class",
+      });
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "generated":
-        return "#FF9500";
-      case "printed":
-        return "#00a550";
-      case "deleted":
-        return "#FF3B30";
-      default:
-        return "#666";
+  const restoreExam = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "exams", id), { isArchived: false });
+      setRestoreTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Restored",
+        text2: "Exam moved out of Archived",
+      });
+      loadArchivedItems();
+    } catch (error) {
+      console.error("Error restoring exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to restore exam",
+      });
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "generated":
-        return "document-text";
-      case "printed":
-        return "print";
-      case "deleted":
-        return "trash";
-      default:
-        return "help-circle";
+  const deleteClass = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "classes", id));
+      setDeleteTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Class deleted successfully",
+      });
+      loadArchivedItems();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Delete failed",
+        text2: "Failed to delete class",
+      });
     }
   };
 
-  const renderBatchItem = (batch: ExamBatch) => (
-    <View
-      key={batch.batchId}
-      style={[
-        styles.batchCard,
-        { backgroundColor: colors.cardBg, borderColor: colors.cardBorder },
-      ]}
-    >
-      <View style={styles.batchHeader}>
-        <View style={styles.batchTitleRow}>
-          <Ionicons
-            name={getStatusIcon(batch.status) as any}
-            size={20}
-            color={getStatusColor(batch.status)}
-          />
-          <Text style={[styles.batchTitle, { color: colors.title }]}>{batch.examTitle}</Text>
-        </View>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: getStatusColor(batch.status) },
-          ]}
-        >
-          <Text style={styles.statusText}>{batch.status.toUpperCase()}</Text>
-        </View>
-      </View>
-
-      <View style={styles.batchDetails}>
-        <View style={styles.detailRow}>
-          <Ionicons name="barcode" size={16} color={colors.subtitle} />
-          <Text style={[styles.detailText, { color: colors.subtitle }]}>Batch ID: {batch.batchId}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="code" size={16} color={colors.subtitle} />
-          <Text style={[styles.detailText, { color: colors.subtitle }]}>Exam Code: {batch.examCode}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="document" size={16} color={colors.subtitle} />
-          <Text style={[styles.detailText, { color: colors.subtitle }]}>
-            Template: {batch.templateName} (v{batch.version})
-          </Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="copy" size={16} color={colors.subtitle} />
-          <Text style={[styles.detailText, { color: colors.subtitle }]}>Sheets: {batch.sheetsGenerated}</Text>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="time" size={16} color={colors.subtitle} />
-          <Text style={[styles.detailText, { color: colors.subtitle }]}>
-            {BatchHistoryService.formatDate(batch.createdAt)}
-          </Text>
-        </View>
-
-        {batch.metadata && (
-          <View style={styles.detailRow}>
-            <Ionicons name="information-circle" size={16} color={colors.subtitle} />
-            <Text style={[styles.detailText, { color: colors.subtitle }]}>
-              {batch.metadata.totalQuestions} questions •{" "}
-              {batch.metadata.columns} column(s)
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {batch.status !== "deleted" && (
-        <View style={[styles.batchActions, { borderTopColor: colors.cardBorder }]}>
-          {batch.status === "generated" && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.printButton]}
-              onPress={() => handleMarkAsPrinted(batch.batchId)}
-            >
-              <Ionicons name="print" size={16} color="white" />
-              <Text style={styles.actionButtonText}>Mark as Printed</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            style={[styles.actionButton, styles.deleteButton]}
-            onPress={() => handleDeleteBatch(batch.batchId)}
-          >
-            <Ionicons name="trash" size={16} color="white" />
-            <Text style={styles.actionButtonText}>Delete</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
-  );
+  const deleteExam = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "exams", id));
+      setDeleteTarget(null);
+      Toast.show({
+        type: "success",
+        text1: "Deleted",
+        text2: "Exam deleted successfully",
+      });
+      loadArchivedItems();
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Delete failed",
+        text2: "Failed to delete exam",
+      });
+    }
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: colors.headerBg,
-            borderBottomColor: colors.headerBorder,
-          },
-        ]}
-      >
+    <View style={styles.container}>
+      <Text style={styles.title}>Archived Items</Text>
+
+      <View style={styles.segmented}>
         <TouchableOpacity
-          onPress={() => router.back()}
-          style={styles.backButton}
+          style={[styles.segment, mode === "classes" && styles.segmentActive]}
+          onPress={() => setMode("classes")}
         >
-          <Ionicons name="arrow-back" size={24} color={colors.accent} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.title }]}>Batch History</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      {/* Statistics */}
-      <View style={styles.statsContainer}>
-        <View
-          style={[
-            styles.statCard,
-            {
-              backgroundColor: colors.cardBg,
-              borderColor: colors.cardBorder,
-            },
-          ]}
-        >
-          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.totalBatches}</Text>
-          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Total Batches</Text>
-        </View>
-        <View
-          style={[
-            styles.statCard,
-            {
-              backgroundColor: colors.cardBg,
-              borderColor: colors.cardBorder,
-            },
-          ]}
-        >
-          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.totalSheets}</Text>
-          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Total Sheets</Text>
-        </View>
-        <View
-          style={[
-            styles.statCard,
-            {
-              backgroundColor: colors.cardBg,
-              borderColor: colors.cardBorder,
-            },
-          ]}
-        >
-          <Text style={[styles.statValue, { color: colors.accent }]}>{statistics.printedBatches}</Text>
-          <Text style={[styles.statLabel, { color: colors.subtitle }]}>Printed</Text>
-        </View>
-      </View>
-
-      {/* Search and Filter */}
-      <View style={styles.searchContainer}>
-        <View style={[styles.searchBox, { backgroundColor: colors.inputBg, borderColor: colors.cardBorder }]}>
-          <Ionicons name="search" size={20} color={colors.subtitle} />
-          <TextInput
-            style={[styles.searchInput, { color: colors.title }]}
-            placeholder="Search by exam, code, or batch ID..."
-            placeholderTextColor={colors.subtitle}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onSubmitEditing={loadBatchHistory}
-          />
-        </View>
-      </View>
-
-      <View style={styles.filterContainer}>
-        {(["all", "generated", "printed", "deleted"] as const).map((status) => (
-          <TouchableOpacity
-            key={status}
-            style={[
-              styles.filterButton,
-              { backgroundColor: colors.inputBg, borderColor: colors.cardBorder },
-              filterStatus === status && styles.filterButtonActive,
-              filterStatus === status && { backgroundColor: colors.primary, borderColor: colors.primary },
-            ]}
-            onPress={() => setFilterStatus(status)}
+          <Text
+            style={[styles.segmentText, mode === "classes" && styles.segmentTextActive]}
           >
-            <Text
-              style={[
-                styles.filterButtonText,
-                { color: colors.subtitle },
-                filterStatus === status && styles.filterButtonTextActive,
-              ]}
-            >
-              {status.charAt(0).toUpperCase() + status.slice(1)}
-            </Text>
-          </TouchableOpacity>
-        ))}
+            Classes
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segment, mode === "exams" && styles.segmentActive]}
+          onPress={() => setMode("exams")}
+        >
+          <Text
+            style={[styles.segmentText, mode === "exams" && styles.segmentTextActive]}
+          >
+            Exams
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Batch List */}
+      <View style={styles.searchWrap}>
+        <Ionicons name="search-outline" size={20} color="#C4CAD5" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={
+            mode === "classes" ? "Search archived classes..." : "Search archived exams..."
+          }
+          placeholderTextColor="#7B8794"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={[styles.loadingText, { color: colors.subtitle }]}>Loading batch history...</Text>
-        </View>
-      ) : batches.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={64} color={darkModeEnabled ? "#5b6d64" : "#9aaea3"} />
-          <Text style={[styles.emptyText, { color: colors.subtitle }]}>No batches found</Text>
-          <Text style={[styles.emptySubtext, { color: colors.subtitle }]}>
-            Generate answer sheets to create batch records
-          </Text>
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#20BE7B" />
         </View>
       ) : (
-        <ScrollView
-          style={styles.batchList}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-          }
-        >
-          {batches.map(renderBatchItem)}
+        <ScrollView contentContainerStyle={styles.listContent}>
+          {mode === "classes"
+            ? filteredClasses.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <View style={styles.cardAccent} />
+                  <View style={styles.cardBody}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardTitle}>{item.title}</Text>
+                      <View style={styles.archivedBadge}>
+                        <Text style={styles.archivedBadgeText}>Archived</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.menuTrigger}
+                        onPress={(event) => {
+                          const { pageX, pageY } = event.nativeEvent;
+                          const left = Math.min(
+                            Math.max(12, pageX - ARCHIVE_MENU_WIDTH + 22),
+                            SCREEN_WIDTH - ARCHIVE_MENU_WIDTH - 12,
+                          );
+                          const top = Math.min(
+                            Math.max(80, pageY - 8),
+                            SCREEN_HEIGHT - ARCHIVE_MENU_HEIGHT - 24,
+                          );
+                          setMenuTarget({ type: "class", id: item.id, title: item.title });
+                          setMenuPosition({ top, left });
+                          setMenuVisible(true);
+                        }}
+                      >
+                        <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.metaRow}>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="people-outline" size={14} color="#9AA2B1" />
+                        <Text style={styles.metaText}>{item.studentCount} students</Text>
+                      </View>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
+                        <Text style={styles.metaText}>{item.dateLabel}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.grayBar} />
+                  </View>
+                </View>
+              ))
+            : filteredExams.map((item) => (
+                <View key={item.id} style={styles.card}>
+                  <View style={styles.cardBody}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardTitle}>{item.title}</Text>
+                      <TouchableOpacity
+                        style={styles.menuTrigger}
+                        onPress={(event) => {
+                          const { pageX, pageY } = event.nativeEvent;
+                          const left = Math.min(
+                            Math.max(12, pageX - ARCHIVE_MENU_WIDTH + 22),
+                            SCREEN_WIDTH - ARCHIVE_MENU_WIDTH - 12,
+                          );
+                          const top = Math.min(
+                            Math.max(80, pageY - 8),
+                            SCREEN_HEIGHT - ARCHIVE_MENU_HEIGHT - 24,
+                          );
+                          setMenuTarget({ type: "exam", id: item.id, title: item.title });
+                          setMenuPosition({ top, left });
+                          setMenuVisible(true);
+                        }}
+                      >
+                        <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.examSubtitle}>
+                      {item.subtitle} - {item.questions} Qs
+                    </Text>
+                    <View style={styles.metaRow}>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
+                        <Text style={styles.metaText}>{item.dateLabel}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              ))}
+
+          {mode === "classes" && !filteredClasses.length && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No archived classes</Text>
+            </View>
+          )}
+          {mode === "exams" && !filteredExams.length && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No archived exams</Text>
+            </View>
+          )}
         </ScrollView>
       )}
+
+      <Toast />
+      <ConfirmationModal
+        visible={Boolean(restoreTarget)}
+        title="Restore Item"
+        message={`Are you sure you want to restore ${restoreTarget?.title ?? "this item"}? It will appear again in its active section.`}
+        cancelText="Cancel"
+        confirmText="Restore"
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={() => {
+          if (!restoreTarget) return;
+          if (restoreTarget.type === "class") {
+            restoreClass(restoreTarget.id);
+            return;
+          }
+          restoreExam(restoreTarget.id);
+        }}
+      />
+
+      <ConfirmationModal
+        visible={Boolean(deleteTarget)}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${deleteTarget?.title ?? "this class"}? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          if (deleteTarget.type === "class") {
+            deleteClass(deleteTarget.id);
+            return;
+          }
+          deleteExam(deleteTarget.id);
+        }}
+      />
+
+      <Modal
+        visible={menuVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setMenuVisible(false)}
+        >
+          <View
+            style={[
+              styles.menuContent,
+              {
+                top: menuPosition.top,
+                left: menuPosition.left,
+              },
+            ]}
+          >
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {menuTarget?.title ?? "Archived"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setMenuVisible(false)}
+              >
+                <Ionicons name="close" size={16} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                if (!menuTarget) return;
+                setMenuVisible(false);
+                setRestoreTarget({
+                  type: menuTarget.type,
+                  id: menuTarget.id,
+                  title: menuTarget.title,
+                });
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuRestoreText]}>Restore</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                if (!menuTarget) return;
+                setMenuVisible(false);
+                setDeleteTarget({
+                  type: menuTarget.type,
+                  id: menuTarget.id,
+                  title: menuTarget.title,
+                });
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuDeleteText]}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -410,225 +517,221 @@ export default function BatchHistoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 12,
+    backgroundColor: "#F7F7F8",
     paddingTop: 56,
-    paddingBottom: 10,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
-  },
-  backButton: {
-    padding: 5,
   },
   title: {
-    fontSize: 20,
+    fontSize: 28,
     fontWeight: "800",
-    color: "#333",
+    color: "#111827",
+    paddingHorizontal: 20,
+    marginBottom: 20,
   },
-  placeholder: {
-    width: 34,
-  },
-  statsContainer: {
+  segmented: {
     flexDirection: "row",
-    paddingHorizontal: 10,
-    paddingTop: 12,
-    marginBottom: 10,
-    gap: 8,
+    backgroundColor: "#F2F4F7",
+    borderRadius: 16,
+    padding: 6,
+    marginHorizontal: 20,
+    marginBottom: 16,
   },
-  statCard: {
+  segment: {
     flex: 1,
-    backgroundColor: "white",
+    height: 48,
     borderRadius: 12,
-    padding: 12,
     alignItems: "center",
+    justifyContent: "center",
+  },
+  segmentActive: {
+    backgroundColor: "#FFFFFF",
+  },
+  segmentText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#8E97A6",
+  },
+  segmentTextActive: {
+    color: "#1F2937",
+  },
+  searchWrap: {
+    marginHorizontal: 20,
+    height: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#007AFF",
-    marginBottom: 5,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: "#666",
-    textAlign: "center",
-  },
-  searchContainer: {
-    paddingHorizontal: 10,
-    paddingTop: 0,
-    paddingBottom: 10,
-  },
-  searchBox: {
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
     gap: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
+    marginBottom: 16,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: "#333",
-  },
-  filterContainer: {
-    flexDirection: "row",
-    paddingHorizontal: 10,
-    paddingBottom: 12,
-    gap: 8,
-  },
-  filterButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "white",
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  filterButtonActive: {
-    backgroundColor: "#007AFF",
-    borderColor: "#007AFF",
-  },
-  filterButtonText: {
-    fontSize: 14,
-    color: "#666",
-  },
-  filterButtonTextActive: {
-    color: "white",
+    color: "#111827",
     fontWeight: "600",
   },
-  batchList: {
+  loadingWrap: {
     flex: 1,
-    paddingHorizontal: 10,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  batchCard: {
-    backgroundColor: "white",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+  listContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 120,
+    gap: 14,
+  },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  batchHeader: {
+    borderColor: "#E8EBF0",
+    overflow: "hidden",
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
   },
-  batchTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+  cardAccent: {
+    width: 6,
+    backgroundColor: "#B9BCC2",
+  },
+  cardBody: {
     flex: 1,
+    padding: 16,
   },
-  batchTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#333",
-    flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "white",
-  },
-  batchDetails: {
-    gap: 8,
-    marginBottom: 12,
-  },
-  detailRow: {
+  cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-  },
-  detailText: {
-    fontSize: 13,
-    color: "#666",
-  },
-  batchActions: {
-    flexDirection: "row",
     gap: 10,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#e0e0e0",
+    marginBottom: 6,
   },
-  actionButton: {
+  cardTitle: {
     flex: 1,
-    flexDirection: "row",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  archivedBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: "#F3F4F6",
+    alignSelf: "center",
+  },
+  archivedBadgeText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B7280",
+  },
+  restoreButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
     alignItems: "center",
     justifyContent: "center",
-    padding: 10,
-    borderRadius: 10,
-    gap: 6,
-  },
-  printButton: {
-    backgroundColor: "#00a550",
   },
   deleteButton: {
-    backgroundColor: "#FF3B30",
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  actionButtonText: {
-    color: "white",
+  menuTrigger: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
+    position: "relative",
+  },
+  menuContent: {
+    position: "absolute",
+    width: ARCHIVE_MENU_WIDTH,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 4,
+  },
+  menuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#273142",
+    marginRight: 8,
+  },
+  menuCloseButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+  },
+  menuItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  menuItemText: {
     fontSize: 14,
     fontWeight: "600",
+    color: "#273142",
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: "center",
+  menuRestoreText: {
+    color: "#20BE7B",
+  },
+  menuDeleteText: {
+    color: "#EF4444",
+  },
+  metaRow: {
+    flexDirection: "row",
     alignItems: "center",
-    gap: 15,
+    gap: 20,
+    marginBottom: 18,
   },
-  loadingText: {
-    fontSize: 16,
-    color: "#666",
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: "center",
+  metaItem: {
+    flexDirection: "row",
     alignItems: "center",
-    padding: 40,
+    gap: 6,
+  },
+  metaText: {
+    fontSize: 13,
+    color: "#8E97A6",
+  },
+  examSubtitle: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginBottom: 6,
+  },
+  grayBar: {
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "#ECEFF3",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 50,
   },
   emptyText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#666",
-    marginTop: 20,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#999",
-    marginTop: 8,
-    textAlign: "center",
+    fontSize: 16,
+    color: "#8E97A6",
   },
 });

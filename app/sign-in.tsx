@@ -21,7 +21,6 @@ import {
 
 import { auth, db } from "@/config/firebase";
 import { authService } from "@/services/authService";
-import { GradeStorageService } from "@/services/gradeStorageService";
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -48,23 +47,28 @@ export default function SignInScreen() {
           password,
         );
 
-        // Get user data from Firestore
+        // 1. Get user data from Firestore
         const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
+        const userData = userDoc.exists() ? userDoc.data() : null;
 
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          router.replace("/(tabs)");
-          Alert.alert("Success", `Welcome back, ${userData.fullName}!`);
-        } else {
-          router.replace("/(tabs)");
-        }
-
-        // Trigger offline sync after successful login
+        // 2. Trigger data preload to Realm (Primary Cache)
         const netState = await NetInfo.fetch();
         if (netState.isConnected && netState.isInternetReachable) {
-          GradeStorageService.syncOfflineQueue();
+          setIsLoading(true); // Ensure loading state is still active
+          try {
+            const { SyncService } = await import("@/services/syncService");
+            console.log("[SignIn] Preloading data for offline use...");
+            await SyncService.syncPendingUpdates();
+          } catch (syncError) {
+            console.warn("[SignIn] Initial sync failed, proceeding to dashboard:", syncError);
+          }
         }
 
+        // 3. Navigate to Dashboard
+        router.replace("/(tabs)");
+        if (userData?.fullName) {
+          Alert.alert("Success", `Welcome back, ${userData.fullName}!`);
+        }
       } else {
         // Fallback to dummy accounts for testing
         const result = authService.signIn(email, password);
