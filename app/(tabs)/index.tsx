@@ -195,6 +195,7 @@ export default function HomeScreen() {
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
+  const lastShownSyncAtRef = React.useRef<number | null>(null);
   const displayRecentScans = recentScans.length
     ? recentScans
     : MOCK_RECENT_SCANS;
@@ -250,15 +251,19 @@ export default function HomeScreen() {
       setIsSyncing(SyncService.isSyncInProgress());
       setIsOnline(NetworkService.getConnectionStatus());
 
-      showSyncBannerTemporarily();
-      if (hideBannerTimer) {
-        clearTimeout(hideBannerTimer);
-      }
-      hideBannerTimer = setTimeout(() => {
-        if (mounted) {
-          animateSyncBannerOut();
+      const nextSyncAt = stats.lastSync ? stats.lastSync.getTime() : null;
+      if (nextSyncAt && nextSyncAt !== lastShownSyncAtRef.current) {
+        lastShownSyncAtRef.current = nextSyncAt;
+        showSyncBannerTemporarily();
+        if (hideBannerTimer) {
+          clearTimeout(hideBannerTimer);
         }
-      }, 2200);
+        hideBannerTimer = setTimeout(() => {
+          if (mounted) {
+            animateSyncBannerOut();
+          }
+        }, 2200);
+      }
     };
 
     NetworkService.initialize();

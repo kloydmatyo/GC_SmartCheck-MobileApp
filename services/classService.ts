@@ -140,6 +140,13 @@ export class ClassService {
         const classes: Class[] = [];
         querySnapshot.forEach((doc) => {
           const data = doc.data();
+          const createdAt =
+            data.createdAt?.toDate?.() ??
+            (data.created_at ? new Date(data.created_at) : undefined);
+          const updatedAt =
+            data.updatedAt?.toDate?.() ??
+            (data.updated_at ? new Date(data.updated_at) : undefined);
+
           classes.push({
             id: doc.id,
             class_name: data.class_name,
@@ -150,8 +157,8 @@ export class ClassService {
             instructorId: data.instructorId,
             createdBy: data.createdBy,
             created_at: data.created_at,
-            createdAt: data.createdAt?.toDate?.() ?? (data.created_at ? new Date(data.created_at) : undefined),
-            updatedAt: data.updatedAt?.toDate?.() ?? undefined,
+            createdAt,
+            updatedAt,
           });
         });
         return classes;

@@ -74,8 +74,14 @@ export default function RootLayout() {
       const wasBackground =
         appState.current === "background" || appState.current === "inactive";
       const isNowActive = nextAppState === "active";
+      const isNowBackground =
+        nextAppState === "background" || nextAppState === "inactive";
 
       if (wasBackground && isNowActive) {
+        await performSync();
+      }
+
+      if (!wasBackground && isNowBackground) {
         await performSync();
       }
 
