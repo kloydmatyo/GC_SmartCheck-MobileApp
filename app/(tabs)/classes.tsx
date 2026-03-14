@@ -397,13 +397,22 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     }
   };
 
-  const filteredClasses = classes.filter(
-    (cls) =>
-      !cls.isArchived &&
-      (cls.class_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        cls.course_subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        cls.section_block.toLowerCase().includes(searchQuery.toLowerCase())),
-  );
+  const normalizedQuery = (searchQuery ?? "").trim().toLowerCase();
+  const filteredClasses = classes.filter((cls) => {
+    if (cls.isArchived) return false;
+
+    const className = String(cls.class_name ?? "").toLowerCase();
+    const courseSubject = String(cls.course_subject ?? "").toLowerCase();
+    const sectionBlock = String(cls.section_block ?? "").toLowerCase();
+    const room = String(cls.room ?? "").toLowerCase();
+
+    return (
+      className.includes(normalizedQuery) ||
+      courseSubject.includes(normalizedQuery) ||
+      sectionBlock.includes(normalizedQuery) ||
+      room.includes(normalizedQuery)
+    );
+  });
 
   const renderClassCard = ({ item }: { item: Class }) => {
     const avgScore = getMockAverage(item.students.length);
@@ -881,21 +890,21 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    elevation: 1,
+    borderWidth: 0,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   addButtonLight: {
-    backgroundColor: "#20BE7B",
-    borderColor: "#57D7A0",
-    shadowColor: "#20BE7B",
+    backgroundColor: "transparent",
+    borderColor: "transparent",
+    shadowColor: "transparent",
   },
   addButtonDark: {
-    backgroundColor: "#20BE7B",
-    borderColor: "#57D7A0",
-    shadowColor: "#20BE7B",
+    backgroundColor: "transparent",
+    borderColor: "transparent",
+    shadowColor: "transparent",
   },
   addButtonPlusText: {
     fontSize: 26,
@@ -906,10 +915,10 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   addButtonPlusTextLight: {
-    color: "#F2FFF8",
+    color: "#000000",
   },
   addButtonPlusTextDark: {
-    color: "#E9F8F1",
+    color: "#000000",
   },
   searchContainer: {
     marginHorizontal: 22,
