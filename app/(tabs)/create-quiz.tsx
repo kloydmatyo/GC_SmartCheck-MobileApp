@@ -7,26 +7,28 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
-    addDoc,
-    collection,
-    doc,
-    getDocs,
-    query,
-    serverTimestamp,
-    setDoc,
-    where,
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
 } from "firebase/firestore";
 import React, { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Clipboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
@@ -39,6 +41,15 @@ interface ClassOption {
   course_subject?: string;
   isArchived?: boolean;
 }
+
+const generateExamCode = (): string => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars like 0/O, 1/I/L
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `EX-${code}`;
+};
 
 const formatDateForStorage = (date: Date): string =>
   date.toISOString().split("T")[0];
@@ -73,6 +84,8 @@ export default function CreateQuizScreen() {
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [createdExamId, setCreatedExamId] = useState<string | null>(null);
+  const [reviewVisible, setReviewVisible] = useState(false);
+  const [reviewExamCode, setReviewExamCode] = useState<string | null>(null);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
     type: "success" | "error" | "info";
@@ -105,6 +118,8 @@ export default function CreateQuizScreen() {
       setExamDate(new Date());
       setSelectedClassId(classIdParam || null);
       setLoading(false);
+      setReviewVisible(false);
+      setReviewExamCode(null);
 
       const loadClasses = async () => {
         const currentUser = auth.currentUser;
@@ -214,6 +229,65 @@ export default function CreateQuizScreen() {
         accent: "#4CAF50",
       };
 
+  const openReview = () => {
+    if (!quizName.trim()) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please enter a quiz name",
+      });
+      return;
+    }
+
+    if (quizName.trim().length > MAX_FIELD_LENGTH) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Exam name must be 50 characters or fewer",
+      });
+      return;
+    }
+
+    if (!numQuestions) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select the number of questions",
+      });
+      return;
+    }
+
+    if (!examDate) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Please select an exam date",
+      });
+      return;
+    }
+
+    const today = toStartOfDay(new Date());
+    const selectedDate = toStartOfDay(examDate);
+    if (selectedDate < today) {
+      setStatusModal({
+        visible: true,
+        type: "error",
+        title: "Error",
+        message: "Exam date cannot be in the past",
+      });
+      return;
+    }
+
+    if (!reviewExamCode) {
+      setReviewExamCode(generateExamCode());
+    }
+    setReviewVisible(true);
+  };
+
   const handleSave = async () => {
     // Validation
     if (!quizName.trim()) {
@@ -300,17 +374,10 @@ export default function CreateQuizScreen() {
       const selectedClass =
         classOptions.find((cls) => cls.id === selectedClassId) || null;
 
-      // Generate exam code
-      const generateExamCode = (title: string, date: string): string => {
-        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Exclude confusing chars like 0/O, 1/I/L
-        let code = "";
-        for (let i = 0; i < 6; i++) {
-          code += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return `EX-${code}`;
-      };
-
-      const examCode = generateExamCode(quizName.trim(), currentDate);
+      const examCode = reviewExamCode || generateExamCode();
+      if (!reviewExamCode) {
+        setReviewExamCode(examCode);
+      }
 
       // Prepare exam data
       const baseExamData = {
@@ -343,6 +410,7 @@ export default function CreateQuizScreen() {
       if (result.startsWith("staging_")) {
         console.log("Quiz saved to staging realm (OFFLINE)");
         setCreatedExamId(result);
+        setReviewVisible(false);
         setStatusModal({
           visible: true,
           type: "success",
@@ -358,6 +426,7 @@ export default function CreateQuizScreen() {
 
       const newExamId = result;
       setCreatedExamId(newExamId);
+      setReviewVisible(false);
 
       // Create default answer key in Firestore (Online path)
       const answerKeyId = `ak_${newExamId}_${Date.now()}`;
@@ -495,7 +564,7 @@ export default function CreateQuizScreen() {
             !canProceed && styles.primaryActionButtonDisabled,
             loading && styles.saveButtonDisabled,
           ]}
-          onPress={handleSave}
+          onPress={openReview}
           disabled={loading || !canProceed}
         >
           {loading ? (
@@ -508,6 +577,95 @@ export default function CreateQuizScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={reviewVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setReviewVisible(false)}
+      >
+        <View style={styles.reviewOverlay}>
+          <View style={styles.reviewCard}>
+            <View style={styles.reviewHeader}>
+              <View style={styles.reviewIconWrap}>
+                <Ionicons name="clipboard-outline" size={18} color="#1F2937" />
+              </View>
+              <View style={styles.reviewHeaderText}>
+                <Text style={styles.reviewTitle}>Review Exam Details</Text>
+                <Text style={styles.reviewSubtitle}>Confirm before creating</Text>
+              </View>
+            </View>
+
+            <View style={styles.reviewDivider} />
+
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Exam Name</Text>
+              <Text style={styles.reviewValue}>{quizName.trim()}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Number of Questions</Text>
+              <View style={styles.reviewPill}>
+                <Text style={styles.reviewPillText}>{numQuestions}</Text>
+              </View>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Exam Date</Text>
+              <Text style={styles.reviewValue}>
+                {examDate ? formatDateForStorage(examDate) : "Not set"}
+              </Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Exam Code</Text>
+              <View style={styles.reviewValueRow}>
+                <Text style={styles.reviewValue}>
+                  {reviewExamCode || "Pending"}
+                </Text>
+                <TouchableOpacity
+                  style={styles.copyButton}
+                  onPress={() => {
+                    if (!reviewExamCode) return;
+                    Clipboard.setString(reviewExamCode);
+                    setStatusModal({
+                      visible: true,
+                      type: "info",
+                      title: "Copied",
+                      message: "Exam code copied to clipboard",
+                    });
+                  }}
+                  disabled={!reviewExamCode}
+                >
+                  <Ionicons
+                    name="copy-outline"
+                    size={16}
+                    color={reviewExamCode ? "#1F2937" : "#9CA3AF"}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.reviewActions}>
+              <TouchableOpacity
+                style={styles.reviewSecondaryButton}
+                onPress={() => setReviewVisible(false)}
+                disabled={loading}
+              >
+                <Text style={styles.reviewSecondaryText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.reviewPrimaryButton}
+                onPress={handleSave}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.reviewPrimaryText}>Create Exam</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <StatusModal
         visible={statusModal.visible}
@@ -690,6 +848,129 @@ const styles = StyleSheet.create({
   primaryActionText: {
     fontSize: 18,
     fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  reviewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  reviewCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 8,
+  },
+  reviewIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "#EAF7F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewHeaderText: {
+    flex: 1,
+  },
+  reviewTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  reviewSubtitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6B7280",
+    marginTop: 2,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  reviewDivider: {
+    height: 1,
+    backgroundColor: "#EEF2F7",
+    marginVertical: 14,
+  },
+  reviewRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
+  },
+  reviewLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#6B7280",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  reviewValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  reviewValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  copyButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F5F8",
+  },
+  reviewPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#F3F5F8",
+  },
+  reviewPillText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  reviewActions: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 18,
+  },
+  reviewSecondaryButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewSecondaryText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#111827",
+  },
+  reviewPrimaryButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#1FC27D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  reviewPrimaryText: {
+    fontSize: 15,
+    fontWeight: "700",
     color: "#FFFFFF",
   },
 });

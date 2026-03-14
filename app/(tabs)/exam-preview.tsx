@@ -133,24 +133,6 @@ export default function ExamPreviewScreen() {
         accent: "#16A34A",
       };
 
-  useEffect(() => {
-    setExam(null);
-    setExamResults([]);
-    setError(null);
-    setLoading(true);
-    setResultsLoading(true);
-    setSettingsMenuVisible(false);
-    setViewCodeVisible(false);
-    setArchiveConfirmVisible(false);
-    setDeleteConfirmVisible(false);
-    loadExamData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examId, refreshKey]); // Reload when refreshKey changes
-
-  useEffect(() => {
-    setActiveTab(requestedTab === "results" ? "results" : "answerKey");
-  }, [requestedTab]);
-
   const loadExamData = async () => {
     const requestId = ++loadRequestRef.current;
     try {
@@ -262,6 +244,29 @@ export default function ExamPreviewScreen() {
     }
   };
 
+  const resetViewState = () => {
+    setExam(null);
+    setExamResults([]);
+    setError(null);
+    setLoading(true);
+    setResultsLoading(true);
+    setSettingsMenuVisible(false);
+    setViewCodeVisible(false);
+    setArchiveConfirmVisible(false);
+    setDeleteConfirmVisible(false);
+  };
+
+  useEffect(() => {
+    setActiveTab(requestedTab === "results" ? "results" : "answerKey");
+  }, [requestedTab]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      resetViewState();
+      loadExamData();
+    }, [examId, refreshKey]),
+  );
+
   const closeSettingsMenu = () => {
     setSettingsMenuVisible(false);
   };
@@ -272,7 +277,7 @@ export default function ExamPreviewScreen() {
       setArchiveConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Archived",
         text2: `${exam?.metadata.title || "Exam"} moved to Archived`,
       });
@@ -293,7 +298,7 @@ export default function ExamPreviewScreen() {
       setDeleteConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });

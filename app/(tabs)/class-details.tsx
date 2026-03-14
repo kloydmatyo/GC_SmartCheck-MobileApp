@@ -338,7 +338,7 @@ export default function ClassDetailsScreen() {
       setArchiveClassConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Archived",
         text2: `${classData.class_name} moved to Archived`,
       });
@@ -471,7 +471,7 @@ export default function ClassDetailsScreen() {
       closeExamMenu();
       clearExamSelection();
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Archived",
         text2: `${examTitle} moved to Archived`,
       });
@@ -493,7 +493,7 @@ export default function ClassDetailsScreen() {
       closeExamMenu();
       clearExamSelection();
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });
@@ -509,7 +509,7 @@ export default function ClassDetailsScreen() {
     try {
       await ClassService.deleteClass(classData.id);
       setDeleteClassConfirmVisible(false);
-      Toast.show({ type: "success", text1: "Deleted", text2: `${classData.class_name} has been deleted` });
+      Toast.show({ type: "delete_result", text1: "Deleted", text2: `${classData.class_name} has been deleted` });
       router.replace("/(tabs)/classes");
     } catch (error) {
       console.error("Error deleting class:", error);

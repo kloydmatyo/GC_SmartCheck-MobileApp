@@ -271,7 +271,7 @@ export default function TemplatesScreen() {
       await deleteDoc(doc(db, "templates", selectedTemplate.id));
       setTemplates((prev) => prev.filter((t) => t.id !== selectedTemplate.id));
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Success",
         text2: `"${selectedTemplate.name}" deleted successfully`,
       });
@@ -312,7 +312,7 @@ export default function TemplatesScreen() {
       );
 
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Success",
         text2: `"${selectedTemplate.name}" archived successfully`,
       });

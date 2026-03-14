@@ -292,7 +292,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       await ClassService.deleteClass(selectedClass.id);
 
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Success",
         text2: "Class deleted successfully",
       });
@@ -492,7 +492,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       setClassMenuVisible(false);
       setSelectedClass(null);
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Archived",
         text2: `${classItem.class_name} moved to Archived`,
       });
@@ -520,7 +520,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       setClassMenuVisible(false);
       setSelectedClass(null);
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Deleted",
         text2: `${classItem.class_name} deleted successfully`,
       });

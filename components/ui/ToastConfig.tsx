@@ -2,15 +2,17 @@
  * components/ui/ToastConfig.tsx
  *
  * Toast type registry for the entire app.
- * Mounted at root level in _layout.tsx — applies to every screen.
+ * Mounted at root level in _layout.tsx - applies to every screen.
  *
  * Types:
- *   success       — generic success
- *   error         — generic error
- *   info          — generic info / warning
- *   save_result   — Firestore save succeeded (shows score summary)
- *   save_offline  — Firestore unavailable; queued offline
- *   save_retry    — Save failed; shows a Retry button with pulse animation
+ *   success        - generic success
+ *   error          - generic error
+ *   info           - generic info / warning
+ *   save_result    - Firestore save succeeded (shows score summary)
+ *   save_offline   - Firestore unavailable; queued offline
+ *   save_retry     - Save failed; shows a Retry button with pulse animation
+ *   delete_result  - Class or exam permanently deleted (red tint)
+ *   archive_result - Class or exam moved to archived (amber tint)
  */
 
 import { Ionicons } from "@expo/vector-icons";
@@ -24,7 +26,7 @@ import {
 } from "react-native";
 import { BaseToast, ErrorToast, ToastConfig } from "react-native-toast-message";
 
-// ── Re-usable retry button with pulse animation (#4, #5) ──────────────────
+// ── Re-usable retry button with pulse animation ───────────────────────────
 
 function RetryButton({ onPress }: { onPress: () => void }) {
   const pulse = useRef(new Animated.Value(1)).current;
@@ -61,7 +63,7 @@ function RetryButton({ onPress }: { onPress: () => void }) {
 // ── Toast Config ──────────────────────────────────────────────────────────
 
 export const toastConfig: ToastConfig = {
-  // ── Existing generic types ────────────────────────────────────────────
+  // ── Generic types ─────────────────────────────────────────────────────
 
   success: (props) => (
     <BaseToast
@@ -71,8 +73,8 @@ export const toastConfig: ToastConfig = {
       text1Style={styles.text1}
       text2Style={styles.text2}
       renderLeadingIcon={() => (
-        <View style={styles.iconContainer}>
-          <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
+        <View style={[styles.iconContainer, styles.iconSuccess]}>
+          <Ionicons name="checkmark" size={16} color="#1F2937" />
         </View>
       )}
     />
@@ -86,8 +88,8 @@ export const toastConfig: ToastConfig = {
       text1Style={styles.text1}
       text2Style={styles.text2}
       renderLeadingIcon={() => (
-        <View style={styles.iconContainer}>
-          <Ionicons name="close-circle" size={24} color="#F44336" />
+        <View style={[styles.iconContainer, styles.iconError]}>
+          <Ionicons name="close" size={16} color="#1F2937" />
         </View>
       )}
     />
@@ -101,19 +103,19 @@ export const toastConfig: ToastConfig = {
       text1Style={styles.text1}
       text2Style={styles.text2}
       renderLeadingIcon={() => (
-        <View style={styles.iconContainer}>
-          <Ionicons name="information-circle" size={24} color="#2196F3" />
+        <View style={[styles.iconContainer, styles.iconInfo]}>
+          <Ionicons name="information-circle" size={16} color="#1F2937" />
         </View>
       )}
     />
   ),
 
-  // ── New: Firestore save succeeded (#1, #2, #3) ────────────────────────
+  // ── Firestore save succeeded ──────────────────────────────────────────
 
   save_result: ({ text1, text2 }) => (
     <View style={[styles.toastBase, styles.saveResultToast]}>
-      <View style={styles.iconContainer}>
-        <Ionicons name="cloud-done" size={26} color="#00a550" />
+      <View style={[styles.iconContainer, styles.iconSuccess]}>
+        <Ionicons name="checkmark" size={16} color="#1F2937" />
       </View>
       <View style={styles.textBlock}>
         <Text style={styles.text1} numberOfLines={1}>
@@ -128,12 +130,12 @@ export const toastConfig: ToastConfig = {
     </View>
   ),
 
-  // ── New: Queued offline — will sync when online (#3) ─────────────────
+  // ── Queued offline  Ewill sync when online ────────────────────────────
 
   save_offline: ({ text1, text2 }) => (
     <View style={[styles.toastBase, styles.saveOfflineToast]}>
-      <View style={styles.iconContainer}>
-        <Ionicons name="cloud-offline" size={26} color="#F5A623" />
+      <View style={[styles.iconContainer, styles.iconWarn]}>
+        <Ionicons name="cloud-offline-outline" size={16} color="#1F2937" />
       </View>
       <View style={styles.textBlock}>
         <Text style={styles.text1} numberOfLines={1}>
@@ -148,12 +150,12 @@ export const toastConfig: ToastConfig = {
     </View>
   ),
 
-  // ── New: Save failed — retry button with pulse animation (#3, #4, #5) ─
+  // ── Save failed  Eretry button with pulse animation ───────────────────
 
   save_retry: ({ text1, text2, props }) => (
     <View style={[styles.toastBase, styles.saveRetryToast]}>
-      <View style={styles.iconContainer}>
-        <Ionicons name="cloud-offline" size={26} color="#F44336" />
+      <View style={[styles.iconContainer, styles.iconError]}>
+        <Ionicons name="close" size={16} color="#1F2937" />
       </View>
       <View style={[styles.textBlock, { flex: 1 }]}>
         <Text style={styles.text1} numberOfLines={1}>
@@ -170,63 +172,128 @@ export const toastConfig: ToastConfig = {
       ) : null}
     </View>
   ),
+
+  delete_result: ({ text1, text2 }) => (
+    <View style={[styles.toastBase, styles.deleteResultToast]}>
+      <View style={[styles.iconContainer, styles.iconDelete]}>
+        <Ionicons name="trash-outline" size={16} color="#1F2937" />
+      </View>
+      <View style={styles.textBlock}>
+        <Text style={styles.text1} numberOfLines={1}>
+          {text1}
+        </Text>
+        {text2 ? (
+          <Text style={styles.text2} numberOfLines={2}>
+            {text2}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  ),
+
+  archive_result: ({ text1, text2 }) => (
+    <View style={[styles.toastBase, styles.archiveResultToast]}>
+      <View style={[styles.iconContainer, styles.iconWarn]}>
+        <Ionicons name="archive-outline" size={16} color="#1F2937" />
+      </View>
+      <View style={styles.textBlock}>
+        <Text style={styles.text1} numberOfLines={1}>
+          {text1}
+        </Text>
+        {text2 ? (
+          <Text style={styles.text2} numberOfLines={2}>
+            {text2}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  ),
 };
 
 // ── Styles ────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  // ── Existing BaseToast overrides ────────────────────────────────────
+  // ── BaseToast overrides ──────────────────────────────────────────────
   successToast: {
-    borderLeftColor: "#4CAF50",
-    backgroundColor: "white",
-    borderRadius: 8,
+    borderLeftColor: "#22C55E",
+    backgroundColor: "#F1FBF5",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#BFE7CC",
     marginHorizontal: 20,
   },
   errorToast: {
-    borderLeftColor: "#F44336",
-    backgroundColor: "white",
-    borderRadius: 8,
+    borderLeftColor: "#EF4444",
+    backgroundColor: "#FFF1F2",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F5C2C7",
     marginHorizontal: 20,
   },
   infoToast: {
-    borderLeftColor: "#2196F3",
-    backgroundColor: "white",
-    borderRadius: 8,
+    borderLeftColor: "#3B82F6",
+    backgroundColor: "#EEF5FF",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#C7DAFF",
     marginHorizontal: 20,
   },
   contentContainer: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 10,
   },
+
+  // ── Icon badge ───────────────────────────────────────────────────────
   iconContainer: {
     justifyContent: "center",
     alignItems: "center",
-    paddingLeft: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    marginLeft: 12,
   },
-  text1: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
+  iconSuccess: {
+    backgroundColor: "#A7F3D0",
   },
-  text2: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 2,
+  iconError: {
+    backgroundColor: "#FECACA",
+  },
+  iconInfo: {
+    backgroundColor: "#BFDBFE",
+  },
+  iconWarn: {
+    backgroundColor: "#FDE68A",
+  },
+  iconDelete: {
+    backgroundColor: "#FECACA",
   },
 
-  // ── Shared custom toast base ────────────────────────────────────────
+  // ── Typography ───────────────────────────────────────────────────────
+  text1: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  text2: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 3,
+  },
+
+  // ── Shared custom toast base ─────────────────────────────────────────
   toastBase: {
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: 20,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingVertical: 10,
     paddingRight: 14,
-    minHeight: 60,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 5,
+    minHeight: 56,
+    borderWidth: 1,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   textBlock: {
     flex: 1,
@@ -234,36 +301,53 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  // ── save_result: soft green — GC brand ─────────────────────────────
+  // ── save_result: soft green ──────────────────────────────────────────
   saveResultToast: {
-    backgroundColor: "#f0f9f4",
-    borderLeftWidth: 5,
-    borderLeftColor: "#00a550",
+    backgroundColor: "#F1FBF5",
+    borderLeftWidth: 4,
+    borderLeftColor: "#22C55E",
+    borderColor: "#BFE7CC",
   },
 
-  // ── save_offline: amber ─────────────────────────────────────────────
+  // ── save_offline: amber ──────────────────────────────────────────────
   saveOfflineToast: {
-    backgroundColor: "#fefae8",
-    borderLeftWidth: 5,
-    borderLeftColor: "#F5A623",
+    backgroundColor: "#FFFAEB",
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+    borderColor: "#F6D8A8",
   },
 
-  // ── save_retry: red — save failed ───────────────────────────────────
+  // ── save_retry: red ──────────────────────────────────────────────────
   saveRetryToast: {
-    backgroundColor: "#fff4f4",
-    borderLeftWidth: 5,
-    borderLeftColor: "#F44336",
+    backgroundColor: "#FFF1F2",
+    borderLeftWidth: 4,
+    borderLeftColor: "#EF4444",
+    borderColor: "#F5C2C7",
   },
 
-  // ── Pulse retry button ──────────────────────────────────────────────
+  deleteResultToast: {
+    backgroundColor: "#FFF1F2",
+    borderLeftWidth: 4,
+    borderLeftColor: "#EF4444",
+    borderColor: "#F5C2C7",
+  },
+
+  archiveResultToast: {
+    backgroundColor: "#FFFAEB",
+    borderLeftWidth: 4,
+    borderLeftColor: "#F59E0B",
+    borderColor: "#F6D8A8",
+  },
+
+  // ── Pulse retry button ───────────────────────────────────────────────
   retryBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#F44336",
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
+    backgroundColor: "#EF4444",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
     marginLeft: 8,
   },
   retryBtnText: {
@@ -272,3 +356,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
+
+
+
+
+
+
+
+

@@ -236,7 +236,7 @@ export default function ArchivedScreen() {
       await deleteDoc(doc(db, "classes", id));
       setDeleteTarget(null);
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Deleted",
         text2: "Class deleted successfully",
       });
@@ -256,7 +256,7 @@ export default function ArchivedScreen() {
       await deleteDoc(doc(db, "exams", id));
       setDeleteTarget(null);
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });
