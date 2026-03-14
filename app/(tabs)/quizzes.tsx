@@ -12,6 +12,7 @@ import React, {
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   ScrollView,
   Share,
   StyleSheet,
@@ -21,6 +22,10 @@ import {
   View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { StorageService } from "@/services/storageService";
+import { GradingResult } from "@/types/scanning";
+import ScanResults from "@/components/scanner/ScanResults";
+import { Alert } from "react-native";
 
 type ResultRow = {
   id: string;
@@ -30,6 +35,9 @@ type ResultRow = {
   percentage: number;
   dateLabel: string;
   correctLabel: string;
+  sortValue: number;
+  source: "synced" | "local";
+  rawLocalData?: GradingResult;
 };
 
 function scoreTone(value: number) {
@@ -54,7 +62,8 @@ export default function ResultsScreen() {
   const [selectedClass, setSelectedClass] = useState("All Classes");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [classFilters, setClassFilters] = useState<string[]>(["All Classes"]);
-  const listRef = useRef<FlatList<ResultRow>>(null);
+  const [selectedLocalResult, setSelectedLocalResult] = useState<GradingResult | null>(null);
+  const listRef = useRef<FlatList>(null);
 
   const loadResults = useCallback(() => {
     let active = true;
@@ -71,8 +80,12 @@ export default function ResultsScreen() {
           return;
         }
 
-        const payload = await ResultsService.getUnifiedResults();
-        const mappedResults = payload.rows.map((item) => ({
+        const [payload, localData] = await Promise.all([
+          ResultsService.getUnifiedResults(),
+          StorageService.getHistory(),
+        ]);
+
+        const mappedSynced = payload.rows.map((item) => ({
           id: item.id,
           studentName: item.studentName,
           classLabel: item.classLabel,
@@ -81,11 +94,38 @@ export default function ResultsScreen() {
           dateLabel: formatDateLabel(item.dateValue),
           correctLabel: item.correctLabel,
           sortValue: item.sortValue,
+          source: "synced" as const,
         }));
 
+        const mappedLocal = localData.map((item) => ({
+          id: `local_${item.metadata?.timestamp || Math.random()}`,
+          studentName: item.studentId === "00000000" ? "Unknown Student" : `ID: ${item.studentId}`,
+          classLabel: "Local Storage",
+          examLabel: "Offline Scan",
+          percentage: item.percentage,
+          dateLabel: formatDateLabel(
+            item.metadata?.timestamp
+              ? new Date(item.metadata.timestamp).toISOString()
+              : "",
+          ),
+          correctLabel: `${item.score}/${item.totalPoints} correct`,
+          sortValue: item.metadata?.timestamp || 0,
+          source: "local" as const,
+          rawLocalData: item,
+        }));
+
+        const combined = [...mappedSynced, ...mappedLocal].sort(
+          (a, b) => b.sortValue - a.sortValue,
+        );
+
         if (!active) return;
-        setResults(mappedResults);
-        setClassFilters(payload.classFilters);
+        setResults(combined);
+
+        const filters = [...payload.classFilters];
+        if (mappedLocal.length > 0 && !filters.includes("Local Storage")) {
+          filters.push("Local Storage");
+        }
+        setClassFilters(filters);
       } catch (error) {
         console.error("Error loading results:", error);
         if (active) {
@@ -186,7 +226,15 @@ export default function ResultsScreen() {
     const tone = scoreTone(item.percentage);
 
     return (
-      <TouchableOpacity style={styles.resultCard} activeOpacity={0.88}>
+      <TouchableOpacity
+        style={styles.resultCard}
+        activeOpacity={0.88}
+        onPress={() => {
+          if (item.source === "local" && item.rawLocalData) {
+            setSelectedLocalResult(item.rawLocalData);
+          }
+        }}
+      >
         <View style={[styles.scoreCircle, { backgroundColor: tone.badge }]}>
           <Text style={[styles.scoreCircleText, { color: tone.text }]}>
             {item.percentage}%
@@ -200,11 +248,34 @@ export default function ResultsScreen() {
           <View style={styles.resultFooter}>
             <Text style={styles.resultDate}>{item.dateLabel}</Text>
             <Text style={styles.resultCorrect}>{item.correctLabel}</Text>
+            {item.source === "local" && (
+              <View
+                style={[
+                  item.rawLocalData?.metadata?.isValidId
+                    ? styles.verifiedBadge
+                    : styles.unverifiedBadge,
+                  { marginLeft: "auto" },
+                ]}
+              >
+                <Text
+                  style={
+                    item.rawLocalData?.metadata?.isValidId
+                      ? styles.verifiedText
+                      : styles.unverifiedText
+                  }
+                >
+                  {item.rawLocalData?.metadata?.isValidId
+                    ? "Verified"
+                    : "Local"}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </TouchableOpacity>
     );
   }, []);
+
 
   return (
     <View style={styles.container}>
@@ -252,7 +323,6 @@ export default function ResultsScreen() {
         ))}
       </ScrollView>
 
-      {/* ✅ FIX: Render spinner outside FlatList to prevent the large empty gap */}
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color="#20BE7B" />
@@ -276,6 +346,23 @@ export default function ResultsScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
         />
+      )}
+
+      {selectedLocalResult && (
+        <Modal visible={!!selectedLocalResult} animationType="slide">
+          <ScanResults
+            result={selectedLocalResult}
+            imageUri={selectedLocalResult.metadata?.imageUri}
+            onClose={() => {
+              setSelectedLocalResult(null);
+              loadResults();
+            }}
+            onScanAnother={() => {
+              setSelectedLocalResult(null);
+              loadResults();
+            }}
+          />
+        </Modal>
       )}
 
       <Toast />
@@ -428,6 +515,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#19B97C",
     fontWeight: "700",
+  },
+  verifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EBFBF3",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  verifiedText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#19B97C",
+  },
+  unverifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  unverifiedText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#E24E5C",
   },
   emptyState: {
     alignItems: "center",
