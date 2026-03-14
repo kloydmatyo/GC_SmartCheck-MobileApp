@@ -133,25 +133,12 @@ export function StudentImportModal({
       let fileContent: string;
 
       if (isXlsx) {
-        const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
+        // Pass raw base64 so processImport uses parseXLSX (handles quoted/multi-word headers correctly)
+        fileContent = await FileSystem.readAsStringAsync(selectedFile.uri, {
           encoding: "base64" as any,
         });
-        const workbook = XLSX.read(base64, { type: "base64" });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        fileContent = XLSX.utils.sheet_to_csv(firstSheet);
       } else {
-        // Native: use expo-file-system/legacy
-        if (isXlsx) {
-          const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
-            encoding: "base64",
-          });
-          const wb = XLSX.read(base64, { type: "base64" });
-          const firstSheet = wb.Sheets[wb.SheetNames[0]];
-          fileContent = XLSX.utils.sheet_to_csv(firstSheet);
-        } else {
-          // Read file content
-          fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
-        }
+        fileContent = await FileSystem.readAsStringAsync(selectedFile.uri);
       }
 
       const importResult = await StudentImportService.processImport(
@@ -295,11 +282,11 @@ export function StudentImportModal({
             contentContainerStyle={styles.contentContainer}
             showsVerticalScrollIndicator={false}
           >
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Select Class</Text>
-              <View style={styles.classList}>
-                {classOptions.length > 0 ? (
-                  classOptions.map((option) => {
+            {classOptions.length > 0 && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldLabel}>Select Class</Text>
+                <View style={styles.classList}>
+                  {classOptions.map((option) => {
                     const isSelected = option.id === selectedClassId;
                     return (
                       <TouchableOpacity
@@ -326,20 +313,11 @@ export function StudentImportModal({
                         ) : null}
                       </TouchableOpacity>
                     );
-                  })
-                ) : (
-                  <View style={styles.classEmptyState}>
-                    <Text style={styles.classEmptyText}>
-                      No classes available yet.
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {classOptions.length > 0 ? (
+                  })}
+                </View>
                 <Text style={styles.selectedClassText}>{selectedClassLabel}</Text>
-              ) : null}
-            </View>
+              </View>
+            )}
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldLabel}>Select CSV File</Text>
@@ -407,11 +385,11 @@ export function StudentImportModal({
               style={[
                 styles.footerButton,
                 styles.importButton,
-                (!selectedFile || !selectedClassId || isProcessing) &&
+                (!selectedFile || (classOptions.length > 0 && !selectedClassId) || isProcessing) &&
                   styles.importButtonDisabled,
               ]}
               onPress={handleProcessImport}
-              disabled={!selectedFile || !selectedClassId || isProcessing}
+              disabled={!selectedFile || (classOptions.length > 0 && !selectedClassId) || isProcessing}
             >
               <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
               <Text style={styles.importButtonText}>Import</Text>
@@ -720,10 +698,11 @@ const styles = StyleSheet.create({
     color: "#666666",
   },
   importButton: {
-    backgroundColor: ACCENT,
+    backgroundColor: ACCENT_DARK,
   },
   importButtonDisabled: {
-    opacity: 0.55,
+    backgroundColor: ACCENT,
+    opacity: 0.6,
   },
   importButtonText: {
     marginLeft: 8,

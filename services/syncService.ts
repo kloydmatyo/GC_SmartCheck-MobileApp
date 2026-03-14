@@ -167,11 +167,11 @@ export class SyncService {
           id: doc.id,
           class_name: data.class_name,
           course_subject: data.course_subject,
-          room: data.room,
-          section_block: data.section_block,
+          room: data.room || "",
+          section_block: data.section_block || "",
           students: JSON.stringify(data.students || []),
           createdBy: data.createdBy,
-          updatedAt: data.updatedAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate?.() || new Date(),
         });
       });
 
@@ -186,8 +186,8 @@ export class SyncService {
           questionCount: item.data.num_items || 0,
           answerKey: item.answerKey,
           createdBy: item.data.createdBy,
-          createdAt: item.data.createdAt?.toDate() || new Date(),
-          updatedAt: item.data.updatedAt?.toDate() || new Date(),
+          createdAt: item.data.createdAt?.toDate?.() || new Date(),
+          updatedAt: item.data.updatedAt?.toDate?.() || new Date(),
           instructorId: item.data.instructorId || "",
           examCode: item.data.examCode || item.data.room || "",
           choicesPerItem: item.data.choices_per_item || 4,
@@ -207,7 +207,7 @@ export class SyncService {
           gradeEquivalent: data.gradeEquivalent,
           dateScanned: data.dateScanned,
           scannedBy: data.scannedBy,
-          createdAt: data.createdAt?.toDate() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(),
         });
       });
     });

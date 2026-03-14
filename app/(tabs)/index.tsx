@@ -403,6 +403,14 @@ export default function HomeScreen() {
     };
   }, []);
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadHome();
+    setRefreshing(false);
+  }, [loadHome]);
+
   useFocusEffect(loadHome);
 
   const syncVisual = (() => {
@@ -427,20 +435,6 @@ export default function HomeScreen() {
         text: "Syncing...",
       };
     }
-  }, []);
-  // ── Pull-to-refresh handler ──────────────────────────────────────────────
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    loadDashboard();
-    loadRecentExams();
-  }, [loadDashboard, loadRecentExams]);
-  // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
-  useFocusEffect(
-    useCallback(() => {
-      loadDashboard();
-      loadRecentExams();
-    }, [loadDashboard, loadRecentExams]),
-  );
 
     if (pendingCount > 0) {
       return {

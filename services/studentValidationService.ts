@@ -18,7 +18,7 @@ const VALIDATION_CONFIG = {
   API_TIMEOUT: 5000, // 5 seconds
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000, // 1 second
-  ID_FORMAT_REGEX: /^\d{9}$/, // 8-9 digit student ID format
+  ID_FORMAT_REGEX: /^\d{8,9}$/, // 8-9 digit student ID format
 };
 
 export class StudentValidationService {

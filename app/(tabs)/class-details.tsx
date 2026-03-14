@@ -27,7 +27,6 @@ import Toast from "react-native-toast-message";
 import * as XLSX from "xlsx";
 
 import { auth, db } from "@/config/firebase";
-import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
 
 import { DashboardService } from "@/services/dashboardService";
@@ -172,6 +171,20 @@ export default function ClassDetailsScreen() {
     email: "",
   });
   const [listNavWidth, setListNavWidth] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [examRows, setExamRows] = useState<ExamRow[]>([]);
+  const [examRowsLoading, setExamRowsLoading] = useState(false);
+  const examLoadRequestRef = useRef(0);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] = useState(false);
+  const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
+  const [examMenuVisible, setExamMenuVisible] = useState(false);
+  const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
+  const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
+  const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
+  const [deleteExamConfirmVisible, setDeleteExamConfirmVisible] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
   const studentSearchInputRef = useRef<TextInput>(null);
   const tabSlideAnim = useRef(new Animated.Value(0)).current;
   const listNavPillWidth = listNavWidth > 0 ? (listNavWidth - 6) / 2 : 120;
@@ -486,39 +499,23 @@ export default function ClassDetailsScreen() {
       });
       loadExams();
     } catch (error) {
-      console.error("Error adding student:", error);
-      
-      // Extract clean message without error prefixes
-      let cleanMessage = "Failed to add student";
-      if (error instanceof Error) {
-        cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
-      }
-      
-      // Check if it's a duplicate error
-      const isDuplicate = cleanMessage.toLowerCase().includes('already exists');
-      
-      if (isDuplicate) {
-        // Show modal for duplicate warnings
-        setDuplicateWarning({
-          visible: true,
-          message: cleanMessage,
-        });
-      } else {
-        // Show toast for other errors
-        Toast.show({
-          type: "error",
-          text1: "Cannot Add Student",
-          text2: cleanMessage,
-          visibilityTime: 4000,
-        });
-      }
-    } finally {
-      setAddingStudent(false);
+      console.error("Error deleting exam:", error);
+      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete exam" });
     }
   };
 
   const handleDeleteClass = async () => {
     if (!classData) return;
+    try {
+      await ClassService.deleteClass(classData.id);
+      setDeleteClassConfirmVisible(false);
+      Toast.show({ type: "success", text1: "Deleted", text2: `${classData.class_name} has been deleted` });
+      router.replace("/(tabs)/classes");
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete class" });
+    }
+  };
 
   const handleExportStudents = async () => {
     if (!classData || classData.students.length === 0) {
@@ -641,24 +638,121 @@ export default function ClassDetailsScreen() {
     }
   };
 
-  const handleBulkImport = async () => {
+  const handleBulkImport = async (fileContent: string, isExcel: boolean) => {
     try {
-      await ClassService.deleteClass(classData.id);
-      setDeleteClassConfirmVisible(false);
-      setSettingsMenuVisible(false);
-      Toast.show({
-        type: "success",
-        text1: "Deleted",
-        text2: `${classData.class_name} deleted successfully`,
-      });
-      router.replace("/(tabs)/classes");
+      const isExcelFile = isExcel;
+      let rows;
+
+      const headerErrors = isExcelFile
+        ? StudentImportService.validateXLSXHeaders(fileContent)
+        : StudentImportService.validateCSVHeaders(fileContent);
+
+      if (headerErrors.length > 0) {
+        setImportErrors({
+          visible: true,
+          successCount: 0,
+          errors: headerErrors.map((e) => ({
+            student_id: e.field,
+            error: e.error,
+          })),
+        });
+        setImporting(false);
+        return;
+      }
+
+      if (isExcelFile) {
+        rows = StudentImportService.parseXLSX(fileContent);
+      } else {
+        rows = StudentImportService.parseCSV(fileContent);
+      }
+
+      setImportProgress(30);
+
+      const validStudents: any[] = [];
+      const errors: any[] = [];
+
+      for (const row of rows) {
+        const rowErrors = StudentImportService.validateRow(row);
+        if (rowErrors.length === 0) {
+          validStudents.push({
+            rowNumber: row.rowNumber,
+            student_id: row.studentId,
+            first_name: row.firstName,
+            last_name: row.lastName,
+            email: row.email || "",
+          });
+        } else {
+          errors.push(...rowErrors);
+        }
+      }
+
+      const existingStudentIds = new Set(
+        (classData?.students ?? []).map((s) => s.student_id)
+      );
+
+      const duplicateInClassErrors = validStudents
+        .filter((student) => existingStudentIds.has(student.student_id))
+        .map((student) => ({
+          rowNumber: student.rowNumber,
+          field: "student_id",
+          value: student.student_id,
+          error: "Student already exists in this class",
+          severity: "warning" as const,
+        }));
+
+      if (duplicateInClassErrors.length > 0) {
+        errors.push(...duplicateInClassErrors);
+      }
+
+      let successCount = 0;
+      for (const student of validStudents) {
+        try {
+          await ClassService.addStudent(classId, student);
+          existingStudentIds.add(student.student_id);
+          successCount++;
+        } catch (err) {
+          console.error("Error adding student to class:", err);
+          let cleanMessage = "Failed to add student";
+          if (err instanceof Error) {
+            cleanMessage = err.message.replace(/^Error:\s*/i, "").trim();
+          }
+          errors.push({
+            rowNumber: 0,
+            field: "student_id",
+            value: student.student_id,
+            error: cleanMessage,
+            severity: cleanMessage.toLowerCase().includes("already exists") ? "warning" as const : "error" as const,
+          });
+        }
+      }
+
+      setImportProgress(100);
+
+      if (errors.length > 0) {
+        setImportErrors({
+          visible: true,
+          successCount,
+          errors: errors.map((e) => ({
+            student_id: e.value,
+            error: e.error,
+          })),
+        });
+      } else {
+        Toast.show({
+          type: "success",
+          text1: "Import Successful",
+          text2: `${successCount} students added successfully`,
+        });
+      }
     } catch (error) {
-      console.error("Error deleting class:", error);
+      console.error("Error during bulk import:", error);
       Toast.show({
         type: "error",
-        text1: "Error",
-        text2: "Failed to delete class",
+        text1: "Import Failed",
+        text2: "Could not import students",
       });
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -672,68 +766,17 @@ export default function ClassDetailsScreen() {
     setDeleteClassConfirmVisible(true);
   };
 
-// Parse the file directly without using the full import service
-// to avoid global duplicate checks
-const isExcelFile = isExcel;
-let rows;
+  const requestArchiveExam = () => {
+    if (!selectedExam) return;
+    setExamMenuVisible(false);
+    setArchiveExamConfirmVisible(true);
+  };
 
-// Validate required headers before parsing any rows.
-const headerErrors = isExcelFile
-  ? StudentImportService.validateXLSXHeaders(fileContent)
-  : StudentImportService.validateCSVHeaders(fileContent);
-
-if (headerErrors.length > 0) {
-  setImportErrors({
-    visible: true,
-    successCount: 0,
-    errors: headerErrors.map((e) => ({
-      student_id: e.field,
-      error: e.error,
-    })),
-  });
-  setImporting(false);
-  return;
-}
-
-if (isExcelFile) {
-  rows = StudentImportService.parseXLSX(fileContent);
-} else {
-  rows = StudentImportService.parseCSV(fileContent);
-}
-
-setImportProgress(30);
-
-// Validate rows
-const validStudents = [];
-const errors = [];
-
-for (const row of rows) {
-  const rowErrors = StudentImportService.validateRow(row);
-  if (rowErrors.length === 0) {
-    validStudents.push({
-      rowNumber: row.rowNumber,
-      student_id: row.studentId,
-      first_name: row.firstName,
-      last_name: row.lastName,
-      email: row.email || "",
-    });
-  } else {
-    errors.push(...rowErrors);
-  }
-}
-
-// Exam action handlers
-const requestArchiveExam = () => {
-  if (!selectedExam) return;
-  setExamMenuVisible(false);
-  setArchiveExamConfirmVisible(true);
-};
-
-const requestDeleteExam = () => {
-  if (!selectedExam) return;
-  setExamMenuVisible(false);
-  setDeleteExamConfirmVisible(true);
-};
+  const requestDeleteExam = () => {
+    if (!selectedExam) return;
+    setExamMenuVisible(false);
+    setDeleteExamConfirmVisible(true);
+  };
 
   const stats = useMemo(() => {
     if (!students.length) {
@@ -763,114 +806,107 @@ const requestDeleteExam = () => {
       { label: "< 60", count: averages.filter((value) => value < 60).length },
     ];
 
-      const duplicateInClassErrors = validStudents
-        .filter((student) => existingStudentIds.has(student.student_id))
-        .map((student) => ({
-          rowNumber: student.rowNumber,
-          field: 'student_id',
-          value: student.student_id,
-          error: 'Student already exists in this class',
-          severity: 'warning' as const,
-        }));
+    const total = averages.length;
+    const sum = averages.reduce((a, b) => a + b, 0);
+    return {
+      average: total ? Math.round(sum / total) : 0,
+      highest: total ? Math.max(...averages) : 0,
+      lowest: total ? Math.min(...averages) : 0,
+      totalScanned: total,
+      passed: averages.filter((v) => v >= 75).length,
+      failed: averages.filter((v) => v < 75).length,
+      distribution,
+    };
+  }, [students]);
 
-      if (duplicateInClassErrors.length > 0) {
-        errors.push(...duplicateInClassErrors);
+  const colors = darkModeEnabled
+    ? {
+        surface: "#1E2A24",
+        border: "#2E3D35",
+        text: "#E8F0EB",
+        textSecondary: "#9DB8A8",
+        textMuted: "#6B8A78",
+        badgeBg: "#2A3D35",
       }
+    : {
+        surface: "#FFFFFF",
+        border: "#E8EBF0",
+        text: "#111827",
+        textSecondary: "#6B7280",
+        textMuted: "#9CA3AF",
+        badgeBg: "#E9F8F1",
+      };
 
-      // Add students to the class
-      let successCount = 0;
-      for (const student of validStudents) {
-        try {
-          await ClassService.addStudent(classId, student);
-          existingStudentIds.add(student.student_id); // Track added students
-          successCount++;
-        } catch (error) {
-          console.error('Error adding student to class:', error);
-          
-          // Extract clean message
-          let cleanMessage = 'Failed to add student';
-          if (error instanceof Error) {
-            cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
-          }
-          
-          errors.push({
-            rowNumber: 0,
-            field: 'student_id',
-            value: student.student_id,
-            error: cleanMessage,
-            severity: cleanMessage.toLowerCase().includes('already exists') ? 'warning' as const : 'error' as const,
-          });
-        }
-      }
+  const sortedStudents = useMemo(() => {
+    const arr = [...filteredStudents];
+    switch (sortBy) {
+      case 'id_asc': return arr.sort((a, b) => a.id.localeCompare(b.id));
+      case 'id_desc': return arr.sort((a, b) => b.id.localeCompare(a.id));
+      case 'fname_asc': return arr.sort((a, b) => a.name.localeCompare(b.name));
+      case 'fname_desc': return arr.sort((a, b) => b.name.localeCompare(a.name));
+      default: return arr;
+    }
+  }, [filteredStudents, sortBy]);
 
-      setImportProgress(100);
-
-      // Show results
-      if (errors.length > 0) {
-        console.log('[Import] Errors:', JSON.stringify(errors, null, 2));
-        
-        // Show modal with detailed errors
-        setImportErrors({
-          visible: true,
-          successCount,
-          errors: errors.map(e => ({
-            student_id: e.value,
-            error: e.error,
-          })),
-        });
-      } else {
-        Toast.show({
-          type: 'success',
-          text1: 'Import Successful',
-          text2: `${successCount} students added successfully`,
-        });
-      }
-
-          {!students.length ? (
-            <View style={styles.emptyStateCard}>
-              <View style={styles.emptyStateIconWrap}>
-                <Ionicons name="people-outline" size={28} color="#20BE7B" />
-              </View>
-              <Text style={styles.emptyStateTitle}>No students yet</Text>
-              <Text style={styles.emptyStateText}>
-                This class does not have any students yet. Tap the import button to
-                add a student list.
-              </Text>
+  const renderTab = () => {
+    if (activeTab === "students") {
+      return (
+        <>
+          <View style={styles.searchRow}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color="#8E97A6" />
+              <TextInput
+                ref={studentSearchInputRef}
+                style={styles.searchInput}
+                placeholder="Search students..."
+                placeholderTextColor="#8E97A6"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
             </View>
-          ) : !filteredStudents.length ? (
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)}>
+                <Ionicons name="swap-vertical-outline" size={14} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.exportButton} onPress={handleExportStudents}>
+                <Ionicons name="download-outline" size={14} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.importButton} onPress={() => setShowImportModal(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {sortedStudents.length === 0 ? (
             <View style={styles.emptyStateCard}>
               <View style={styles.emptyStateIconWrap}>
-                <Ionicons name="search-outline" size={26} color="#20BE7B" />
+                <Ionicons name="people-outline" size={26} color="#20BE7B" />
               </View>
-              <Text style={styles.emptyStateTitle}>No matching students</Text>
-              <Text style={styles.emptyStateText}>
-                No students matched your search. Try a different name.
-              </Text>
+              <Text style={styles.emptyStateTitle}>No Students Yet</Text>
+              <Text style={styles.emptyStateText}>Add students to get started.</Text>
             </View>
           ) : (
-            filteredStudents.map((student) => (
+            sortedStudents.map((student) => (
               <TouchableOpacity
                 key={student.id}
                 style={styles.studentCard}
-                activeOpacity={0.88}
-                onPress={() => router.push("/(tabs)/quizzes")}
+                onPress={() => {
+                  setStudentToRemove({ studentId: student.id, studentName: student.name });
+                  setRemoveStudentConfirmVisible(true);
+                }}
               >
                 <View style={[styles.studentAvatar, { backgroundColor: student.color }]}>
                   <Text style={styles.studentAvatarText}>{student.initials}</Text>
                 </View>
                 <View style={styles.studentBody}>
                   <Text style={styles.studentName}>{student.name}</Text>
-                  <Text style={styles.studentSubtext}>{student.scans} scans</Text>
+                  <Text style={styles.studentSubtext}>ID: {student.id}</Text>
                 </View>
                 <View style={styles.studentScoreWrap}>
-                  <Text
-                    style={[styles.studentScore, { color: scoreColor(student.average) }]}
-                  >
-                    {student.average} %
+                  <Text style={[styles.studentScore, { color: scoreColor(student.average) }]}>
+                    {student.average}%
                   </Text>
-                  <Text style={styles.studentAvgLabel}>Avg</Text>
+                  <Text style={styles.studentAvgLabel}>avg</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#C5CBD6" />
               </TouchableOpacity>
             ))
           )}
@@ -878,139 +914,65 @@ const requestDeleteExam = () => {
       );
     }
 
-const filteredStudents = (classData?.students ?? [])
-  .filter((student) => {
-    if (!studentSearch.trim()) return true;
-    const q = studentSearch.toLowerCase();
-    const fullName = `${student.first_name} ${student.last_name}`.toLowerCase();
-    return (
-      fullName.includes(q) ||
-      student.student_id.toLowerCase().includes(q) ||
-      (student.email ?? "").toLowerCase().includes(q)
-    );
-  })
-  .sort((a, b) => {
-    switch (sortBy) {
-      case "id_asc":
-        return a.student_id.localeCompare(b.student_id, undefined, { numeric: true });
-      case "id_desc":
-        return b.student_id.localeCompare(a.student_id, undefined, { numeric: true });
-      case "fname_asc":
-        return a.first_name.localeCompare(b.first_name);
-      case "fname_desc":
-        return b.first_name.localeCompare(a.first_name);
-      default:
-        return 0;
-    }
-  });
-
-const recentQuizzes = [
-  {
-    id: "q1",
-    title: `Midterm Exam - ${classData?.section_block.toUpperCase() ?? ""}`,
-    subject: classData?.course_subject ?? "N/A",
-    date: "Feb 11, 2026",
-    students: classData?.students.length ?? 0,
-  },
-];
-
-const filteredQuizzes = recentQuizzes.filter((quiz) =>
-  quiz.title.toLowerCase().includes(quizSearch.toLowerCase())
-);
-
-const getScore = (studentId: string) => {
-  const numeric = parseInt(studentId.replace(/\D/g, "").slice(-2) || "0", 10);
-  return Math.max(2, Math.min(49, (numeric % 50) || 32));
-};
-
-if (activeTab === "exams") {
-  return (
-    <>
-      <TouchableOpacity
-        style={styles.createExamButton}
-        onPress={() => router.push(`/(tabs)/create-quiz?classId=${classId}`)}
-        activeOpacity={0.88}
-      >
-        <Ionicons name="add" size={18} color="#109B67" />
-        <Text style={styles.createExamText}>Create Exam</Text>
-      </TouchableOpacity>
-
-          {examRowsLoading ? (
-            <View style={styles.emptyStateCard}>
-              <ActivityIndicator size="small" color="#20BE7B" />
-              <Text style={styles.emptyStateTitle}>Loading exams...</Text>
-              <Text style={styles.emptyStateText}>
-                Please wait while we load this class&apos;s exams.
-              </Text>
+    if (activeTab === "exams") {
+      return (
+        <>
+          <View style={styles.searchRow}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color="#8E97A6" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search exams..."
+                placeholderTextColor="#8E97A6"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
             </View>
-          ) : !examRows.length ? (
+          </View>
+          <TouchableOpacity
+            style={styles.createExamButton}
+            onPress={() => router.push(`/(tabs)/create-quiz?classId=${classId}`)}
+          >
+            <Ionicons name="add-circle-outline" size={18} color="#20BE7B" />
+            <Text style={styles.createExamText}>Create New Exam</Text>
+          </TouchableOpacity>
+          {examRowsLoading ? (
+            <ActivityIndicator size="small" color="#20BE7B" style={{ marginTop: 20 }} />
+          ) : filteredExams.length === 0 ? (
             <View style={styles.emptyStateCard}>
               <View style={styles.emptyStateIconWrap}>
                 <Ionicons name="document-text-outline" size={26} color="#20BE7B" />
               </View>
-              <Text style={styles.emptyStateTitle}>No exams yet</Text>
-              <Text style={styles.emptyStateText}>
-                This class does not have any exams yet. Tap Create Exam to add one.
-              </Text>
-            </View>
-          ) : !filteredExams.length ? (
-            <View style={styles.emptyStateCard}>
-              <View style={styles.emptyStateIconWrap}>
-                <Ionicons name="search-outline" size={26} color="#20BE7B" />
-              </View>
-              <Text style={styles.emptyStateTitle}>No matching exams</Text>
-              <Text style={styles.emptyStateText}>
-                No exams matched your search. Try a different title or subject.
-              </Text>
+              <Text style={styles.emptyStateTitle}>No Exams Yet</Text>
+              <Text style={styles.emptyStateText}>Create an exam to get started.</Text>
             </View>
           ) : (
             filteredExams.map((exam) => (
               <View key={exam.id} style={styles.examCard}>
                 <TouchableOpacity
                   style={styles.examCardPressable}
-                  activeOpacity={0.88}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(tabs)/exam-preview",
-                      params: {
-                        examId: String(exam.id),
-                        classId: String(classId),
-                        tab: "answerKey",
-                        refresh: String(Date.now()),
-                      },
-                    })
-                  }
+                  onPress={() => router.push(`/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`)}
                 >
                   <View style={styles.examBody}>
                     <Text style={styles.examTitle}>{exam.title}</Text>
-                    <Text style={styles.examMeta}>
-                      {exam.questions} Questions • {exam.scans} Scans
-                    </Text>
-                    {exam.examCode ? (
-                      <Text style={styles.examCodeMeta}>{exam.examCode}</Text>
-                    ) : null}
+                    <Text style={styles.examMeta}>{exam.questions} items · {exam.subject}</Text>
+                    {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
                   </View>
                   <View style={styles.examRight}>
                     <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
-                      {exam.average} %
+                      {exam.average > 0 ? `${exam.average}%` : "—"}
                     </Text>
-                    <Text style={styles.studentAvgLabel}>Avg</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.examMenuButton}
-                  onPress={(event) =>
-                    openExamMenu(
-                      exam,
-                      event.nativeEvent.pageX,
-                      event.nativeEvent.pageY,
-                    )
-                  }
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`More actions for ${exam.title}`}
+                  onPress={(e) => {
+                    e.currentTarget.measure((_fx, _fy, _w, _h, px, py) => {
+                      openExamMenu(exam, px, py);
+                    });
+                  }}
                 >
-                  <Ionicons name="ellipsis-vertical" size={16} color="#A3ACBA" />
+                  <Ionicons name="ellipsis-vertical" size={18} color="#8E97A6" />
                 </TouchableOpacity>
               </View>
             ))
@@ -1023,19 +985,15 @@ if (activeTab === "exams") {
       return (
         <View style={styles.scanPanel}>
           <View style={styles.scanIconWrap}>
-            <Ionicons name="settings-outline" size={34} color="#20BE7B" />
+            <Ionicons name="scan-outline" size={36} color="#20BE7B" />
           </View>
-          <Text style={styles.scanTitle}>Ready to Scan</Text>
+          <Text style={styles.scanTitle}>Scan Answer Sheets</Text>
           <Text style={styles.scanDescription}>
-            Scan answer sheets for {classData?.class_name}. {examRows.length === 1 ? `This will use the "${examRows[0].title}" exam.` : "Select the exam on the next screen."}
+            Use the camera to scan and grade answer sheets for this class.
           </Text>
           <TouchableOpacity
             style={styles.startScanButton}
-            onPress={() => {
-              const examIdParam = examRows.length === 1 ? `&examId=${examRows[0].id}` : "";
-              router.push(`/(tabs)/scanner?classId=${classId}${examIdParam}`);
-            }}
-            activeOpacity={0.9}
+            onPress={() => router.push(`/(tabs)/scanner?classId=${classId}`)}
           >
             <Text style={styles.startScanText}>Start Scanning</Text>
           </TouchableOpacity>
@@ -1043,51 +1001,53 @@ if (activeTab === "exams") {
       );
     }
 
-    const maxDistribution = Math.max(...stats.distribution.map((item) => item.count), 1);
-
-    return (
-      <>
-        <View style={styles.statsHeroCard}>
-          <Text style={styles.statsHeroLabel}>Class Average</Text>
-          <Text style={styles.statsHeroValue}>{stats.average} %</Text>
-          <View style={styles.statsHeroBar}>
-            <AnimatedStatBar progress={stats.average / 100} />
-          </View>
-          <View style={styles.statsHeroFooter}>
-            <Text style={styles.statsPassedText}>{stats.passed} Passed</Text>
-            <Text style={styles.statsFailedText}>{stats.failed} Failed</Text>
-          </View>
-        </View>
-
-        <View style={styles.statsGrid}>
-          <View style={styles.statsSmallCard}>
-            <Text style={styles.statsSmallLabel}>Highest Score</Text>
-            <Text style={styles.statsSmallValue}>{stats.highest}%</Text>
-          </View>
-          <View style={styles.statsSmallCard}>
-            <Text style={styles.statsSmallLabel}>Lowest Score</Text>
-            <Text style={styles.statsSmallValue}>{stats.lowest}%</Text>
-          </View>
-          <View style={styles.statsSmallCard}>
-            <Text style={styles.statsSmallLabel}>Total Scanned</Text>
-            <Text style={styles.statsSmallValue}>{stats.totalScanned}</Text>
-          </View>
-        </View>
-
-        <View style={styles.distributionCard}>
-          <Text style={styles.distributionTitle}>Score Distribution</Text>
-          {stats.distribution.map((item) => (
-            <View key={item.label} style={styles.distributionRow}>
-              <Text style={styles.distributionLabel}>{item.label}</Text>
-              <View style={styles.distributionTrack}>
-                <AnimatedStatBar progress={item.count / maxDistribution} />
-              </View>
-              <Text style={styles.distributionCount}>{item.count}</Text>
+    if (activeTab === "stats") {
+      return (
+        <>
+          <View style={styles.statsHeroCard}>
+            <Text style={styles.statsHeroLabel}>Class Average</Text>
+            <Text style={styles.statsHeroValue}>{stats.average}%</Text>
+            <View style={styles.statsHeroBar}>
+              <AnimatedStatBar progress={stats.average / 100} />
             </View>
-          ))}
-        </View>
-      </>
-    );
+            <View style={styles.statsHeroFooter}>
+              <Text style={styles.statsPassedText}>Passed: {stats.passed}</Text>
+              <Text style={styles.statsFailedText}>Failed: {stats.failed}</Text>
+            </View>
+          </View>
+          <View style={styles.statsGrid}>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Highest</Text>
+              <Text style={[styles.statsSmallValue, { color: "#20BE7B" }]}>{stats.highest}%</Text>
+            </View>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Lowest</Text>
+              <Text style={[styles.statsSmallValue, { color: "#EF4444" }]}>{stats.lowest}%</Text>
+            </View>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Students</Text>
+              <Text style={styles.statsSmallValue}>{stats.totalScanned}</Text>
+            </View>
+          </View>
+          <View style={styles.distributionCard}>
+            <Text style={styles.distributionTitle}>Score Distribution</Text>
+            {stats.distribution.map((item) => (
+              <View key={item.label} style={styles.distributionRow}>
+                <Text style={styles.distributionLabel}>{item.label}</Text>
+                <View style={styles.distributionTrack}>
+                  <AnimatedStatBar
+                    progress={stats.totalScanned > 0 ? item.count / stats.totalScanned : 0}
+                  />
+                </View>
+                <Text style={styles.distributionCount}>{item.count}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      );
+    }
+
+    return null;
   };
 
   if (loading) {
@@ -1223,207 +1183,6 @@ if (activeTab === "exams") {
         </TouchableOpacity>
       </Modal>
 
-{/* Students / Quizzes Section */}
-<View
-  style={[
-    styles.section,
-    showClassDetails ? styles.listContentSection : styles.listContentSectionLight,
-    showClassDetails
-      ? {
-          backgroundColor: colors.surfaceSoft,
-          borderColor: colors.borderSoft,
-        }
-      : {
-          backgroundColor: darkModeEnabled
-            ? colors.surface
-            : colors.surfaceMuted,
-          borderColor: darkModeEnabled
-            ? colors.border
-            : colors.surfaceMuted,
-        },
-  ]}
->
-  <View style={styles.sectionHeader}>
-    <Text style={[styles.sectionTitle, styles.sectionTitleOnDark]}>
-      {activeTab === "students"
-        ? `Students (${filteredStudents.length})`
-        : "Recent Quizzes"}
-    </Text>
-
-    {activeTab === "students" && (
-      <View style={styles.headerActions}>
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={() => setSortModalVisible(true)}
-        >
-          <Ionicons name="funnel-outline" size={16} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.exportButton}
-          onPress={handleExportStudents}
-          disabled={exporting || classData.students.length === 0}
-        >
-          {exporting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Ionicons name="download-outline" size={18} color="#fff" />
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.importButton}
-          onPress={handleBulkImport}
-          disabled={importing}
-        >
-          {importing ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.addStudentButton}
-          onPress={() => setAddStudentModalVisible(true)}
-        >
-          <Ionicons name="add" size={18} color="#fff" />
-        </TouchableOpacity>
-      </View>
-    )}
-  </View>
-
-  {activeTab === "students" && classData.students.length === 0 ? (
-    <View style={styles.emptyStudents}>
-      <Ionicons name="people-outline" size={48} color={colors.emptyIcon} />
-      <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-        No students yet
-      </Text>
-      <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>
-        Tap + to add your first student
-      </Text>
-    </View>
-  ) : activeTab === "students" ? (
-    <FlatList
-      data={filteredStudents}
-      renderItem={renderStudentItem}
-      keyExtractor={(item, index) =>
-        item.id || item.student_id || `student-${index}`
-      }
-      scrollEnabled={false}
-    />
-  ) : filteredQuizzes.length === 0 ? (
-    <View
-      style={[
-        styles.quizPlaceholderCard,
-        {
-          backgroundColor: darkModeEnabled
-            ? colors.surfaceMuted
-            : "rgba(233, 245, 238, 0.16)",
-          borderColor: darkModeEnabled
-            ? colors.border
-            : "rgba(221, 239, 230, 0.3)",
-        },
-      ]}
-    >
-      <Text style={[styles.quizPlaceholderTitle, { color: colors.text }]}>
-        No recent quizzes yet
-      </Text>
-      <Text
-        style={[
-          styles.quizPlaceholderSubtitle,
-          { color: colors.textSecondary },
-        ]}
-      >
-        Create a quiz to see latest results for this class.
-      </Text>
-    </View>
-  ) : (
-    filteredQuizzes.map((quiz) => (
-      <View
-        key={quiz.id}
-        style={[
-          styles.quizCard,
-          {
-            backgroundColor: colors.quizCardBg,
-            borderColor: colors.quizCardBorder,
-          },
-        ]}
-      >
-        <Text style={[styles.quizCardTitle, { color: colors.text }]}>
-          {quiz.title}
-        </Text>
-
-        <Text
-          style={[styles.quizCardSubject, { color: colors.textSecondary }]}
-        >
-          {quiz.subject}
-        </Text>
-
-        <View style={styles.quizMetaRow}>
-          <Ionicons
-            name="calendar-outline"
-            size={12}
-            color={darkModeEnabled ? colors.textSecondary : "#cde2d8"}
-          />
-          <Text
-            style={[
-              styles.quizMetaText,
-              {
-                color: darkModeEnabled
-                  ? colors.textSecondary
-                  : "#d5e9de",
-              },
-            ]}
-          >
-            {quiz.date}
-          </Text>
-        </View>
-
-        <View style={styles.quizActionsRow}>
-          <View
-            style={[
-              styles.quizStudentsBadge,
-              { backgroundColor: colors.quizBadgeBg },
-            ]}
-          >
-            <Text
-              style={[
-                styles.quizStudentsBadgeText,
-                { color: colors.quizBadgeText },
-              ]}
-            >
-              {quiz.students} STUDENTS
-            </Text>
-          </View>
-
-          <View style={styles.quizRightActions}>
-            <TouchableOpacity
-              style={[
-                styles.quizActionBtn,
-                { backgroundColor: colors.quizActionBg },
-              ]}
-            >
-              <Ionicons name="share-social-outline" size={12} color="#fff" />
-              <Text style={styles.quizActionText}>Share</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.quizActionBtn,
-                { backgroundColor: colors.quizActionBg },
-              ]}
-            >
-              <Ionicons name="download-outline" size={12} color="#fff" />
-              <Text style={styles.quizActionText}>Export</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    ))
-  )}
-</View>
-</ScrollView>
 
 <ConfirmationModal
   visible={archiveClassConfirmVisible}
@@ -1634,38 +1393,49 @@ if (activeTab === "exams") {
         }}
       />
 
-onConfirm={async () => {
-  if (!studentToRemove) return;
-  setRemoveStudentConfirmVisible(false);
+      <ConfirmationModal
+        visible={removeStudentConfirmVisible}
+        title="Remove Student"
+        message={`Are you sure you want to remove ${studentToRemove?.studentName ?? "this student"} from this class?`}
+        cancelText="Cancel"
+        confirmText="Remove"
+        destructive
+        onCancel={() => {
+          setRemoveStudentConfirmVisible(false);
+          setStudentToRemove(null);
+        }}
+        onConfirm={async () => {
+          if (!studentToRemove) return;
+          setRemoveStudentConfirmVisible(false);
 
-  try {
-    await ClassService.removeStudent(classId, studentToRemove.studentId);
+          try {
+            await ClassService.removeStudent(classId, studentToRemove.studentId);
 
-    Toast.show({
-      type: "success",
-      text1: "Success",
-      text2: "Student removed successfully",
-    });
+            Toast.show({
+              type: "success",
+              text1: "Success",
+              text2: "Student removed successfully",
+            });
 
-    loadClassData();
-  } catch (error) {
-    console.error("Error removing student:", error);
+            loadClassData();
+          } catch (error) {
+            console.error("Error removing student:", error);
 
-    let cleanMessage = "Failed to remove student";
-    if (error instanceof Error) {
-      cleanMessage = error.message.replace(/^Error:\s*/i, "").trim();
-    }
+            let cleanMessage = "Failed to remove student";
+            if (error instanceof Error) {
+              cleanMessage = error.message.replace(/^Error:\s*/i, "").trim();
+            }
 
-    Toast.show({
-      type: "error",
-      text1: "Cannot Remove Student",
-      text2: cleanMessage,
-    });
-  } finally {
-    setStudentToRemove(null);
-  }
-}}
-/>
+            Toast.show({
+              type: "error",
+              text1: "Cannot Remove Student",
+              text2: cleanMessage,
+            });
+          } finally {
+            setStudentToRemove(null);
+          }
+        }}
+      />
 
 <ConfirmationModal
   visible={deleteExamConfirmVisible}
@@ -1820,6 +1590,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
   sortModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -1879,6 +1656,9 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     backgroundColor: "#2d7a5f",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   emptyStateCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
@@ -2329,4 +2109,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-});
+})
+

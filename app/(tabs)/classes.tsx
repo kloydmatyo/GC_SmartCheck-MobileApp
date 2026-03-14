@@ -96,7 +96,6 @@ export default function ClassesScreen() {
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
 const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
 const [blockPickerVisible, setBlockPickerVisible] = useState(false);
-const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 const [deleting, setDeleting] = useState(false);
 
 const [classMenuPosition, setClassMenuPosition] = useState({
@@ -527,7 +526,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     }
   };
 
-  const handleDeleteClass = (classItem: Class) => {
+  const openDeleteConfirm = (classItem: Class) => {
     setSelectedClass(classItem);
     setClassMenuVisible(false);
     setDeleteConfirmVisible(true);
@@ -709,31 +708,8 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                     setFormData({ ...formData, section_block: text })
                   }
                 />
-              </TouchableOpacity>
-
-              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Room</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  darkModeEnabled && {
-                    backgroundColor: modalColors.panelSoft,
-                    borderColor: modalColors.border,
-                    color: modalColors.text,
-                  },
-                ]}
-                placeholder="e.g., 404"
-                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
-                value={formData.room}
-                keyboardType="number-pad"
-                maxLength={3}
-                onChangeText={(text) =>
-                  setFormData({
-                    ...formData,
-                    room: text.replace(/\D/g, "").slice(0, 3),
-                  })
-                }
-              />
               </View>
+
               <View style={styles.sheetHalf}>
                 <Text style={styles.sheetLabel}>Room</Text>
                 <TextInput
@@ -824,9 +800,8 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               style={styles.menuAction}
               onPress={() => {
                 setClassMenuVisible(false);
-                setDeleteConfirmVisible(true);
                 if (selectedClass) {
-                  handleDeleteClass(selectedClass);
+                  openDeleteConfirm(selectedClass);
                 }
               }}
             >
@@ -850,22 +825,6 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           if (selectedClass) {
             setArchiveConfirmVisible(false);
             archiveClass(selectedClass);
-          }
-        }}
-      />
-
-      <ConfirmationModal
-        visible={deleteConfirmVisible}
-        title="Delete Item"
-        message={`Are you sure you want to delete ${selectedClass?.class_name ?? "this class"}? This action cannot be undone.`}
-        cancelText="Cancel"
-        confirmText="Delete"
-        destructive
-        onCancel={() => setDeleteConfirmVisible(false)}
-        onConfirm={() => {
-          if (selectedClass) {
-            setDeleteConfirmVisible(false);
-            deleteClass(selectedClass);
           }
         }}
       />

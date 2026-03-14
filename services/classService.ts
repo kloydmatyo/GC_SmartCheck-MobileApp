@@ -150,8 +150,8 @@ export class ClassService {
             instructorId: data.instructorId,
             createdBy: data.createdBy,
             created_at: data.created_at,
-            createdAt: data.createdAt?.toDate(),
-            updatedAt: data.updatedAt?.toDate(),
+            createdAt: data.createdAt?.toDate?.() ?? (data.created_at ? new Date(data.created_at) : undefined),
+            updatedAt: data.updatedAt?.toDate?.() ?? undefined,
           });
         });
         return classes;
