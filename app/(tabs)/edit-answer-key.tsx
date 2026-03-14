@@ -17,6 +17,8 @@ import {
   getDocs,
   onSnapshot,
   query,
+  runTransaction,
+  serverTimestamp,
   where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
@@ -49,8 +51,8 @@ export default function EditAnswerKeyScreen() {
   const goBack = () =>
     classId
       ? router.replace(
-          `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
-        )
+        `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
+      )
       : router.replace("/(tabs)/quizzes");
 
   const [loading, setLoading] = useState(true);
@@ -117,21 +119,33 @@ export default function EditAnswerKeyScreen() {
     }, []),
   );
 
+  // Add real-time network listener
+  useEffect(() => {
+    const unsubscribe = NetworkService.addListener((isConnected) => {
+      setIsOffline(!isConnected);
+    });
+
+    // Check initial state
+    NetworkService.isOnline().then(online => setIsOffline(!online));
+
+    return unsubscribe;
+  }, []);
+
   const colors = darkModeEnabled
     ? {
-        bg: "#111815",
-        headerBg: "#1a2520",
-        cardBg: "#1f2b26",
-        border: "#34483f",
-        title: "#e7f1eb",
-      }
+      bg: "#111815",
+      headerBg: "#1a2520",
+      cardBg: "#1f2b26",
+      border: "#34483f",
+      title: "#e7f1eb",
+    }
     : {
-        bg: "#f5f5f5",
-        headerBg: "#ffffff",
-        cardBg: "#ffffff",
-        border: "#e0e0e0",
-        title: "#333333",
-      };
+      bg: "#f5f5f5",
+      headerBg: "#ffffff",
+      cardBg: "#ffffff",
+      border: "#e0e0e0",
+      title: "#333333",
+    };
 
   useEffect(() => {
     if (!answerKeyId || isOffline) return;
@@ -180,9 +194,9 @@ export default function EditAnswerKeyScreen() {
   ): QuestionAnswer[] => {
     const settingsAnswers = Array.isArray(data.questionSettings)
       ? data.questionSettings
-          .slice()
-          .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
-          .map((q: any) => String(q.correctAnswer ?? ""))
+        .slice()
+        .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+        .map((q: any) => String(q.correctAnswer ?? ""))
       : [];
 
     const numericAnswers = Object.keys(data)
@@ -289,9 +303,9 @@ export default function EditAnswerKeyScreen() {
           const initialAnswers = resolvedAnswerKey.data
             ? parseAnswersFromAnswerKey(resolvedAnswerKey.data, numItems)
             : Array.from({ length: numItems }, (_, i) => ({
-                questionNumber: i + 1,
-                answer: "",
-              }));
+              questionNumber: i + 1,
+              answer: "",
+            }));
 
           setAnswers(initialAnswers);
           const loadedVersion = Number(resolvedAnswerKey.data?.version ?? 1);
@@ -602,7 +616,7 @@ export default function EditAnswerKeyScreen() {
 
       const file = pickerResult.assets[0];
       const base64 = await FileSystem.readAsStringAsync(file.uri, {
-        encoding: "base64" as any,
+        encoding: FileSystem.EncodingType.Base64,
       });
       const workbook = XLSX.read(base64, { type: "base64" });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
