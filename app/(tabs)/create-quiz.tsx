@@ -246,15 +246,7 @@ export default function CreateQuizScreen() {
       return;
     }
 
-    if (!selectedClassId) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select a class",
-      });
-      return;
-    }
+
 
     if (!examDate) {
       setStatusModal({
@@ -493,77 +485,7 @@ export default function CreateQuizScreen() {
           </View>
         </View>
 
-        {!classIdParam && (
-          <View style={styles.section}>
-            <Text style={styles.formLabel}>Class</Text>
-            {classesLoading ? (
-              <View style={styles.inlineInfoBox}>
-                <ActivityIndicator size="small" color="#1FC27D" />
-                <Text style={styles.inlineInfoText}>Loading classes...</Text>
-              </View>
-            ) : classOptions.length === 0 ? (
-              <View style={styles.inlineInfoBox}>
-                <Text style={styles.inlineInfoText}>No classes found</Text>
-              </View>
-            ) : (
-              <View style={styles.classButtons}>
-                {classOptions.map((cls) => {
-                  const selected = selectedClassId === cls.id;
-                  return (
-                    <TouchableOpacity
-                      key={cls.id}
-                      style={[
-                        styles.lightClassButton,
-                        selected && styles.lightClassButtonActive,
-                      ]}
-                      onPress={() => setSelectedClassId(cls.id)}
-                      disabled={loading}
-                    >
-                      <Text
-                        style={[
-                          styles.lightClassButtonText,
-                          selected && styles.lightClassButtonTextActive,
-                        ]}
-                      >
-                        {cls.class_name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-        )}
 
-        {!!classIdParam && (
-          <View style={styles.section}>
-            <Text style={styles.formLabel}>Class</Text>
-            <View style={styles.inlineInfoBox}>
-              <Text style={styles.inlineInfoText}>
-                {classOptions.find((cls) => cls.id === selectedClassId)
-                  ?.class_name || "Selected class"}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        <View style={styles.section}>
-          <Text style={styles.formLabel}>Answer Key</Text>
-          <View style={styles.inlineInfoBox}>
-            <Text style={styles.inlineInfoText}>
-              You&apos;ll set the answer key on the next screen.
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.inlineInfoBox}>
-            <Text style={styles.inlineInfoText}>
-              After you create the exam, the exam code will appear on the Answer
-              Key tab.
-            </Text>
-          </View>
-        </View>
       </ScrollView>
 
       <View style={styles.lightFooter}>
