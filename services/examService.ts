@@ -1,5 +1,12 @@
 import { auth, db } from "@/config/firebase";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import {
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    where,
+} from "firebase/firestore";
 import Realm from "realm";
 import { ExamPreviewData } from "../types/exam";
 import { AuditLogService } from "./auditLogService";
@@ -22,30 +29,39 @@ export class ExamService {
 
       if (isOnline) {
         console.log("[ExamService] Online. Fetching from Firestore...");
-        const q = query(collection(db, "exams"), where("createdBy", "==", currentUser.uid));
+        const q = query(
+          collection(db, "exams"),
+          where("createdBy", "==", currentUser.uid),
+        );
         const snap = await getDocs(q);
         const cacheRealm = await RealmService.getCacheRealm();
 
-        const examIds = snap.docs.map(doc => doc.id);
+        const examIds = snap.docs.map((doc) => doc.id);
         const answerKeysMap: Record<string, any> = {};
 
         // Firestore 'in' queries are limited to 30 elements.
         const chunkArray = (arr: string[], size: number) =>
           Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-            arr.slice(i * size, i * size + size)
+            arr.slice(i * size, i * size + size),
           );
 
         const chunks = chunkArray(examIds, 30);
 
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          const akQuery = query(collection(db, "answerKeys"), where("examId", "in", chunk));
+          const akQuery = query(
+            collection(db, "answerKeys"),
+            where("examId", "in", chunk),
+          );
           const akSnap = await getDocs(akQuery);
-          akSnap.docs.forEach(doc => {
+          akSnap.docs.forEach((doc) => {
             const data = doc.data();
             const eId = data.examId;
             // Keep the latest version if multiple exist
-            if (!answerKeysMap[eId] || (data.version || 0) > (answerKeysMap[eId].version || 0)) {
+            if (
+              !answerKeysMap[eId] ||
+              (data.version || 0) > (answerKeysMap[eId].version || 0)
+            ) {
               answerKeysMap[eId] = data;
             }
           });
@@ -53,31 +69,37 @@ export class ExamService {
 
         // Cache the newly fetched data in realmdb.primary
         cacheRealm.write(() => {
-          snap.docs.forEach(docSnap => {
+          snap.docs.forEach((docSnap) => {
             const data = docSnap.data();
             const eId = docSnap.id;
-            const akJson = answerKeysMap[eId] ? JSON.stringify(answerKeysMap[eId]) : "";
+            const akJson = answerKeysMap[eId]
+              ? JSON.stringify(answerKeysMap[eId])
+              : "";
 
-            cacheRealm.create("QuizCache", {
-              id: eId,
-              title: data.title || "Untitled Exam",
-              subject: data.subject || data.className || "No Subject",
-              status: data.status || "Draft",
-              papersCount: data.scanned_papers || 0,
-              questionCount: data.num_items || 0,
-              answerKey: akJson,
-              createdBy: data.createdBy,
-              createdAt: data.createdAt?.toDate?.() || new Date(),
-              updatedAt: data.updatedAt?.toDate?.() || new Date(),
-              instructorId: data.instructorId || "",
-              examCode: data.examCode || data.room || "",
-              choicesPerItem: data.choices_per_item || 4,
-            }, Realm.UpdateMode.Modified);
+            cacheRealm.create(
+              "QuizCache",
+              {
+                id: eId,
+                title: data.title || "Untitled Exam",
+                subject: data.subject || data.className || "No Subject",
+                status: data.status || "Draft",
+                papersCount: data.scanned_papers || 0,
+                questionCount: data.num_items || 0,
+                answerKey: akJson,
+                createdBy: data.createdBy,
+                createdAt: data.createdAt?.toDate?.() || new Date(),
+                updatedAt: data.updatedAt?.toDate?.() || new Date(),
+                instructorId: data.instructorId || "",
+                examCode: data.examCode || data.room || "",
+                choicesPerItem: data.choices_per_item || 4,
+              },
+              Realm.UpdateMode.Modified,
+            );
           });
         });
 
         // Map data for UI components
-        const firestoreExams = snap.docs.map(doc => {
+        const firestoreExams = snap.docs.map((doc) => {
           return {
             id: doc.id,
             ...doc.data(),
@@ -93,7 +115,7 @@ export class ExamService {
 
         const results = [...firestoreExams];
         // Add staging exams that aren't synced yet
-        staging.forEach(s => {
+        staging.forEach((s) => {
           results.push({
             id: `staging_${s._id.toHexString()}`,
             title: s.title,
@@ -114,7 +136,7 @@ export class ExamService {
 
       const localExams: any[] = [];
 
-      cached.forEach(q => {
+      cached.forEach((q) => {
         localExams.push({
           id: q.id,
           title: q.title,
@@ -127,7 +149,7 @@ export class ExamService {
         });
       });
 
-      staging.forEach(s => {
+      staging.forEach((s) => {
         localExams.push({
           id: `staging_${s._id.toHexString()}`,
           title: s.title,
@@ -150,7 +172,10 @@ export class ExamService {
   /**
    * Update answer key for an exam
    */
-  static async updateAnswerKey(examId: string, answers: string[]): Promise<void> {
+  static async updateAnswerKey(
+    examId: string,
+    answers: string[],
+  ): Promise<void> {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error("Not authenticated");
@@ -162,7 +187,10 @@ export class ExamService {
         console.log("[ExamService] Updating Staging Answer Key:", examId);
         const stagingRealm = await RealmService.getStagingRealm();
         const hexId = examId.replace("staging_", "");
-        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>("OfflineQuiz", new Realm.BSON.ObjectId(hexId));
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
 
         if (sQuiz) {
           stagingRealm.write(() => {
@@ -179,18 +207,30 @@ export class ExamService {
         const stagingRealm = await RealmService.getStagingRealm();
         // We'll reuse OfflineQuiz staging if possible, or we need a new PendingUpdate schema
         // For now, let's just use the existing OfflineStorageService for updates if it's not a staging quiz
-        const { OfflineStorageService } = await import("./offlineStorageService");
+        const { OfflineStorageService } =
+          await import("./offlineStorageService");
         await OfflineStorageService.queueUpdate(examId, "update", {
-          answerKey: { answers, locked: false }
+          answerKey: { answers, locked: false },
         });
         return;
       }
 
       // Online - Sync to Firestore
-      const { collection, doc, query, where, getDocs, setDoc, serverTimestamp } = await import("firebase/firestore");
+      const {
+        collection,
+        doc,
+        query,
+        where,
+        getDocs,
+        setDoc,
+        serverTimestamp,
+      } = await import("firebase/firestore");
 
       // Find correctly resolving answer key ID
-      const q = query(collection(db, "answerKeys"), where("examId", "==", examId));
+      const q = query(
+        collection(db, "answerKeys"),
+        where("examId", "==", examId),
+      );
       const snap = await getDocs(q);
 
       let akRef;
@@ -213,8 +253,8 @@ export class ExamService {
         questionSettings: answers.map((a, i) => ({
           questionNumber: i + 1,
           correctAnswer: a,
-          points: 1
-        }))
+          points: 1,
+        })),
       };
 
       await setDoc(akRef, answerKeyData, { merge: true });
@@ -258,7 +298,8 @@ export class ExamService {
         return `staging_${newId}`;
       }
 
-      const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+      const { addDoc, collection, serverTimestamp } =
+        await import("firebase/firestore");
       const docRef = await addDoc(collection(db, "exams"), {
         ...examData,
         createdAt: serverTimestamp(),
@@ -306,19 +347,29 @@ export class ExamService {
         console.log("[ExamService] Resolving Staging Exam ID:", examId);
         const stagingRealm = await RealmService.getStagingRealm();
         const hexId = examId.replace("staging_", "");
-        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>("OfflineQuiz", new Realm.BSON.ObjectId(hexId));
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
 
         if (sQuiz) {
-          const answerKeyData = sQuiz.answerKey ? JSON.parse(sQuiz.answerKey) : null;
+          const answerKeyData = sQuiz.answerKey
+            ? JSON.parse(sQuiz.answerKey)
+            : null;
           const totalQuestions = sQuiz.questionCount || 20;
 
           const extractedAnswers: string[] = [];
           if (answerKeyData?.questionSettings) {
             for (let i = 0; i < totalQuestions; i++) {
-              const setting = answerKeyData.questionSettings.find((qs: any) => qs.questionNumber === i + 1);
+              const setting = answerKeyData.questionSettings.find(
+                (qs: any) => qs.questionNumber === i + 1,
+              );
               extractedAnswers.push(setting?.correctAnswer || "");
             }
-          } else if (answerKeyData?.answers && Array.isArray(answerKeyData.answers)) {
+          } else if (
+            answerKeyData?.answers &&
+            Array.isArray(answerKeyData.answers)
+          ) {
             for (let i = 0; i < totalQuestions; i++) {
               extractedAnswers.push(answerKeyData.answers[i] || "");
             }
@@ -342,17 +393,19 @@ export class ExamService {
               createdBy: sQuiz.createdBy,
               version: 1,
             },
-            answerKey: answerKeyData ? {
-              id: `ak_${examId}`,
-              examId: examId,
-              answers: extractedAnswers,
-              questionSettings: answerKeyData.questionSettings || [],
-              locked: false,
-              createdAt: sQuiz.createdAt,
-              updatedAt: sQuiz.createdAt,
-              createdBy: sQuiz.createdBy,
-              version: 1,
-            } : null as any,
+            answerKey: answerKeyData
+              ? {
+                  id: `ak_${examId}`,
+                  examId: examId,
+                  answers: extractedAnswers,
+                  questionSettings: answerKeyData.questionSettings || [],
+                  locked: false,
+                  createdAt: sQuiz.createdAt,
+                  updatedAt: sQuiz.createdAt,
+                  createdBy: sQuiz.createdBy,
+                  version: 1,
+                }
+              : (null as any),
             templateLayout: {
               name: "Standard Template",
               totalQuestions: totalQuestions,
@@ -368,20 +421,30 @@ export class ExamService {
       }
       if (!isOnline) {
         const cacheRealm = await RealmService.getCacheRealm();
-        const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+        const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>(
+          "QuizCache",
+          examId,
+        );
 
         if (cachedQuiz) {
           console.log("[ExamService] Found exam in Cache Realm (Offline)");
-          const answerKeyData = cachedQuiz.answerKey ? JSON.parse(cachedQuiz.answerKey) : null;
+          const answerKeyData = cachedQuiz.answerKey
+            ? JSON.parse(cachedQuiz.answerKey)
+            : null;
           const totalQuestions = cachedQuiz.questionCount || 20;
 
           const extractedAnswers: string[] = [];
           if (answerKeyData?.questionSettings) {
             for (let i = 0; i < totalQuestions; i++) {
-              const setting = answerKeyData.questionSettings.find((qs: any) => qs.questionNumber === i + 1);
+              const setting = answerKeyData.questionSettings.find(
+                (qs: any) => qs.questionNumber === i + 1,
+              );
               extractedAnswers.push(setting?.correctAnswer || "");
             }
-          } else if (answerKeyData?.answers && Array.isArray(answerKeyData.answers)) {
+          } else if (
+            answerKeyData?.answers &&
+            Array.isArray(answerKeyData.answers)
+          ) {
             for (let i = 0; i < totalQuestions; i++) {
               extractedAnswers.push(answerKeyData.answers[i] || "");
             }
@@ -405,17 +468,19 @@ export class ExamService {
               createdBy: cachedQuiz.createdBy,
               version: 1,
             },
-            answerKey: answerKeyData ? {
-              id: answerKeyData.id || "",
-              examId: examId,
-              answers: extractedAnswers,
-              questionSettings: answerKeyData.questionSettings || [],
-              locked: answerKeyData.locked || false,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              createdBy: "",
-              version: 1,
-            } : null as any,
+            answerKey: answerKeyData
+              ? {
+                  id: answerKeyData.id || "",
+                  examId: examId,
+                  answers: extractedAnswers,
+                  questionSettings: answerKeyData.questionSettings || [],
+                  locked: answerKeyData.locked || false,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                  createdBy: "",
+                  version: 1,
+                }
+              : (null as any),
             templateLayout: {
               name: "Standard Template",
               totalQuestions: totalQuestions,
@@ -455,9 +520,8 @@ export class ExamService {
         // Fetch answer key - prefer the most recently updated answer key for this exam
         let answerKeyData = null;
         let answerKeyId = null;
-        const { collection, query, where, getDocs } = await import(
-          "firebase/firestore"
-        );
+        const { collection, query, where, getDocs } =
+          await import("firebase/firestore");
         const answerKeysQuery = query(
           collection(db, "answerKeys"),
           where("examId", "==", examId),
@@ -483,7 +547,10 @@ export class ExamService {
 
           answerKeyData = selected.data();
           answerKeyId = selected.id;
-          console.log("[ExamService] Found latest answer key via query:", answerKeyId);
+          console.log(
+            "[ExamService] Found latest answer key via query:",
+            answerKeyId,
+          );
         } else {
           // Strategy 2: Query for answer key by examId
           console.log(
@@ -508,8 +575,14 @@ export class ExamService {
             const firstDoc = answerKeysSnapshot.docs[0];
             answerKeyData = firstDoc.data();
             answerKeyId = firstDoc.id;
-            console.log("[ExamService] Found answer key via query:", answerKeyId);
-            console.log("[ExamService] Answer key examId:", answerKeyData.examId);
+            console.log(
+              "[ExamService] Found answer key via query:",
+              answerKeyId,
+            );
+            console.log(
+              "[ExamService] Answer key examId:",
+              answerKeyData.examId,
+            );
             console.log(
               "[ExamService] Answer key has questionSettings:",
               !!answerKeyData.questionSettings,
@@ -531,7 +604,9 @@ export class ExamService {
             console.log("[ExamService] No answer key found for exam:", examId);
 
             // Strategy 3: Try to find by ID pattern (for web app compatibility)
-            console.log("[ExamService] Trying Strategy 3: Search by ID pattern");
+            console.log(
+              "[ExamService] Trying Strategy 3: Search by ID pattern",
+            );
             const allAnswerKeysSnapshot = await getDocs(
               collection(db, "answerKeys"),
             );
@@ -640,27 +715,27 @@ export class ExamService {
           },
           answerKey: answerKeyData
             ? {
-              id: answerKeyId || "",
-              examId: examData.examId || examSnap.id,
-              answers: extractedAnswers, // Use extracted answers
-              questionSettings: answerKeyData.questionSettings || [],
-              locked: answerKeyData.locked || false,
-              createdAt: answerKeyData.createdAt?.toDate() || new Date(),
-              updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
-              createdBy: answerKeyData.createdBy || "",
-              version: answerKeyData.version || 1,
-            }
+                id: answerKeyId || "",
+                examId: examData.examId || examSnap.id,
+                answers: extractedAnswers, // Use extracted answers
+                questionSettings: answerKeyData.questionSettings || [],
+                locked: answerKeyData.locked || false,
+                createdAt: answerKeyData.createdAt?.toDate() || new Date(),
+                updatedAt: answerKeyData.updatedAt?.toDate() || new Date(),
+                createdBy: answerKeyData.createdBy || "",
+                version: answerKeyData.version || 1,
+              }
             : {
-              id: "",
-              examId: examSnap.id,
-              answers: extractedAnswers, // Use extracted answers (empty)
-              questionSettings: [],
-              locked: false,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-              createdBy: "",
-              version: 1,
-            },
+                id: "",
+                examId: examSnap.id,
+                answers: extractedAnswers, // Use extracted answers (empty)
+                questionSettings: [],
+                locked: false,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                createdBy: "",
+                version: 1,
+              },
           templateLayout: {
             name: "Standard Template",
             totalQuestions: totalQuestions,
@@ -676,7 +751,10 @@ export class ExamService {
             new Date(),
         };
       } catch (fbError) {
-        console.warn("[ExamService] Firestore fetch failed, falling back to cache:", fbError);
+        console.warn(
+          "[ExamService] Firestore fetch failed, falling back to cache:",
+          fbError,
+        );
         return await this.fetchFromCache(examId);
       }
     } catch (err) {
@@ -688,13 +766,20 @@ export class ExamService {
   /**
    * Private helper to fetch from cache only
    */
-  private static async fetchFromCache(examId: string): Promise<ExamPreviewData | null> {
+  private static async fetchFromCache(
+    examId: string,
+  ): Promise<ExamPreviewData | null> {
     const cacheRealm = await RealmService.getCacheRealm();
-    const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+    const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>(
+      "QuizCache",
+      examId,
+    );
 
     if (cachedQuiz) {
       console.log("[ExamService] Found exam in Cache Realm");
-      const answerKeyData = cachedQuiz.answerKey ? JSON.parse(cachedQuiz.answerKey) : null;
+      const answerKeyData = cachedQuiz.answerKey
+        ? JSON.parse(cachedQuiz.answerKey)
+        : null;
       const totalQuestions = cachedQuiz.questionCount || 20;
 
       return {
@@ -711,27 +796,29 @@ export class ExamService {
           createdBy: cachedQuiz.createdBy,
           version: 1,
         },
-        answerKey: answerKeyData ? {
-          id: answerKeyData.id || "",
-          examId: examId,
-          answers: answerKeyData.answers || [],
-          questionSettings: answerKeyData.questionSettings || [],
-          locked: answerKeyData.locked || false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          createdBy: "",
-          version: 1,
-        } : {
-          id: "",
-          examId: examId,
-          answers: Array(totalQuestions).fill(""),
-          questionSettings: [],
-          locked: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          createdBy: "",
-          version: 1,
-        },
+        answerKey: answerKeyData
+          ? {
+              id: answerKeyData.id || "",
+              examId: examId,
+              answers: answerKeyData.answers || [],
+              questionSettings: answerKeyData.questionSettings || [],
+              locked: answerKeyData.locked || false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              createdBy: "",
+              version: 1,
+            }
+          : {
+              id: "",
+              examId: examId,
+              answers: Array(totalQuestions).fill(""),
+              questionSettings: [],
+              locked: false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              createdBy: "",
+              version: 1,
+            },
         templateLayout: {
           name: "Standard Template",
           totalQuestions: totalQuestions,
@@ -847,11 +934,6 @@ export class ExamService {
         throw new Error("Not authorized to update this exam");
       }
 
-      // Check if exam is in Draft status
-      if (examData.status !== "Draft") {
-        throw new Error("Only Draft exams can be edited");
-      }
-
       // Check for version conflicts (optimistic locking)
       const currentVersion = examData.version || 1;
 
@@ -924,11 +1006,6 @@ export class ExamService {
       // Check if user is authorized
       if (examData.createdBy !== currentUser.uid) {
         throw new Error("Not authorized to update this exam");
-      }
-
-      // Check if exam is in Draft status
-      if (examData.status !== "Draft") {
-        throw new Error("Only Draft exams can be edited");
       }
 
       // Check for version conflicts (optimistic locking)

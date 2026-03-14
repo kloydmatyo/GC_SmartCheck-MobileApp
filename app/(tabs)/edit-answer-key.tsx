@@ -3,6 +3,7 @@ import StatusModal from "@/components/common/StatusModal";
 import { db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
+import { OfflineStorageService } from "@/services/offlineStorageService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
@@ -10,21 +11,22 @@ import * as FileSystem from "expo-file-system/legacy";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 import {
-  collection,
-  doc,
-  getDocs,
-  onSnapshot,
-  query,
-  where,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    onSnapshot,
+    query,
+    where,
 } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  FlatList,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import * as XLSX from "xlsx";
 
@@ -271,18 +273,6 @@ export default function EditAnswerKeyScreen() {
 
           const examData = examSnap.data();
 
-          // Check if exam is in Draft status
-          if (examData.status !== "Draft") {
-            setStatusModal({
-              visible: true,
-              type: "error",
-              title: "Edit Restricted",
-              message: `Cannot edit answer key. Exam status is "${examData.status}". Only Draft exams can be edited.`,
-              onClose: goBack,
-            });
-            return;
-          }
-
           const numItems = examData.num_items || 20;
           const choices = examData.choices_per_item || 4;
           setExamTitle(String(examData.title || "Untitled Exam"));
@@ -463,11 +453,6 @@ export default function EditAnswerKeyScreen() {
         }
 
         const examData = examSnap.data();
-        if (examData.status !== "Draft") {
-          throw new Error(
-            `Cannot edit answer key. Exam status is "${examData.status}".`,
-          );
-        }
 
         const serverVersion = Number(answerKeySnap.data()?.version ?? 1);
         if (answerKeySnap.exists() && serverVersion !== answerKeyVersion) {
