@@ -18,7 +18,7 @@ interface ConfirmationModalProps {
   confirmText?: string;
   cancelText?: string;
   onConfirm: () => void;
-  onCancel: () => void;
+  onCancel?: () => void;
   destructive?: boolean;
   loading?: boolean;
 }
@@ -41,7 +41,7 @@ export default function ConfirmationModal({
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onCancel}
+      onRequestClose={onCancel || onConfirm}
     >
       <View style={styles.overlay}>
         <TouchableOpacity
@@ -64,15 +64,21 @@ export default function ConfirmationModal({
           <Text style={styles.message}>{message}</Text>
 
           <View style={styles.actions}>
+            {cancelText && onCancel && (
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={onCancel}
+                disabled={loading}
+              >
+                <Text style={styles.cancelText}>{cancelText}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={onCancel}
-              disabled={loading}
-            >
-              <Text style={styles.cancelText}>{cancelText}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.confirmButton, { backgroundColor: confirmColor }]}
+              style={[
+                styles.confirmButton, 
+                { backgroundColor: confirmColor },
+                !cancelText && styles.confirmButtonFull
+              ]}
               onPress={onConfirm}
               disabled={loading}
             >
@@ -163,6 +169,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
+  },
+  confirmButtonFull: {
+    flex: 1,
+    minWidth: 0,
   },
   confirmText: {
     fontSize: 16,

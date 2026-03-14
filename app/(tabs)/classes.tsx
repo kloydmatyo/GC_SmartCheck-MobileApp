@@ -94,10 +94,15 @@ export default function ClassesScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
-  const [classMenuPosition, setClassMenuPosition] = useState({
-    top: 0,
-    left: 0,
-  });
+const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
+const [blockPickerVisible, setBlockPickerVisible] = useState(false);
+const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+const [deleting, setDeleting] = useState(false);
+
+const [classMenuPosition, setClassMenuPosition] = useState({
+  top: 0,
+  left: 0,
+});
 
   useEffect(() => {
     if (
@@ -279,6 +284,34 @@ export default function ClassesScreen() {
   );
   const canCreateClass = !hasMissingRequired && !hasTooLong && !creating;
 
+  // Delete class
+  const handleDeleteClass = async () => {
+    if (!selectedClass) return;
+
+    try {
+      setDeleting(true);
+      await ClassService.deleteClass(selectedClass.id);
+
+      Toast.show({
+        type: "success",
+        text1: "Success",
+        text2: "Class deleted successfully",
+      });
+
+      setDeleteConfirmVisible(false);
+      loadClasses();
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Create new class
   const handleCreateClass = async () => {
     // Validation
@@ -309,11 +342,11 @@ export default function ClassesScreen() {
       return;
     }
 
-    if (!trimmedForm.room) {
+    if (!/^\d{3}$/.test(formData.room.trim())) {
       Toast.show({
         type: "error",
         text1: "Validation Error",
-        text2: "Room is required",
+        text2: "Room must be exactly 3 digits",
       });
       return;
     }
@@ -676,6 +709,30 @@ export default function ClassesScreen() {
                     setFormData({ ...formData, section_block: text })
                   }
                 />
+              </TouchableOpacity>
+
+              <Text style={[styles.label, { color: darkModeEnabled ? "#b9c9c0" : "#666" }]}>Room</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  darkModeEnabled && {
+                    backgroundColor: modalColors.panelSoft,
+                    borderColor: modalColors.border,
+                    color: modalColors.text,
+                  },
+                ]}
+                placeholder="e.g., 404"
+                placeholderTextColor={darkModeEnabled ? "#8fa39a" : "#9ab79f"}
+                value={formData.room}
+                keyboardType="number-pad"
+                maxLength={3}
+                onChangeText={(text) =>
+                  setFormData({
+                    ...formData,
+                    room: text.replace(/\D/g, "").slice(0, 3),
+                  })
+                }
+              />
               </View>
               <View style={styles.sheetHalf}>
                 <Text style={styles.sheetLabel}>Room</Text>
@@ -766,6 +823,8 @@ export default function ClassesScreen() {
             <TouchableOpacity
               style={styles.menuAction}
               onPress={() => {
+                setClassMenuVisible(false);
+                setDeleteConfirmVisible(true);
                 if (selectedClass) {
                   handleDeleteClass(selectedClass);
                 }
@@ -809,6 +868,18 @@ export default function ClassesScreen() {
             deleteClass(selectedClass);
           }
         }}
+      />
+
+      <ConfirmationModal
+        visible={deleteConfirmVisible}
+        title="Delete Class"
+        message={`Are you sure you want to delete "${selectedClass?.class_name ?? "this class"}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleDeleteClass}
+        onCancel={() => setDeleteConfirmVisible(false)}
+        destructive={true}
+        loading={deleting}
       />
 
       <Toast />

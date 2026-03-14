@@ -600,8 +600,13 @@ export default function StudentsScreen() {
       closeStudentModal();
     } catch (error) {
       console.warn("Failed to save student:", error);
-      const message =
-        error instanceof Error ? error.message : "Could not save student.";
+      
+      // Extract clean message
+      let message = "Could not save student.";
+      if (error instanceof Error) {
+        message = error.message.replace(/^Error:\s*/i, '').trim();
+      }
+      
       const normalizedMessage = message.toLowerCase();
 
       if (
@@ -616,7 +621,7 @@ export default function StudentsScreen() {
       }
 
       Alert.alert(
-        "Save failed",
+        "Cannot Save Student",
         message,
       );
     } finally {
@@ -643,9 +648,15 @@ export default function StudentsScreen() {
       await loadStudents();
     } catch (error) {
       console.error("Failed to delete student:", error);
+      
+      let cleanMessage = "Could not delete student.";
+      if (error instanceof Error) {
+        cleanMessage = error.message.replace(/^Error:\s*/i, '').trim();
+      }
+      
       Alert.alert(
-        "Delete failed",
-        error instanceof Error ? error.message : "Could not delete student.",
+        "Cannot Delete Student",
+        cleanMessage,
       );
     }
   };
@@ -1108,7 +1119,7 @@ export default function StudentsScreen() {
       <FlatList
         data={students}
         renderItem={renderStudentCard}
-        keyExtractor={(item) => item.student_id}
+        keyExtractor={(item, index) => item.id || item.student_id || `student-${index}`}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={

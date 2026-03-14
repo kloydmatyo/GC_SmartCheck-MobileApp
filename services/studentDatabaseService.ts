@@ -68,35 +68,6 @@ export class StudentDatabaseService {
     }
   }
 
-  private static async resolveStudentDocId(
-    docIdOrStudentId: string,
-  ): Promise<string> {
-    await this.initializeDatabase();
-
-    const directMatch = this.cachedStudents?.find(
-      (student) =>
-        student.id === docIdOrStudentId || student.student_id === docIdOrStudentId,
-    );
-    if (directMatch?.id) {
-      return directMatch.id;
-    }
-
-    const studentsRef = collection(db, "students");
-    const snapshot = await getDocs(
-      query(
-        studentsRef,
-        where("student_id", "==", docIdOrStudentId),
-      ),
-    );
-
-    const match = snapshot.docs[0];
-    if (!match) {
-      throw new Error("Student record not found");
-    }
-
-    return match.id;
-  }
-
   /**
    * Create students table if it doesn't exist
    */
@@ -475,6 +446,73 @@ export class StudentDatabaseService {
     await this.updateCacheMetadata(this.cachedStudents.length);
   }
 
+  /**
+   * Add multiple students to local cache (used by bulk import)
+   * Note: Students should already be in Firestore before calling this
+   */
+  static async addStudentsToCache(students: StudentExtended[]): Promise<void> {
+    if (!students || students.length === 0) {
+      return;
+    }
+
+    await this.initializeDatabase();
+
+    // Add to SQLite cache (if available)
+    if (this.isSQLiteAvailable) {
+      const database = await this.openDatabase();
+      if (database) {
+        await database.execAsync("BEGIN TRANSACTION");
+        try {
+          for (const student of students) {
+            await database.runAsync(
+              `INSERT OR REPLACE INTO students 
+              (id, student_id, first_name, last_name, grade, email, section, is_active, createdBy, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                student.id,
+                student.student_id,
+                student.first_name,
+                student.last_name,
+                student.grade || null,
+                student.email || null,
+                student.section || null,
+                student.is_active ? 1 : 0,
+                student.createdBy || null,
+                student.created_at || null,
+                student.updated_at || null,
+              ],
+            );
+          }
+          await database.execAsync("COMMIT");
+          console.log(`[SQLite] Added ${students.length} students to cache`);
+        } catch (error) {
+          await database.execAsync("ROLLBACK");
+          console.error("[SQLite] Failed to add students to cache:", error);
+          throw error;
+        }
+      }
+    }
+
+    // Add to memory cache (deduplicate first)
+    if (!this.cachedStudents) this.cachedStudents = [];
+    
+    // Create a Set of existing student IDs for fast lookup
+    const existingIds = new Set(this.cachedStudents.map(s => s.student_id));
+    
+    // Only add students that don't already exist in cache
+    const newStudents = students.filter(s => !existingIds.has(s.student_id));
+    
+    if (newStudents.length > 0) {
+      this.cachedStudents.push(...newStudents);
+      console.log(`[Cache] Added ${newStudents.length} new students to memory cache (${students.length - newStudents.length} already existed)`);
+    } else {
+      console.log(`[Cache] All ${students.length} students already exist in cache, skipping`);
+    }
+    
+    // Update cache metadata
+    await this.updateCacheMetadata(this.cachedStudents.length);
+  }
+
   static async updateStudent(
     docIdOrStudentId: string,
     updates: Partial<
@@ -570,27 +608,42 @@ export class StudentDatabaseService {
       throw new Error("User must be authenticated");
     }
 
-    const docId = await this.resolveStudentDocId(docIdOrStudentId);
-
-    // Delete from Firestore
-    await deleteDoc(doc(db, "students", docId));
-
-    // Delete from SQLite cache (if available)
-    if (this.isSQLiteAvailable) {
-      const database = await this.openDatabase();
-      if (database) {
-        await database.runAsync("DELETE FROM students WHERE id = ?", [docId]);
-      }
-    }
-
-    // Update memory cache directly (don't reload from SQLite to avoid stale data)
-    if (this.cachedStudents) {
-      this.cachedStudents = this.cachedStudents.filter((s) => s.id !== docId);
-    }
+    await this.initializeDatabase();
     
-    // Update cache metadata to prevent auto-refresh from wiping this change
-    if (this.cachedStudents) {
-      await this.updateCacheMetadata(this.cachedStudents.length);
+    const docId = await this.resolveStudentDocId(docIdOrStudentId);
+    console.log(`[Delete] Attempting to delete student with docId: ${docId}`);
+
+    try {
+      // Delete from Firestore FIRST (source of truth)
+      await deleteDoc(doc(db, "students", docId));
+      console.log(`[Delete] Successfully deleted from Firestore: ${docId}`);
+
+      // Delete from SQLite cache (if available)
+      if (this.isSQLiteAvailable) {
+        const database = await this.openDatabase();
+        if (database) {
+          await database.runAsync("DELETE FROM students WHERE id = ?", [docId]);
+          console.log(`[Delete] Successfully deleted from SQLite: ${docId}`);
+        }
+      }
+
+      // Update memory cache directly (don't reload from SQLite to avoid stale data)
+      if (this.cachedStudents) {
+        const beforeCount = this.cachedStudents.length;
+        this.cachedStudents = this.cachedStudents.filter((s) => s.id !== docId);
+        const afterCount = this.cachedStudents.length;
+        console.log(`[Delete] Memory cache updated: ${beforeCount} -> ${afterCount} students`);
+      }
+      
+      // Update cache metadata to prevent auto-refresh from wiping this change
+      if (this.cachedStudents) {
+        await this.updateCacheMetadata(this.cachedStudents.length);
+      }
+      
+      console.log(`[Delete] Student deletion completed successfully: ${docId}`);
+    } catch (error) {
+      console.error(`[Delete] Failed to delete student ${docId}:`, error);
+      throw error;
     }
   }
 
@@ -611,6 +664,16 @@ export class StudentDatabaseService {
 
     if (!this.cachedStudents) {
       return { students: [], total: 0 };
+    }
+
+    // Deduplicate students by student_id before processing (safety measure)
+    const uniqueStudents = Array.from(
+      new Map(this.cachedStudents.map(s => [s.student_id, s])).values()
+    );
+    
+    if (uniqueStudents.length !== this.cachedStudents.length) {
+      console.warn(`[Cache] Removed ${this.cachedStudents.length - uniqueStudents.length} duplicate students from cache`);
+      this.cachedStudents = uniqueStudents;
     }
 
     // Filter students

@@ -1,24 +1,34 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { auth, db } from "@/config/firebase";
+import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { GradeStorageService } from "@/services/gradeStorageService";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { ResultsService } from "@/services/resultsService";
 import { SyncService, type SyncResult } from "@/services/syncService";
+
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
+
 import { signOut } from "firebase/auth";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
+  orderBy,
   query,
   where,
 } from "firebase/firestore";
+
 import React, { useCallback, useEffect, useState } from "react";
+
 import {
   ActivityIndicator,
   Animated,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -27,8 +37,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
+
+import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 type SummaryStats = {
   scans: number;
@@ -414,6 +427,20 @@ export default function HomeScreen() {
         text: "Syncing...",
       };
     }
+  }, []);
+  // ── Pull-to-refresh handler ──────────────────────────────────────────────
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadDashboard();
+    loadRecentExams();
+  }, [loadDashboard, loadRecentExams]);
+  // ── Subscribe on focus, unsubscribe on blur ───────────────────────────
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+      loadRecentExams();
+    }, [loadDashboard, loadRecentExams]),
+  );
 
     if (pendingCount > 0) {
       return {
