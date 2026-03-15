@@ -5,7 +5,7 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
-import { Stack } from "expo-router";
+import { Stack, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
@@ -25,9 +25,12 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const appState = useRef<AppStateStatus>(AppState.currentState);
+  const pathname = usePathname();
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | null>(null);
   const isSyncingRef = useRef(false);
+  const syncStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Hide Android navigation bar
   useEffect(() => {
@@ -46,12 +49,21 @@ export default function RootLayout() {
 
       if (netState.isConnected && netState.isInternetReachable && auth.currentUser) {
         setIsSyncing(true);
+        setSyncStatus("syncing");
         console.log("[RootLayout] Triggering background sync...");
         await SyncService.syncPendingUpdates();
         console.log("[RootLayout] Background sync complete");
+        setSyncStatus("synced");
+        if (syncStatusTimeoutRef.current) {
+          clearTimeout(syncStatusTimeoutRef.current);
+        }
+        syncStatusTimeoutRef.current = setTimeout(() => {
+          setSyncStatus(null);
+        }, 1200);
       }
     } catch (err) {
       console.warn("Background sync error:", err);
+      setSyncStatus(null);
     } finally {
       setIsSyncing(false);
       isSyncingRef.current = false;
@@ -96,6 +108,22 @@ export default function RootLayout() {
     return () => subscription.remove();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (syncStatusTimeoutRef.current) {
+        clearTimeout(syncStatusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const isHomeTab =
+    pathname === "/" ||
+    pathname === "/(tabs)" ||
+    pathname === "/(tabs)/index";
+
+  const showSyncOverlay =
+    isHomeTab && (isSyncing || syncStatus === "synced");
+
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
@@ -109,11 +137,20 @@ export default function RootLayout() {
       </Stack>
       <StatusBar style="auto" />
       <Toast config={toastConfig} />
-      {isSyncing && (
+      {showSyncOverlay && (
         <View style={styles.syncOverlay} pointerEvents="none">
           <View style={styles.syncContainer}>
-            <ActivityIndicator color="#6B7280" size="small" />
-            <Text style={styles.syncText}>Syncing Data...</Text>
+            {isSyncing ? (
+              <>
+                <ActivityIndicator color="#6B7280" size="small" />
+                <Text style={styles.syncText}>Syncing Data...</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.syncSuccessDot} />
+                <Text style={styles.syncText}>Synced to Web</Text>
+              </>
+            )}
           </View>
         </View>
       )}
@@ -148,5 +185,11 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 12,
     fontWeight: '600',
-  }
+  },
+  syncSuccessDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#22C55E',
+  },
 });

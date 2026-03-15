@@ -68,7 +68,7 @@ export const toastConfig: ToastConfig = {
   success: (props) => (
     <BaseToast
       {...props}
-      style={styles.successToast}
+      style={[styles.baseToastContainer, styles.successToast]}
       contentContainerStyle={styles.contentContainer}
       text1Style={styles.text1}
       text2Style={styles.text2}
@@ -83,7 +83,7 @@ export const toastConfig: ToastConfig = {
   error: (props) => (
     <ErrorToast
       {...props}
-      style={styles.errorToast}
+      style={[styles.baseToastContainer, styles.errorToast]}
       contentContainerStyle={styles.contentContainer}
       text1Style={styles.text1}
       text2Style={styles.text2}
@@ -98,7 +98,7 @@ export const toastConfig: ToastConfig = {
   info: (props) => (
     <BaseToast
       {...props}
-      style={styles.infoToast}
+      style={[styles.baseToastContainer, styles.infoToast]}
       contentContainerStyle={styles.contentContainer}
       text1Style={styles.text1}
       text2Style={styles.text2}
@@ -216,30 +216,25 @@ const styles = StyleSheet.create({
   // ── BaseToast overrides ──────────────────────────────────────────────
   successToast: {
     borderLeftColor: "#22C55E",
+    borderLeftWidth: 4,
     backgroundColor: "#F1FBF5",
-    borderRadius: 12,
-    borderWidth: 1,
     borderColor: "#BFE7CC",
-    marginHorizontal: 20,
   },
   errorToast: {
     borderLeftColor: "#EF4444",
+    borderLeftWidth: 4,
     backgroundColor: "#FFF1F2",
-    borderRadius: 12,
-    borderWidth: 1,
     borderColor: "#F5C2C7",
-    marginHorizontal: 20,
   },
   infoToast: {
     borderLeftColor: "#3B82F6",
+    borderLeftWidth: 4,
     backgroundColor: "#EEF5FF",
-    borderRadius: 12,
-    borderWidth: 1,
     borderColor: "#C7DAFF",
-    marginHorizontal: 20,
   },
   contentContainer: {
     paddingHorizontal: 10,
+    alignItems: "center",
   },
 
   // ── Icon badge ───────────────────────────────────────────────────────
@@ -250,6 +245,7 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     marginLeft: 12,
+    alignSelf: "center",
   },
   iconSuccess: {
     backgroundColor: "#A7F3D0",
@@ -294,11 +290,27 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
+    overflow: "hidden",
   },
   textBlock: {
     flex: 1,
     paddingHorizontal: 12,
     justifyContent: "center",
+  },
+
+  baseToastContainer: {
+    borderRadius: 12,
+    borderWidth: 1,
+    marginHorizontal: 20,
+    minHeight: 56,
+    paddingVertical: 10,
+    paddingRight: 14,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+    overflow: "hidden",
   },
 
   // ── save_result: soft green ──────────────────────────────────────────

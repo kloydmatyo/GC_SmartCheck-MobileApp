@@ -196,7 +196,7 @@ export default function ArchivedScreen() {
       await updateDoc(doc(db, "classes", id), { isArchived: false });
       setRestoreTarget(null);
       Toast.show({
-        type: "success",
+        type: "save_result",
         text1: "Restored",
         text2: "Class moved out of Archived",
       });
@@ -216,7 +216,7 @@ export default function ArchivedScreen() {
       await updateDoc(doc(db, "exams", id), { isArchived: false });
       setRestoreTarget(null);
       Toast.show({
-        type: "success",
+        type: "save_result",
         text1: "Restored",
         text2: "Exam moved out of Archived",
       });
