@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Brightness-Based Scanner for 100-Item Templates
  * 
  * This scanner uses brightness sampling instead of contour detection
@@ -33,7 +33,15 @@ interface AnswerBlock {
   rowSpacingNY: number;
 }
 
+interface IdLayout {
+  firstColNX: number;
+  firstRowNY: number;
+  colSpacingNX: number;
+  rowSpacingNY: number;
+}
+
 interface TemplateLayout {
+  id: IdLayout;
   answerBlocks: AnswerBlock[];
   bubbleDiameterNX: number;
   bubbleDiameterNY: number;
@@ -117,6 +125,18 @@ function get100ItemTemplateLayout(): TemplateLayout {
   const fw = 197, fh = 215.5;
   
   return {
+    // 100Q ID section: 10 columns × 10 rows (10-digit student ID)
+    // Physical layout from templatePdfGenerator.ts drawFullSheet():
+    //   TL marker at page (3, 3)mm. Frame width=197mm, frame height=215.5mm.
+    //   idStartX = lx(10) + idPad(3) + idLabelW(8) = 21mm from page left → 21-3 = 18mm from TL
+    //   idBubbleY empirically calibrated: detected digits were consistently 1 row too high,
+    //   so firstRowNY shifted down by one rowSpacing (4.8mm) → 54.3mm from TL marker
+    id: {
+      firstColNX:   16 / fw,
+      firstRowNY:   49.9 / fh,
+      colSpacingNX:  4.5 / fw,
+      rowSpacingNY:  4.8 / fh,
+    },
     answerBlocks: [
       // Top row (beside ID section)
       {
@@ -195,6 +215,108 @@ function get100ItemTemplateLayout(): TemplateLayout {
     bubbleDiameterNX: 3.8 / fw,
     bubbleDiameterNY: 3.8 / fh,
   };
+}
+
+// ─── STUDENT ID DETECTION ───
+// Ported from Web-Based-for-SIA OMRScanner.tsx detectStudentIdFromImage()
+// Uses brightness sampling at exact physical coordinates (9 cols × 10 rows).
+// Returns { studentId, doubleShadeColumns } matching the web app's behaviour.
+function detectStudentIdFromImage(
+  grayscale: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  layout: TemplateLayout
+): { studentId: string; doubleShadeColumns: number[] } {
+  const { id } = layout;
+  const idDigits: number[] = [];
+  const doubleShadeColumns: number[] = [];
+
+  const frameW = markers.topRight.x - markers.topLeft.x;
+  const frameH = markers.bottomLeft.y - markers.topLeft.y;
+  const bubbleRX = (layout.bubbleDiameterNX * frameW) / 2;
+  const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
+
+  // ID bubbles are slightly smaller than answer bubbles (3.5mm vs 3.8mm)
+  const idBubbleRX = bubbleRX * (3.5 / 3.8);
+  const idBubbleRY = bubbleRY * (3.5 / 3.8);
+
+  console.log('[ID-100Q] BubbleR:', idBubbleRX.toFixed(1), 'x', idBubbleRY.toFixed(1));
+
+  // 10 columns for a 10-digit student ID
+  for (let col = 0; col < 10; col++) {
+    const fills: number[] = [];
+
+    // 10 rows for digits 0-9
+    for (let row = 0; row < 10; row++) {
+      const nx = id.firstColNX + col * id.colSpacingNX;
+      const ny = id.firstRowNY + row * id.rowSpacingNY;
+      const { px, py } = mapToPixel(markers, nx, ny);
+      const brightness = sampleBubbleAt(grayscale, width, height, px, py, idBubbleRX, idBubbleRY);
+      fills.push(brightness);
+    }
+
+    // Sort ascending — lowest brightness = darkest = most filled
+    const sorted = [...fills].sort((a, b) => a - b);
+    const darkest    = sorted[0];
+    const secondDark = sorted[1];
+    // Upper quartile (index 7) as the "unfilled" reference — more robust than median
+    const upperQ = sorted[7];
+
+    let detectedDigit: number | null = null;
+    let hasDetection = false;
+
+    const darkRatio    = upperQ > 20 ? darkest    / upperQ : 1;
+    const gapFromSecond = secondDark - darkest;
+    const gapRatio     = upperQ > 20 ? gapFromSecond / upperQ : 0;
+
+    // Tier 1 — strong fill
+    if (darkRatio < 0.68) {
+      detectedDigit = fills.indexOf(darkest);
+      hasDetection = true;
+    // Tier 2 — light fill with clear separation
+    } else if (darkRatio < 0.82 && gapRatio > 0.12) {
+      detectedDigit = fills.indexOf(darkest);
+      hasDetection = true;
+    // Tier 3 — clearly dark bubble even when neighbours are also somewhat dark
+    // Handles sheets where unfilled bubbles are uniformly mid-grey (small absolute gap)
+    // but the filled one is still meaningfully darker than the upper-quartile reference
+    } else if (darkRatio < 0.78) {
+      detectedDigit = fills.indexOf(darkest);
+      hasDetection = true;
+    } else if (gapFromSecond >= 2 && darkest < sorted[2] - 1) {
+      detectedDigit = fills.indexOf(darkest);
+      hasDetection = true;
+    }
+
+    if (hasDetection && detectedDigit !== null) {
+      // Double-shade: 2nd-darkest is also quite dark AND close to darkest
+      const secondRatio      = upperQ > 20 ? secondDark / upperQ : 1;
+      const gapBetweenTopTwo = upperQ > 20 ? gapFromSecond / upperQ : 1;
+      if (secondRatio < 0.76 && gapBetweenTopTwo < 0.09) {
+        doubleShadeColumns.push(col + 1);
+        console.log(`[ID-100Q] ⚠ Col ${col} DOUBLE SHADE: darkest=${darkest.toFixed(0)} 2nd=${secondDark.toFixed(0)} upperQ=${upperQ.toFixed(0)}`);
+        idDigits.push(-2);
+        continue;
+      }
+    }
+
+    const digitChar = hasDetection && detectedDigit !== null ? String(detectedDigit) : '_';
+    console.log(`[ID-100Q] Col ${col}: [${fills.map(f => f.toFixed(0)).join(',')}] → ${digitChar} (ratio=${darkRatio.toFixed(2)} gap=${gapRatio.toFixed(2)})`);
+
+    // -1 = unshaded (not '0'), -2 = double-shade
+    idDigits.push(hasDetection && detectedDigit !== null ? detectedDigit : -1);
+  }
+
+  // Strip unshaded (-1) and double-shaded (-2) columns — only keep clean digits
+  const cleanId = idDigits.filter(d => d >= 0).map(d => String(d)).join('');
+  const rawWithPlaceholders = idDigits.map(d => d === -1 ? '_' : d === -2 ? '?' : String(d)).join('');
+
+  console.log('[ID-100Q] Raw:', rawWithPlaceholders);
+  console.log('[ID-100Q] Clean ID:', cleanId, `(${cleanId.length} digits)`,
+    doubleShadeColumns.length > 0 ? `double-shade cols: ${doubleShadeColumns.join(',')}` : '');
+
+  return { studentId: cleanId, doubleShadeColumns };
 }
 
 // ─── ANSWER DETECTION ───
@@ -281,8 +403,8 @@ function detectAnswersFromImage(
       } else if (absoluteGap >= 3 && darkest < median - 2) {
         // Very light fill: at least 3 units darker AND clearly below median
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 1 && darkest < brightest) {
-        // Extremely light fill: any detectable 1+ unit difference (catches very light pencil marks)
+      } else if (absoluteGap >= 0.5 && darkest < brightest) {
+        // Extremely light fill: any detectable difference (catches very light pencil marks)
         selectedChoice = sorted[0].choice;
       }
 
@@ -308,7 +430,7 @@ function detectAnswersFromImage(
 export async function scan100ItemWithBrightness(
   imageUri: string,
   markers: Markers
-): Promise<StudentAnswer[]> {
+): Promise<{ answers: StudentAnswer[]; studentId: string; doubleShadeColumns: number[] }> {
   console.log('[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia');
   
   try {
@@ -372,16 +494,26 @@ export async function scan100ItemWithBrightness(
     
     const detectedCount = answers.filter(a => a.selectedAnswer).length;
     console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
-    
-    return answers;
+
+    // Detect student ID using brightness sampling (ported from web app)
+    const { studentId, doubleShadeColumns } = detectStudentIdFromImage(
+      grayscale, width, height, markers, layout
+    );
+
+    return { answers, studentId, doubleShadeColumns };
     
   } catch (error) {
     console.error('[100Q-BRIGHTNESS] Error:', error);
     
     // Return empty answers on error
-    return Array.from({ length: 100 }, (_, i) => ({
-      questionNumber: i + 1,
-      selectedAnswer: '',
-    }));
+    return {
+      answers: Array.from({ length: 100 }, (_, i) => ({
+        questionNumber: i + 1,
+        selectedAnswer: '',
+      })),
+      studentId: '',
+      doubleShadeColumns: [],
+    };
   }
 }
+

@@ -2,7 +2,7 @@ import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
@@ -16,6 +16,7 @@ export default function CameraScanner({
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -53,22 +54,34 @@ export default function CameraScanner({
     );
   }
 
-  // Calculate frame dimensions based on template aspect ratio
+  // Dynamic frame dimensions matching the web app's aspect-ratio approach.
+  // Paper aspect ratios (width/height) from the actual templates:
+  //   20-item:  105mm × 148.5mm → 0.707
+  //   50-item:  105mm × 297mm   → 0.354
+  //   100-item: 210mm × 297mm   → 0.707 (A4)
+  // Frame is fitted inside 76% of the screen (PAD=0.12 each side), same as web.
   const getFrameDimensions = () => {
-    // Custom dimensions for each template to fit phone screen
-    // These dimensions create the green guide frame overlay
+    const PAD = 0.12;
+    const maxW = screenWidth  * (1 - PAD * 2);
+    const maxH = screenHeight * (1 - PAD * 2);
+
+    let paperAspect: number; // width / height
     if (questionCount <= 20) {
-      // 20-item: 105mm × 148.5mm (aspect ~0.707)
-      return { width: 300, height: 400 };
+      paperAspect = 105 / 148.5; // ~0.707
     } else if (questionCount <= 50) {
-      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
-      return { width: 215, height: 500 };
+      paperAspect = 105 / 297;   // ~0.354
     } else {
-      // 100-item: 210mm × 297mm (aspect ~0.707, A4 paper)
-      // The paper is A4 size, nearly same aspect as 20-item but larger
-      // Use 85% of screen width to allow some margin
-      return { width: 320, height: 450 };
+      paperAspect = 210 / 297;   // ~0.707 (A4)
     }
+
+    let fw = maxW;
+    let fh = fw / paperAspect;
+    if (fh > maxH) {
+      fh = maxH;
+      fw = fh * paperAspect;
+    }
+
+    return { width: Math.round(fw), height: Math.round(fh) };
   };
 
   const frameDimensions = getFrameDimensions();

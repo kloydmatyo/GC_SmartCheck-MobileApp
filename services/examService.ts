@@ -85,80 +85,36 @@ export class ExamService {
         answerKeyId = selected.id;
         console.log("[ExamService] Found latest answer key via query:", answerKeyId);
       } else {
-        // Strategy 2: Query for answer key by examId
-        console.log(
-          "[ExamService] Timestamp-based ID not found, querying by examId:",
-          examId,
-        );
-        const { collection, query, where, getDocs } =
-          await import("firebase/firestore");
-        const answerKeysQuery = query(
+        console.log("[ExamService] No answer key found for exam:", examId);
+
+        // Strategy 2: Try to find by document ID pattern (web app stores as ak_<examId>_<timestamp>)
+        console.log("[ExamService] Trying Strategy 2: Search by ID pattern");
+        const allAnswerKeysSnapshot = await getDocs(
           collection(db, "answerKeys"),
-          where("examId", "==", examId),
         );
-        const answerKeysSnapshot = await getDocs(answerKeysQuery);
 
         console.log(
-          "[ExamService] Query returned",
-          answerKeysSnapshot.size,
-          "documents",
+          "[ExamService] Total answer keys in collection:",
+          allAnswerKeysSnapshot.size,
         );
 
-        if (!answerKeysSnapshot.empty) {
-          const firstDoc = answerKeysSnapshot.docs[0];
-          answerKeyData = firstDoc.data();
-          answerKeyId = firstDoc.id;
-          console.log("[ExamService] Found answer key via query:", answerKeyId);
-          console.log("[ExamService] Answer key examId:", answerKeyData.examId);
+        // Look for answer keys whose doc ID starts with ak_<examId>
+        for (const docSnap of allAnswerKeysSnapshot.docs) {
+          if (docSnap.id.startsWith(`ak_${examId}`)) {
+            answerKeyData = docSnap.data();
+            answerKeyId = docSnap.id;
+            console.log(
+              "[ExamService] Found answer key by ID pattern:",
+              answerKeyId,
+            );
+            break;
+          }
+        }
+
+        if (!answerKeyData) {
           console.log(
-            "[ExamService] Answer key has questionSettings:",
-            !!answerKeyData.questionSettings,
+            "[ExamService] Strategy 2 failed - no matching answer key found",
           );
-          if (answerKeyData.questionSettings) {
-            console.log(
-              "[ExamService] questionSettings length:",
-              answerKeyData.questionSettings.length,
-            );
-            console.log(
-              "[ExamService] First 3 answers:",
-              answerKeyData.questionSettings.slice(0, 3).map((qs: any) => ({
-                q: qs.questionNumber,
-                a: qs.correctAnswer,
-              })),
-            );
-          }
-        } else {
-          console.log("[ExamService] No answer key found for exam:", examId);
-
-          // Strategy 3: Try to find by ID pattern (for web app compatibility)
-          console.log("[ExamService] Trying Strategy 3: Search by ID pattern");
-          const allAnswerKeysSnapshot = await getDocs(
-            collection(db, "answerKeys"),
-          );
-
-          console.log(
-            "[ExamService] Total answer keys in collection:",
-            allAnswerKeysSnapshot.size,
-          );
-
-          // Look for answer keys that start with our exam ID
-          for (const docSnap of allAnswerKeysSnapshot.docs) {
-            if (docSnap.id.startsWith(`ak_${examId}`)) {
-              answerKeyData = docSnap.data();
-              answerKeyId = docSnap.id;
-              console.log(
-                "[ExamService] Found answer key by ID pattern:",
-                answerKeyId,
-              );
-              break;
-            }
-          }
-
-          if (!answerKeyData) {
-            console.log(
-              "[ExamService] Strategy 3 failed - no matching answer key found",
-            );
-          }
         }
       }
 

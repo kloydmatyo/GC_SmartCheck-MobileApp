@@ -790,20 +790,18 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
-      // 50q sheets should be portrait (tall), but camera may capture landscape
-      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
+      // 50q sheets are very tall portrait (aspect ~0.43)
+      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707)
+      // Both need rotating if captured landscape
       let workingMat = srcMat;
 
-      if (qCount === 50) {
+      if (qCount === 50 || qCount === 100) {
         const imgAspect = srcJs.cols / srcJs.rows;
         const isLandscape = imgAspect > 1.0;
 
-        // 50q sheets are very tall (aspect ~0.43), should be portrait
-        // If we have a 50q exam but image is landscape, rotate 90° clockwise
         if (isLandscape) {
           console.log(
-            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
+            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but ${qCount}q sheet should be portrait. Rotating 90° clockwise...`,
           );
           const rotatedMat = OpenCV.createObject(
             ObjectType.Mat,
@@ -1431,6 +1429,8 @@ export class ZipgradeScanner {
 
       // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
+      let brightnessStudentId = '';
+      let brightnessDoubleShades: number[] = [];
 
       // For 100-item templates, use brightness-based scanning (Skia)
       if (detectedQ === 100 && regMarks.length >= 3) {
@@ -1541,10 +1541,16 @@ export class ZipgradeScanner {
         );
 
         // Call brightness scanner with image URI and markers
-        allAnswers = await scan100ItemWithBrightness(imageUri, markers);
+        const brightnessResult = await scan100ItemWithBrightness(imageUri, markers);
+        allAnswers = brightnessResult.answers;
+        brightnessStudentId = brightnessResult.studentId;
+        brightnessDoubleShades = brightnessResult.doubleShadeColumns;
 
         console.log(
           `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,
+        );
+        console.log(`[OMR] Brightness scanner student ID: "${brightnessStudentId}"`,
+          brightnessDoubleShades.length > 0 ? `(double-shade cols: ${brightnessDoubleShades.join(',')})` : ''
         );
       } else if (detectedQ === 100) {
         // Fallback: not enough markers for hybrid scanning
@@ -1603,13 +1609,22 @@ export class ZipgradeScanner {
       }
 
       // ── 10. Extract Student ID ────────────────────────────────────────────
-      const studentId = extractStudentId(
-        bubbles,
-        paperW,
-        paperH,
-        medianH,
-        detectedQ,
-      );
+      // For 100Q: use brightness-detected ID (web app approach, exact physical coords)
+      // For 20Q/50Q: use contour-based extraction (existing)
+      let studentId: string;
+      if (detectedQ === 100 && brightnessStudentId) {
+        studentId = brightnessStudentId;
+        console.log(`[OMR] Student ID (brightness): "${studentId}"`,
+          brightnessDoubleShades.length > 0
+            ? `⚠ double-shade cols: ${brightnessDoubleShades.join(',')}`
+            : ''
+        );
+      } else {
+        studentId = extractStudentId(bubbles, paperW, paperH, medianH, detectedQ);
+        if (detectedQ === 100) {
+          console.log(`[OMR] Student ID: Not scanning for 100q template (manual edit available)`);
+        }
+      }
 
       console.log(`[OMR] Final studentId: ${studentId}`);
       console.log("--- OPENCV EXTRACTED ANSWERS ---");
