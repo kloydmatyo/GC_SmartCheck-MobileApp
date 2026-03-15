@@ -796,7 +796,7 @@ export default function ExamPreviewScreen() {
         onConfirm={handleDeleteExam}
       />
 
-      <Toast />
+
     </SafeAreaView>
   );
 }

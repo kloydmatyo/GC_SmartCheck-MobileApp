@@ -888,7 +888,7 @@ export default function EditExamScreen() {
         </View>
       </Modal>
 
-      <Toast />
+
     </SafeAreaView>
   );
 }

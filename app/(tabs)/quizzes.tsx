@@ -365,7 +365,7 @@ export default function ResultsScreen() {
         </Modal>
       )}
 
-      <Toast />
+
     </View>
   );
 }

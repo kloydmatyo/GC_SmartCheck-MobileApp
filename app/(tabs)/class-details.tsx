@@ -1459,7 +1459,7 @@ export default function ClassDetailsScreen() {
         onImportComplete={handleImportComplete}
       />
 
-      <Toast />
+
     </View>
   );
 }

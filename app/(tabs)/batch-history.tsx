@@ -412,7 +412,7 @@ export default function ArchivedScreen() {
         </ScrollView>
       )}
 
-      <Toast />
+
       <ConfirmationModal
         visible={Boolean(restoreTarget)}
         title="Restore Item"

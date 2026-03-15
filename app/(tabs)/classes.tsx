@@ -850,7 +850,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
         loading={deleting}
       />
 
-      <Toast />
+
     </View>
   );
 }
