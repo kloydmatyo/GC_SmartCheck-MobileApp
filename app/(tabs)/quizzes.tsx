@@ -1,31 +1,32 @@
+import ScanResults from "@/components/scanner/ScanResults";
 import { auth } from "@/config/firebase";
 import { ResultsService } from "@/services/resultsService";
-import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import Toast from "react-native-toast-message";
 import { StorageService } from "@/services/storageService";
 import { GradingResult } from "@/types/scanning";
-import ScanResults from "@/components/scanner/ScanResults";
-import { Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
+import { useFocusEffect } from "expo-router";
+import * as Sharing from "expo-sharing";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
+import {
+    ActivityIndicator,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from "react-native";
+import Toast from "react-native-toast-message";
+import * as XLSX from "xlsx";
 
 type ResultRow = {
   id: string;
@@ -62,7 +63,8 @@ export default function ResultsScreen() {
   const [selectedClass, setSelectedClass] = useState("All Classes");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [classFilters, setClassFilters] = useState<string[]>(["All Classes"]);
-  const [selectedLocalResult, setSelectedLocalResult] = useState<GradingResult | null>(null);
+  const [selectedLocalResult, setSelectedLocalResult] =
+    useState<GradingResult | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const loadResults = useCallback(() => {
@@ -99,7 +101,10 @@ export default function ResultsScreen() {
 
         const mappedLocal = localData.map((item) => ({
           id: `local_${item.metadata?.timestamp || Math.random()}`,
-          studentName: item.studentId === "00000000" ? "Unknown Student" : `ID: ${item.studentId}`,
+          studentName:
+            item.studentId === "00000000"
+              ? "Unknown Student"
+              : `ID: ${item.studentId}`,
           classLabel: "Local Storage",
           examLabel: "Offline Scan",
           percentage: item.percentage,
@@ -183,34 +188,45 @@ export default function ResultsScreen() {
       return;
     }
 
-    const header = [
-      "Student Name",
-      "Class",
-      "Exam",
-      "Percentage",
-      "Date",
-      "Correct",
-    ];
-    const escapeCsv = (value: string | number) =>
-      `"${String(value ?? "").replace(/"/g, '""')}"`;
-
-    const rows = filteredResults.map((item) => [
-      item.studentName,
-      item.classLabel,
-      item.examLabel,
-      `${item.percentage}%`,
-      item.dateLabel,
-      item.correctLabel,
-    ]);
-
-    const csv = [header, ...rows]
-      .map((row) => row.map(escapeCsv).join(","))
-      .join("\n");
-
     try {
-      await Share.share({
-        title: "Results Export",
-        message: csv,
+      const wsData = [
+        ["Student Name", "Class", "Exam", "Percentage", "Date", "Correct"],
+        ...filteredResults.map((item) => [
+          item.studentName,
+          item.classLabel,
+          item.examLabel,
+          `${item.percentage}%`,
+          item.dateLabel,
+          item.correctLabel,
+        ]),
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Results");
+
+      const base64 = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
+      const fileUri = `${FileSystem.cacheDirectory}results_export.xlsx`;
+
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Toast.show({
+          type: "error",
+          text1: "Sharing Not Available",
+          text2: "Your device does not support file sharing.",
+        });
+        return;
+      }
+
+      await Sharing.shareAsync(fileUri, {
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        dialogTitle: "Export Results",
+        UTI: "com.microsoft.excel.xlsx",
       });
     } catch (error) {
       console.error("Error exporting results:", error);
@@ -275,7 +291,6 @@ export default function ResultsScreen() {
       </TouchableOpacity>
     );
   }, []);
-
 
   return (
     <View style={styles.container}>
@@ -364,8 +379,6 @@ export default function ResultsScreen() {
           />
         </Modal>
       )}
-
-
     </View>
   );
 }
