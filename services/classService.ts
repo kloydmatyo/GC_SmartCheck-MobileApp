@@ -70,8 +70,8 @@ export class ClassService {
           stagingRealm.create("OfflineClass", {
             class_name: classData.class_name,
             course_subject: classData.course_subject,
-            room: classData.room,
-            section_block: classData.section_block,
+            room: classData.room ?? "",
+            section_block: classData.section_block ?? "",
             students: JSON.stringify(classData.students || []),
             status: "pending",
             createdBy: currentUser.uid,
@@ -81,16 +81,18 @@ export class ClassService {
         return "offline_pending";
       }
 
-      const newClass = {
-        ...classData,
-        students: classData.students || [],
-        isArchived: classData.isArchived || false,
-        instructorId,
-        createdBy: currentUser.uid,
-        created_at: new Date().toISOString(),
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      };
+      const newClass = Object.fromEntries(
+        Object.entries({
+          ...classData,
+          students: classData.students || [],
+          isArchived: classData.isArchived || false,
+          instructorId,
+          createdBy: currentUser.uid,
+          created_at: new Date().toISOString(),
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        }).filter(([, v]) => v !== undefined)
+      );
 
       const docRef = await addDoc(collection(db, this.COLLECTION), newClass);
 
@@ -103,8 +105,8 @@ export class ClassService {
             id: docRef.id,
             class_name: classData.class_name,
             course_subject: classData.course_subject,
-            room: classData.room,
-            section_block: classData.section_block,
+            ...(classData.room ? { room: classData.room } : {}),
+            ...(classData.section_block ? { section_block: classData.section_block } : {}),
             students: JSON.stringify(classData.students || []),
             createdBy: currentUser.uid,
             updatedAt: new Date(),
@@ -273,6 +275,8 @@ export class ClassService {
       );
       const querySnapshot = await getDocs(q);
 
+      const firestoreIds = new Set<string>();
+
       cacheRealm.write(() => {
         querySnapshot.forEach((docSnap) => {
           const data = docSnap.data();
@@ -280,14 +284,16 @@ export class ClassService {
             data.updatedAt?.toDate?.() ??
             (data.updated_at ? new Date(data.updated_at) : new Date());
 
+          firestoreIds.add(docSnap.id);
+
           cacheRealm.create(
             "ClassCache",
             {
               id: docSnap.id,
               class_name: data.class_name,
               course_subject: data.course_subject,
-              room: data.room ?? "",
-              section_block: data.section_block ?? "",
+              room: data.room ?? undefined,
+              section_block: data.section_block ?? undefined,
               students: JSON.stringify(data.students || []),
               createdBy: data.createdBy,
               updatedAt: updatedAt,
@@ -295,7 +301,13 @@ export class ClassService {
             Realm.UpdateMode.Modified,
           );
         });
+
+        // Remove cached entries that no longer exist in Firestore
+        const allCached = cacheRealm.objects<ClassCache>("ClassCache").filtered("createdBy == $0", userId);
+        const toDelete = allCached.filter((c) => !firestoreIds.has(c.id));
+        toDelete.forEach((c) => cacheRealm.delete(c));
       });
+
       console.log("[ClassService] Background sync complete.");
     } catch (error) {
       console.warn("[ClassService] Background sync failed:", error);
@@ -422,6 +434,15 @@ export class ClassService {
     try {
       const docRef = doc(db, this.COLLECTION, classId);
       await deleteDoc(docRef);
+
+      // Remove from Realm cache
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      if (cached) {
+        cacheRealm.write(() => {
+          cacheRealm.delete(cached);
+        });
+      }
     } catch (error) {
       console.error("Error deleting class:", error);
       throw error;

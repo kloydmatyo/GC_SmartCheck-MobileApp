@@ -95,9 +95,8 @@ export default function ClassesScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
-const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
-const [blockPickerVisible, setBlockPickerVisible] = useState(false);
-const [deleting, setDeleting] = useState(false);
+  const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
+  const [deleting, setDeleting] = useState(false);
 
 const [classMenuPosition, setClassMenuPosition] = useState({
   top: 0,
@@ -138,13 +137,17 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     return "#EF4444";
   };
 
+  const YEAR_OPTIONS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
+
   // Form state
   const [formData, setFormData] = useState({
     class_name: "",
     course_subject: "",
     room: "",
-    section_block: "",
+    year: "",
+    school_year: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
   });
+  const [yearPickerVisible, setYearPickerVisible] = useState(false);
 
   // Fetch recent quizzes for each class (Optimized: uses ExamService Cache)
   const loadRecentQuizzes = async (classIds: string[]) => {
@@ -256,20 +259,30 @@ const [classMenuPosition, setClassMenuPosition] = useState({
   const trimmedForm = {
     class_name: formData.class_name.trim(),
     course_subject: formData.course_subject.trim(),
-    section_block: formData.section_block.trim(),
     room: formData.room.trim(),
+    school_year: formData.school_year.trim(),
   };
   const requiredFields = [
     trimmedForm.class_name,
     trimmedForm.course_subject,
-    trimmedForm.section_block,
-    trimmedForm.room,
+    formData.year,
   ];
   const hasMissingRequired = requiredFields.some((value) => !value);
-  const hasTooLong = requiredFields.some(
+  const hasClassNameTooShort = trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4;
+  const hasCourseSubjectTooShort = trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5;
+  const hasRoomInvalid = trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room);
+  const hasTooLong = [trimmedForm.class_name, trimmedForm.course_subject, trimmedForm.school_year].some(
     (value) => value.length > MAX_FIELD_LENGTH,
   );
-  const canCreateClass = !hasMissingRequired && !hasTooLong && !creating;
+  const canCreateClass =
+    !hasMissingRequired &&
+    !hasClassNameTooShort &&
+    !hasCourseSubjectTooShort &&
+    !hasRoomInvalid &&
+    !hasTooLong &&
+    trimmedForm.class_name.length >= 4 &&
+    trimmedForm.course_subject.length >= 5 &&
+    !creating;
 
   // Delete class
   const handleDeleteClass = async () => {
@@ -279,6 +292,9 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       setDeleting(true);
       await ClassService.deleteClass(selectedClass.id);
 
+      // Remove from local state immediately
+      setClasses((prev) => prev.filter((c) => c.id !== selectedClass.id));
+
       Toast.show({
         type: "delete_result",
         text1: "Success",
@@ -286,7 +302,6 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       });
 
       setDeleteConfirmVisible(false);
-      loadClasses();
     } catch (error) {
       console.error("Error deleting class:", error);
       Toast.show({
@@ -301,85 +316,56 @@ const [classMenuPosition, setClassMenuPosition] = useState({
 
   // Create new class
   const handleCreateClass = async () => {
-    // Validation
     if (!trimmedForm.class_name) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Program is required",
-      });
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
       return;
     }
-
+    if (trimmedForm.class_name.length < 4) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Class Name must be at least 4 characters" });
+      return;
+    }
     if (!trimmedForm.course_subject) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Course subject is required",
-      });
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course subject is required" });
       return;
     }
-
-    if (!trimmedForm.section_block) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Course block is required",
-      });
+    if (trimmedForm.course_subject.length < 5) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course Subject must be at least 5 characters" });
       return;
     }
-
-    if (!/^\d{3}$/.test(formData.room.trim())) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Room must be exactly 3 digits",
-      });
+    if (trimmedForm.room && !/^\d{3}$/.test(trimmedForm.room)) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Room must be exactly 3 digits (e.g. 101)" });
       return;
     }
-
     if (hasTooLong) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Each field must be 50 characters or fewer",
-      });
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Each field must be 50 characters or fewer" });
       return;
     }
 
     try {
       setCreating(true);
       await ClassService.createClass({
-        ...formData,
         class_name: trimmedForm.class_name,
         course_subject: trimmedForm.course_subject,
-        section_block: trimmedForm.section_block,
-        room: trimmedForm.room,
+        room: trimmedForm.room || undefined,
+        year: formData.year,
+        school_year: trimmedForm.school_year || undefined,
       });
 
-      Toast.show({
-        type: "success",
-        text1: "Success",
-        text2: "Class created successfully",
-      });
+      Toast.show({ type: "success", text1: "Success", text2: "Class created successfully" });
 
-      // Reset form
       setFormData({
         class_name: "",
         course_subject: "",
         room: "",
-        section_block: "",
+        year: "",
+        school_year: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
       });
 
       setModalVisible(false);
-      loadClasses(); // Reload classes
+      loadClasses();
     } catch (error) {
       console.error("Error creating class:", error);
-      Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to create class",
-      });
+      Toast.show({ type: "error", text1: "Error", text2: "Failed to create class" });
     } finally {
       setCreating(false);
     }
@@ -507,12 +493,15 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       await ClassService.deleteClass(classItem.id);
       setClassMenuVisible(false);
       setSelectedClass(null);
+
+      // Remove from local state immediately
+      setClasses((prev) => prev.filter((c) => c.id !== classItem.id));
+
       Toast.show({
         type: "delete_result",
         text1: "Deleted",
         text2: `${classItem.class_name} deleted successfully`,
       });
-      await loadClasses();
     } catch (error) {
       console.error("Error deleting class:", error);
       Toast.show({
@@ -668,59 +657,95 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.sheetLabel}>Class Name</Text>
+            <Text style={styles.sheetLabel}>
+              Program <Text style={styles.requiredStar}>*</Text>
+            </Text>
             <TextInput
-              style={styles.sheetInput}
-              placeholder="e.g. Biology 101"
+              style={[
+                styles.sheetInput,
+                trimmedForm.class_name.length >= 4 && styles.sheetInputValid,
+                trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4 && styles.sheetInputError,
+              ]}
+              placeholder="Enter program name"
               placeholderTextColor="#B5BCC8"
               maxLength={MAX_FIELD_LENGTH}
               value={formData.class_name}
-              onChangeText={(text) =>
-                setFormData({ ...formData, class_name: text })
-              }
+              onChangeText={(text) => setFormData({ ...formData, class_name: text })}
             />
+            {trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4 && (
+              <Text style={styles.fieldHint}>At least 4 characters required</Text>
+            )}
 
-            <Text style={styles.sheetLabel}>Program</Text>
+            <Text style={styles.sheetLabel}>
+              Course <Text style={styles.requiredStar}>*</Text>
+            </Text>
             <TextInput
-              style={styles.sheetInput}
-              placeholder="e.g. Science Dept"
+              style={[
+                styles.sheetInput,
+                trimmedForm.course_subject.length >= 5 && styles.sheetInputValid,
+                trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5 && styles.sheetInputError,
+              ]}
+              placeholder="Enter course subject"
               placeholderTextColor="#B5BCC8"
               maxLength={MAX_FIELD_LENGTH}
               value={formData.course_subject}
-              onChangeText={(text) =>
-                setFormData({ ...formData, course_subject: text })
-              }
+              onChangeText={(text) => setFormData({ ...formData, course_subject: text })}
             />
+            {trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5 && (
+              <Text style={styles.fieldHint}>At least 5 characters required</Text>
+            )}
+
+            <Text style={styles.sheetLabel}>
+              Year <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={[styles.sheetInput, styles.sheetPicker]}
+              onPress={() => setYearPickerVisible(true)}
+            >
+              <Text style={formData.year ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
+                {formData.year || "Select year level"}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#B5BCC8" />
+            </TouchableOpacity>
 
             <View style={styles.sheetRow}>
               <View style={styles.sheetHalf}>
-                <Text style={styles.sheetLabel}>Course Block</Text>
+                <Text style={styles.sheetLabel}>
+                  Room <Text style={styles.optionalLabel}>(Optional)</Text>
+                </Text>
                 <TextInput
-                  style={styles.sheetInput}
-                  placeholder="e.g. Period 1"
+                  style={[
+                    styles.sheetInput,
+                    trimmedForm.room.length === 3 && /^\d{3}$/.test(trimmedForm.room) && styles.sheetInputValid,
+                    trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room) && styles.sheetInputError,
+                  ]}
+                  placeholder="Enter room number (exactly 3 digits)"
                   placeholderTextColor="#B5BCC8"
-                  maxLength={MAX_FIELD_LENGTH}
-                  value={formData.section_block}
-                  onChangeText={(text) =>
-                    setFormData({ ...formData, section_block: text })
-                  }
-                />
-              </View>
-
-              <View style={styles.sheetHalf}>
-                <Text style={styles.sheetLabel}>Room</Text>
-                <TextInput
-                  style={styles.sheetInput}
-                  placeholder="e.g. Room 402"
-                  placeholderTextColor="#B5BCC8"
-                  maxLength={MAX_FIELD_LENGTH}
+                  keyboardType="numeric"
+                  maxLength={3}
                   value={formData.room}
-                  onChangeText={(text) =>
-                    setFormData({ ...formData, room: text })
-                  }
+                  onChangeText={(text) => {
+                    const digits = text.replace(/[^0-9]/g, "").slice(0, 3);
+                    setFormData({ ...formData, room: digits });
+                  }}
                 />
+                {trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room) && (
+                  <Text style={styles.fieldHint}>Exactly 3 digits</Text>
+                )}
               </View>
             </View>
+
+            <Text style={styles.sheetLabel}>
+              School Year <Text style={styles.optionalLabel}>(Auto-populated)</Text>
+            </Text>
+            <TextInput
+              style={[styles.sheetInput, styles.sheetInputValid]}
+              placeholder="e.g. 2025-2026"
+              placeholderTextColor="#B5BCC8"
+              maxLength={MAX_FIELD_LENGTH}
+              value={formData.school_year}
+              onChangeText={(text) => setFormData({ ...formData, school_year: text })}
+            />
           </ScrollView>
 
           <View style={styles.createScreenFooter}>
@@ -728,6 +753,12 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               <Text style={styles.validationText}>
                 {hasTooLong
                   ? "Keep each field under 50 characters."
+                  : hasClassNameTooShort
+                  ? "Class Name must be at least 4 characters."
+                  : hasCourseSubjectTooShort
+                  ? "Course Subject must be at least 5 characters."
+                  : hasRoomInvalid
+                  ? "Room must be exactly 3 digits."
                   : "Complete all required fields to continue."}
               </Text>
             )}
@@ -747,6 +778,55 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Year Picker Modal */}
+      <Modal
+        visible={yearPickerVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setYearPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setYearPickerVisible(false)}
+        >
+          <View style={styles.yearPickerContent}>
+            <Text style={styles.yearPickerTitle}>Select Year Level</Text>
+            {YEAR_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.yearPickerItem,
+                  formData.year === option && styles.yearPickerItemSelected,
+                ]}
+                onPress={() => {
+                  setFormData({ ...formData, year: option });
+                  setYearPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.yearPickerItemText,
+                    formData.year === option && styles.yearPickerItemTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={styles.yearPickerClear}
+              onPress={() => {
+                setFormData({ ...formData, year: "" });
+                setYearPickerVisible(false);
+              }}
+            >
+              <Text style={styles.yearPickerClearText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
       </Modal>
 
       <Modal
@@ -1091,6 +1171,96 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#111827",
+  },
+  sheetInputValid: {
+    borderColor: "#1FC27D",
+    backgroundColor: "#F0FDF8",
+  },
+  sheetInputError: {
+    borderColor: "#EF4444",
+    backgroundColor: "#FFF5F5",
+  },
+  sheetPicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetPickerValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetPickerPlaceholder: {
+    fontSize: 16,
+    color: "#B5BCC8",
+  },
+  requiredStar: {
+    color: "#EF4444",
+  },
+  optionalLabel: {
+    fontSize: 11,
+    fontWeight: "400",
+    color: "#9CA3AF",
+  },
+  fieldHint: {
+    fontSize: 11,
+    color: "#EF4444",
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  yearPickerContent: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 32,
+    paddingTop: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  yearPickerTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+    textAlign: "center",
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+    marginBottom: 8,
+  },
+  yearPickerItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+  },
+  yearPickerItemSelected: {
+    backgroundColor: "#F0FDF8",
+  },
+  yearPickerItemText: {
+    fontSize: 16,
+    color: "#374151",
+    fontWeight: "600",
+  },
+  yearPickerItemTextSelected: {
+    color: "#1FC27D",
+    fontWeight: "800",
+  },
+  yearPickerClear: {
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F5",
+  },
+  yearPickerClearText: {
+    fontSize: 15,
+    color: "#9CA3AF",
+    fontWeight: "600",
   },
   sheetRow: {
     flexDirection: "row",

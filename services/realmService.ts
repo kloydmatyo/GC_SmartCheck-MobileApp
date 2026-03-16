@@ -43,9 +43,9 @@ export class OfflineClass extends Realm.Object<OfflineClass> {
     _id!: Realm.BSON.ObjectId;
     class_name!: string;
     course_subject!: string;
-    room!: string;
-    section_block!: string;
-    students!: string; // JSON string because Realm arrays of objects are complex to sync 1:1 with Firestore easily without sub-schemas
+    room?: string;
+    section_block?: string;
+    students!: string;
     status!: string;
     createdBy!: string;
     createdAt!: Date;
@@ -57,8 +57,8 @@ export class OfflineClass extends Realm.Object<OfflineClass> {
             _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
             class_name: "string",
             course_subject: "string",
-            room: "string",
-            section_block: "string",
+            room: "string?",
+            section_block: "string?",
             students: "string",
             status: "string",
             createdBy: "string",
@@ -106,12 +106,12 @@ export class OfflineQuiz extends Realm.Object<OfflineQuiz> {
 // --- CACHE SCHEMAS (Local Firestore Mirror) ---
 
 export class ClassCache extends Realm.Object<ClassCache> {
-    id!: string; // Firestore ID
+    id!: string;
     class_name!: string;
     course_subject!: string;
-    room!: string;
-    section_block!: string;
-    students!: string; // JSON string
+    room?: string;
+    section_block?: string;
+    students!: string;
     createdBy!: string;
     updatedAt!: Date;
 
@@ -122,8 +122,8 @@ export class ClassCache extends Realm.Object<ClassCache> {
             id: "string",
             class_name: "string",
             course_subject: "string",
-            room: "string",
-            section_block: "string",
+            room: "string?",
+            section_block: "string?",
             students: "string",
             createdBy: "string",
             updatedAt: "date",
@@ -239,13 +239,23 @@ let cacheRealm: Realm | null = null;
 const STAGING_CONFIG: Realm.Configuration = {
     path: "staging.realm",
     schema: [OfflineGrade, OfflineClass, OfflineQuiz],
-    schemaVersion: 7,
+    schemaVersion: 8,
+    migration: (oldRealm, newRealm) => {
+        if (oldRealm.schemaVersion < 8) {
+            const oldObjects = oldRealm.objects<any>("OfflineClass");
+            const newObjects = newRealm.objects<any>("OfflineClass");
+            for (let i = 0; i < oldObjects.length; i++) {
+                newObjects[i].room = oldObjects[i].room ?? "";
+                newObjects[i].section_block = oldObjects[i].section_block ?? "";
+            }
+        }
+    },
 };
 
 const CACHE_CONFIG: Realm.Configuration = {
     path: "cache.realm",
     schema: [ClassCache, QuizCache, GradeCache, StudentCache],
-    schemaVersion: 8,
+    schemaVersion: 9,
     deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 
@@ -255,7 +265,20 @@ export class RealmService {
      */
     static async getStagingRealm(): Promise<Realm> {
         if (!stagingRealm || stagingRealm.isClosed) {
-            stagingRealm = await Realm.open(STAGING_CONFIG);
+            try {
+                stagingRealm = await Realm.open(STAGING_CONFIG);
+            } catch (error: any) {
+                // If already open with a different schema version, close and reopen
+                if (error?.message?.includes("already opened with different schema version")) {
+                    if (stagingRealm && !stagingRealm.isClosed) {
+                        stagingRealm.close();
+                    }
+                    stagingRealm = null;
+                    stagingRealm = await Realm.open(STAGING_CONFIG);
+                } else {
+                    throw error;
+                }
+            }
         }
         return stagingRealm;
     }
