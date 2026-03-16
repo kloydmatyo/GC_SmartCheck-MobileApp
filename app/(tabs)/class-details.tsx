@@ -44,6 +44,8 @@ import {
 
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
+import { ExamService } from "../../services/examService";
+import { StudentImportService } from "../../services/studentImportService";
 import { Class } from "../../types/class";
 
 type DetailTab = "students" | "exams" | "scan" | "stats";
@@ -247,48 +249,49 @@ export default function ClassDetailsScreen() {
         return;
       }
 
-      const examSnapshot = await getDocs(
-        query(collection(db, "exams"), where("createdBy", "==", currentUser.uid)),
-      );
+      // Use the optimized Local-First ExamService instead of direct Firestore call
+      // Force refresh of the service just in case there's a load order issue
+      const { ExamService } = await import("../../services/examService");
+      const allExams = await ExamService.getExamsByUser();
 
-      const linkedExams = examSnapshot.docs
-        .map((item) => {
-          const data = item.data();
-          const subject = String(data.subject || "General");
-          const title = String(data.title || "Untitled Exam");
-          const examCode = String(data.examCode || "").trim();
-          const questions =
-            Number(data.num_items || data.totalQuestions || 0) ||
-            (Array.isArray(data.questions) ? data.questions.length : 0) ||
-            (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0);
-          const linkedClassId = String(data.classId || "");
-          const linkedClassName = String(data.className || "");
-
-          return {
-            id: item.id,
-            title,
-            questions: questions || 0,
-            scans: 0,
-            average: 0,
-            subject,
-            examCode,
-            classId: linkedClassId,
-            className: linkedClassName,
-            isArchived: Boolean(data.isArchived),
-          };
-        })
+      const linkedExams = allExams
         .filter((exam) => {
           if (exam.isArchived) return false;
+          
+          // Match by classId or class name
           const className = classData.class_name.trim().toLowerCase();
-          return (
-            (exam.classId && exam.classId === classData.id) ||
-            (exam.className && exam.className.trim().toLowerCase() === className)
-          );
+          const matchesId = exam.classId && exam.classId === classData.id;
+          const matchesName = exam.className && exam.className.trim().toLowerCase() === className;
+          const matchesLegacyClass = exam.class && exam.class.trim().toLowerCase() === className;
+
+          return matchesId || matchesName || matchesLegacyClass;
+        })
+        .map((exam) => {
+          return {
+            id: exam.id,
+            title: exam.title || "Untitled Exam",
+            questions: exam.num_items || exam.totalQuestions || 0,
+            scans: exam.papers || 0,
+            average: 0, // Stats will be loaded below
+            subject: exam.class || exam.subject || "General",
+            examCode: exam.examCode || "",
+            classId: exam.classId,
+            className: exam.className,
+          } as ExamRow;
         });
 
+      if (requestId !== examLoadRequestRef.current) return;
+      setExamRows(linkedExams);
+
+      // Background update for stats
       const examsWithStats = await Promise.all(
         linkedExams.map(async (exam) => {
           try {
+            // Check if online before calling DashboardService (which might be slow)
+            const { NetworkService } = await import("@/services/networkService");
+            const isOnline = await NetworkService.isOnline();
+            if (!isOnline) return exam;
+
             const stats = await DashboardService.getExamStats(exam.id);
             return {
               ...exam,
@@ -868,7 +871,7 @@ export default function ClassDetailsScreen() {
               <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)}>
                 <Ionicons name="swap-vertical-outline" size={14} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.exportButton} onPress={handleExportStudents}>
+              <TouchableOpacity style={styles.exportButtonSmall} onPress={handleExportStudents}>
                 <Ionicons name="download-outline" size={14} color="#fff" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.importButton} onPress={() => setShowImportModal(true)}>
@@ -1582,7 +1585,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  exportButton: {
+  exportButtonSmall: {
     width: 28,
     height: 28,
     borderRadius: 14,

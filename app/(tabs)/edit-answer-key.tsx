@@ -4,6 +4,7 @@ import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
+import { ExamService } from "@/services/examService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
@@ -264,110 +265,53 @@ export default function EditAnswerKeyScreen() {
     try {
       setLoading(true);
 
-      // Check if we're online
+      // Get connectivity status for UI only
       const online = await NetworkService.isOnline();
       setIsOffline(!online);
 
-      if (online) {
-        try {
-          // Load exam data from Firebase
-          const examRef = doc(db, "exams", examId as string);
-          const examSnap = await getDoc(examRef);
+      // Use centralized ExamService to fetch data (handles Staging -> Cache -> Online)
+      const examData = await ExamService.getExamById(examId as string);
 
-          if (!examSnap.exists()) {
-            setStatusModal({
-              visible: true,
-              type: "error",
-              title: "Error",
-              message: "Exam not found",
-              onClose: goBack,
-            });
-            return;
-          }
-
-          const examData = examSnap.data();
-
-          const numItems = examData.num_items || 20;
-          const choices = examData.choices_per_item || 4;
-          setExamTitle(String(examData.title || "Untitled Exam"));
-          setExamCode(String(examData.examCode || "").trim());
-          setChoicesPerItem(choices);
-
-          const resolvedAnswerKey = await resolveAnswerKeyDoc(
-            examId as string,
-            examData.createdAt?.toMillis?.(),
-          );
-
-          setAnswerKeyId(resolvedAnswerKey.id);
-
-          const initialAnswers = resolvedAnswerKey.data
-            ? parseAnswersFromAnswerKey(resolvedAnswerKey.data, numItems)
-            : Array.from({ length: numItems }, (_, i) => ({
-              questionNumber: i + 1,
-              answer: "",
-            }));
-
-          setAnswers(initialAnswers);
-          const loadedVersion = Number(resolvedAnswerKey.data?.version ?? 1);
-          setAnswerKeyVersion(loadedVersion);
-          setRemoteVersion(loadedVersion);
-          setConflictDetected(false);
-          setHasLocalChanges(false);
-          return;
-        } catch (onlineError) {
-          console.warn(
-            "Failed loading live answer key, attempting offline fallback:",
-            onlineError,
-          );
-        }
-      }
-
-      // Offline fallback
-      const offlineExam = await OfflineStorageService.getDownloadedExam(
-        examId as string,
-      );
-
-      if (!offlineExam) {
+      if (!examData) {
         setStatusModal({
           visible: true,
           type: "error",
-          title: "Offline",
-          message:
-            "This exam is not available offline. Please connect to the internet or download it first.",
+          title: online ? "Error" : "Offline",
+          message: online
+            ? "Exam not found."
+            : "This exam is not available offline. Please connect to the internet to download it.",
           onClose: goBack,
         });
         return;
       }
 
-      const numItems = offlineExam.questions?.length || 20;
-      const choices = 4;
-      setExamTitle(String(offlineExam.title || "Untitled Exam"));
-      setExamCode(String((offlineExam as any).examCode || "").trim());
-      setChoicesPerItem(choices);
+      // Update UI with fetched data
+      setExamTitle(examData.metadata.title);
+      setExamCode(examData.metadata.examCode || "");
+      setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
 
-      const answerKeyIdStr = `ak_${examId}_offline`;
-      setAnswerKeyId(answerKeyIdStr);
-
-      const initialAnswers: QuestionAnswer[] = Array.from(
-        { length: numItems },
-        (_, i) => ({
-          questionNumber: i + 1,
-          answer: offlineExam.answerKey?.answers?.[i] || "",
-        }),
-      );
+      const numItems = examData.totalQuestions || 20;
+      const initialAnswers = Array.from({ length: numItems }, (_, i) => ({
+        questionNumber: i + 1,
+        answer: examData.answerKey?.answers?.[i] || "",
+      }));
 
       setAnswers(initialAnswers);
-      setAnswerKeyVersion(Number(offlineExam.version ?? 1));
-      setRemoteVersion(Number(offlineExam.version ?? 1));
+      setAnswerKeyId(examData.answerKey?.id || `ak_${examId}`);
+      const loadedVersion = Number(examData.answerKey?.version ?? 1);
+      setAnswerKeyVersion(loadedVersion);
+      setRemoteVersion(loadedVersion);
       setConflictDetected(false);
       setHasLocalChanges(false);
+
     } catch (error) {
-      console.error("Error loading answer key:", error);
+      console.error("[EditAnswerKey] Load error:", error);
       setStatusModal({
         visible: true,
         type: "error",
         title: "Error",
-        message: "Failed to load answer key",
+        message: "Failed to load exam data. Please try again.",
+        onClose: goBack,
       });
     } finally {
       setLoading(false);
@@ -402,6 +346,20 @@ export default function EditAnswerKeyScreen() {
       }
 
       const online = await NetworkService.isOnline();
+
+      // Handle Staging IDs directly
+      if (examId?.startsWith("staging_")) {
+        await ExamService.updateAnswerKey(examId as string, answers.map(a => a.answer));
+        setHasLocalChanges(false);
+        setStatusModal({
+          visible: true,
+          type: "success",
+          title: "Saved Offline",
+          message: "Answer key saved to local staging. It will sync when you are online.",
+          onClose: goBack,
+        });
+        return;
+      }
 
       if (!online) {
         // Save offline - queue for sync
@@ -440,6 +398,20 @@ export default function EditAnswerKeyScreen() {
       }
 
       // Online - save to Firebase
+      let activeId = answerKeyId;
+      if (activeId.includes("_offline")) {
+        const examRef = doc(db, "exams", examId as string);
+        const examSnap = await getDoc(examRef);
+        if (examSnap.exists()) {
+          const resolved = await resolveAnswerKeyDoc(
+            examId as string,
+            examSnap.data().createdAt?.toMillis?.(),
+          );
+          activeId = resolved.id;
+          setAnswerKeyId(activeId);
+        }
+      }
+
       if (conflictDetected || remoteVersion > answerKeyVersion) {
         setStatusModal({
           visible: true,
@@ -454,7 +426,7 @@ export default function EditAnswerKeyScreen() {
 
       let nextVersion = 1;
       const examRef = doc(db, "exams", examId as string);
-      const answerKeyRef = doc(db, "answerKeys", answerKeyId);
+      const answerKeyRef = doc(db, "answerKeys", activeId);
 
       await runTransaction(db, async (transaction) => {
         const [examSnap, answerKeySnap] = await Promise.all([
@@ -486,12 +458,17 @@ export default function EditAnswerKeyScreen() {
           updatedAt: serverTimestamp(),
           locked: false,
           version: nextVersion,
-          questionSettings: answers.map((item) => ({
-            questionNumber: item.questionNumber,
-            correctAnswer: item.answer,
-            points: 1,
-            choiceLabels: {},
-          })),
+          questionSettings: answers.map((item) => {
+            const existingSetting = (answerKeySnap.data()?.questionSettings || []).find(
+              (q: any) => q.questionNumber === item.questionNumber
+            );
+            return {
+              questionNumber: item.questionNumber,
+              correctAnswer: item.answer,
+              points: existingSetting?.points ?? 1,
+              choiceLabels: existingSetting?.choiceLabels ?? {},
+            };
+          }),
           numItems: answers.length,
         };
 
@@ -543,12 +520,7 @@ export default function EditAnswerKeyScreen() {
 
   const handleDownloadTemplate = async () => {
     try {
-      const totalQuestions = (() => {
-        const count = Math.max(answers.length, 1);
-        if (count <= 20) return 20;
-        if (count <= 50) return 50;
-        return 100;
-      })();
+      const totalQuestions = answers.length || 20;
       const rows: (string | number)[][] = [
         ["Question Number", "Answer"],
         ...Array.from({ length: totalQuestions }, (_, i) => [i + 1, ""]),

@@ -153,90 +153,37 @@ export default function ExamPreviewScreen() {
       const online = await NetworkService.isOnline().catch(() => true);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setIsOffline(!online);
-      let liveLoadError: unknown = null;
 
-      try {
-        const authorized = await ExamApi.isAuthorized(currentUser.uid, examId);
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        if (!authorized) {
-          setError("You are not authorized to view this exam.");
-          return;
-        }
-
-        const [examData, resultRows] = await Promise.all([
-          ExamApi.getExamById(examId),
-          ResultsService.getExamResults(examId).catch(() => []),
-        ]);
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        if (!examData) {
-          throw new Error("Exam not found in live data");
-        }
-
-        setIsOffline(false);
-        setExam(examData);
-        setExamResults(resultRows);
-        return;
-      } catch (liveError) {
-        liveLoadError = liveError;
-        console.warn(
-          "Failed to fetch live exam data, attempting offline fallback:",
-          liveError,
-        );
-      }
-
-      // Offline fallback
-      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+      // 1. Check Authorization (Local-First in Service)
+      const authorized = await ExamApi.isAuthorized(currentUser.uid, examId);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      if (!offlineExam) {
-        if (liveLoadError) {
-          const message =
-            liveLoadError instanceof Error && liveLoadError.message
-              ? liveLoadError.message
-              : "Failed to load exam data. Please try again.";
-          setError(message);
-        } else {
-          setError(
-            "This exam is not available offline. Please connect to the internet.",
-          );
-        }
+      if (!authorized) {
+        setError("You are not authorized to view this exam.");
         return;
       }
 
-      const examData: ExamPreviewData = {
-        metadata: {
-          examId,
-          examCode: String((offlineExam as any).examCode || examId),
-          title: offlineExam.title,
-          subject: "",
-          section: "",
-          date: offlineExam.createdAt.toISOString(),
-          status: "Active",
-          version: offlineExam.version,
-          createdAt: offlineExam.createdAt,
-          updatedAt: offlineExam.updatedAt,
-          createdBy: offlineExam.createdBy || "",
-        },
-        totalQuestions: offlineExam.questions?.length || 0,
-        choiceFormat: "A-D",
-        answerKey: {
-          id: `ak_${examId}_offline`,
-          examId,
-          answers: offlineExam.answerKey?.answers || [],
-          questionSettings: [],
-          locked: true,
-          createdAt: offlineExam.createdAt,
-          updatedAt: offlineExam.updatedAt,
-          createdBy: offlineExam.createdBy || "",
-          version: offlineExam.version || 1,
-        },
-        lastModified: offlineExam.updatedAt,
-      };
+      // 2. Fetch Exam Data and Results (Local-First in Service)
+      const [examData, resultRows] = await Promise.all([
+        ExamApi.getExamById(examId),
+        ResultsService.getExamResults(examId).catch((err) => {
+          console.warn("Failed to catch results, falling back to empty:", err);
+          return [];
+        }),
+      ]);
+
+      if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+      
+      if (!examData) {
+        setError("Exam not found. It may have been deleted or is not available on this device.");
+        return;
+      }
 
       setExam(examData);
+      setExamResults(resultRows);
     } catch (err) {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setError("Failed to load exam data. Please try again.");
-      console.error(err);
+      console.error("[ExamPreview] Load error:", err);
     } finally {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(false);

@@ -26,6 +26,7 @@ import {
 import Toast from "react-native-toast-message";
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
+import { ExamService } from "../../services/examService";
 import { Class } from "../../types/class";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -145,51 +146,38 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     section_block: "",
   });
 
-  // Fetch recent quizzes for each class
+  // Fetch recent quizzes for each class (Optimized: uses ExamService Cache)
   const loadRecentQuizzes = async (classIds: string[]) => {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser || classIds.length === 0) return;
 
-      const q = query(
-        collection(db, "exams"),
-        where("createdBy", "==", currentUser.uid),
-      );
-      const snapshot = await getDocs(q);
+      // Use the now optimized Local-First ExamService
+      const allExams = await ExamService.getExamsByUser();
 
       const byClass: Record<string, RecentQuiz[]> = {};
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const cid: string | undefined = data.classId;
+      
+      allExams.forEach((exam) => {
+        const cid = exam.classId;
+        // Also check if the 'class' field title matches if classId is missing (legacy)
         if (!cid || !classIds.includes(cid)) return;
-
-        const rawDate =
-          data.createdAt?.toDate?.() ||
-          (data.created_at ? new Date(data.created_at) : null);
-        const dateStr = rawDate
-          ? rawDate.toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })
-          : "";
 
         if (!byClass[cid]) byClass[cid] = [];
         byClass[cid].push({
-          id: docSnap.id,
-          title: data.title || "Untitled",
-          date: dateStr,
+          id: exam.id,
+          title: exam.title || "Untitled",
+          date: exam.date || "",
         });
       });
 
-      // Keep only 5 most recent per class (already sorted by Firestore insertion order)
+      // Keep only 5 most recent per class
       Object.keys(byClass).forEach((cid) => {
         byClass[cid] = byClass[cid].slice(0, 5);
       });
 
       setRecentQuizzes(byClass);
     } catch (error) {
-      console.error("Error loading recent quizzes:", error);
+      console.error("[ClassesScreen] Error loading recent quizzes:", error);
     }
   };
 
