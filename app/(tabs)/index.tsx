@@ -331,19 +331,14 @@ export default function HomeScreen() {
           setTeacherEmail(email);
         }
 
-        const [classesSnapshot, unifiedResults] = await Promise.all([
-          getDocs(
-            query(
-              collection(db, "classes"),
-              where("createdBy", "==", currentUser.uid),
-            ),
-          ),
+        // Use optimized local-first ClassService
+        const { ClassService } = await import("../../services/classService");
+        
+        const [classDocs, unifiedResults] = await Promise.all([
+          ClassService.getClassesByUser(),
           ResultsService.getUnifiedResults(),
         ]);
 
-        const classDocs = classesSnapshot.docs
-          .map((doc) => doc.data())
-          .filter((item) => !item.isArchived);
         const scanRows = unifiedResults.rows.filter(
           (item) => item.source === "scan",
         );

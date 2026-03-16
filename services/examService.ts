@@ -14,28 +14,82 @@ import { OfflineQuiz, QuizCache, RealmService } from "./realmService";
 
 export class ExamService {
   /**
-   * Get all exams for the current user (Cache + Staging)
+   * Get all exams for the current user (Local-First: Cache + Staging)
    */
   static async getExamsByUser(): Promise<any[]> {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) return [];
 
-      const { NetworkService } = await import("./networkService");
-      const isOnline = await NetworkService.isOnline();
-
+      // 1. Load from Staging & Cache Realm - FASTEST
       const stagingRealm = await RealmService.getStagingRealm();
       const staging = stagingRealm.objects<OfflineQuiz>("OfflineQuiz");
 
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objects<QuizCache>("QuizCache");
+
+      const localExams: any[] = [];
+
+      cached.forEach((q) => {
+        localExams.push({
+          id: q.id,
+          title: q.title,
+          class: q.subject, // Map subject to class for UI consistency
+          classId: (q as any).classId || "", // We should ideally have classId in Cache
+          date: q.createdAt.toLocaleDateString(),
+          createdAt: q.createdAt,
+          updatedAt: q.updatedAt,
+          papers: q.papersCount,
+          status: q.status,
+          num_items: q.questionCount,
+          choices_per_item: q.choicesPerItem || 4,
+          isDownloaded: true,
+          isStaging: false,
+        });
+      });
+
+      staging.forEach((s) => {
+        localExams.push({
+          id: `staging_${s._id.toHexString()}`,
+          title: s.title,
+          class: s.subject,
+          classId: (s as any).classId || "",
+          date: s.createdAt.toLocaleDateString(),
+          createdAt: s.createdAt,
+          updatedAt: s.createdAt,
+          papers: 0,
+          status: s.status,
+          num_items: s.questionCount,
+          choices_per_item: s.choicesPerItem || 4,
+          isStaging: true,
+          isDownloaded: true,
+        });
+      });
+
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (localExams.length > 0) {
+        console.log(`[ExamService] Returning ${localExams.length} local exams instantly.`);
+        
+        // Match ClassService pattern: refresh background if online
+        if (isOnline) {
+             this.backgroundSyncExams(currentUser.uid).catch(err => 
+                 console.error("[ExamService] Background sync failed:", err)
+             );
+        }
+        
+        return localExams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      }
+
       if (isOnline) {
-        console.log("[ExamService] Online. Fetching from Firestore...");
+        console.log("[ExamService] No local exams, fetching from Firestore...");
         const q = query(
           collection(db, "exams"),
           where("createdBy", "==", currentUser.uid),
         );
         const snap = await getDocs(q);
-        const cacheRealm = await RealmService.getCacheRealm();
-
+        
         const examIds = snap.docs.map((doc) => doc.id);
         const answerKeysMap: Record<string, any> = {};
 
@@ -57,7 +111,6 @@ export class ExamService {
           akSnap.docs.forEach((doc) => {
             const data = doc.data();
             const eId = data.examId;
-            // Keep the latest version if multiple exist
             if (
               !answerKeysMap[eId] ||
               (data.version || 0) > (answerKeysMap[eId].version || 0)
@@ -67,14 +120,12 @@ export class ExamService {
           });
         }
 
-        // Cache the newly fetched data in realmdb.primary
+        // Update cache
         cacheRealm.write(() => {
           snap.docs.forEach((docSnap) => {
             const data = docSnap.data();
             const eId = docSnap.id;
-            const akJson = answerKeysMap[eId]
-              ? JSON.stringify(answerKeysMap[eId])
-              : "";
+            const akJson = answerKeysMap[eId] ? JSON.stringify(answerKeysMap[eId]) : "";
 
             cacheRealm.create(
               "QuizCache",
@@ -98,25 +149,25 @@ export class ExamService {
           });
         });
 
-        // Map data for UI components
-        const firestoreExams = snap.docs.map((doc) => {
+        // Map results for UI
+        const firestoreExams = snap.docs.map((docSnap) => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
-            ...doc.data(),
-            title: doc.data().title || "Untitled Exam",
-            class: doc.data().subject || doc.data().className || "No Subject",
-            date: doc.data().created_at || "No Date",
-            papers: doc.data().scanned_papers || 0,
-            status: doc.data().status || "Draft",
-            isDownloaded: true, // Always true now because we just cached it!
+            id: docSnap.id,
+            ...data,
+            title: data.title || "Untitled Exam",
+            class: data.subject || data.className || "No Subject",
+            date: data.created_at || (data.createdAt?.toDate?.().toLocaleDateString()) || "No Date",
+            papers: data.scanned_papers || 0,
+            status: data.status || "Draft",
+            isDownloaded: true,
             isStaging: false,
           };
         });
 
-        const results = [...firestoreExams];
-        // Add staging exams that aren't synced yet
+        const combined = [...firestoreExams];
         staging.forEach((s) => {
-          results.push({
+          combined.push({
             id: `staging_${s._id.toHexString()}`,
             title: s.title,
             class: s.subject,
@@ -124,48 +175,87 @@ export class ExamService {
             papers: 0,
             status: s.status,
             isStaging: true,
-            isDownloaded: true, // Staging is local, so it's "downloaded"
+            isDownloaded: true,
           } as any);
         });
-        return results;
+        return combined;
       }
 
-      console.log("[ExamService] Offline. Falling back to Realm Cache...");
-      const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objects<QuizCache>("QuizCache");
-
-      const localExams: any[] = [];
-
-      cached.forEach((q) => {
-        localExams.push({
-          id: q.id,
-          title: q.title,
-          class: q.subject,
-          date: q.createdAt.toLocaleDateString(),
-          papers: q.papersCount,
-          status: q.status,
-          isDownloaded: true,
-          isStaging: false,
-        });
-      });
-
-      staging.forEach((s) => {
-        localExams.push({
-          id: `staging_${s._id.toHexString()}`,
-          title: s.title,
-          class: s.subject,
-          date: s.createdAt.toLocaleDateString(),
-          papers: 0,
-          status: s.status,
-          isDownloaded: true, // Staging is local
-          isStaging: true,
-        });
-      });
-
       return localExams;
-    } catch (err) {
-      console.error("Error in getExamsByUser:", err);
-      return [];
+    } catch (error) {
+      console.error("Error fetching exams:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Background sync exams and answer keys from Firestore to Realm Cache
+   */
+  private static async backgroundSyncExams(userId: string): Promise<void> {
+    try {
+      const cacheRealm = await RealmService.getCacheRealm();
+      const q = query(
+        collection(db, "exams"),
+        where("createdBy", "==", userId),
+      );
+      const snap = await getDocs(q);
+      
+      const examIds = snap.docs.map((doc) => doc.id);
+      const answerKeysMap: Record<string, any> = {};
+
+      // Fetch answer keys in chunks of 30
+      const chunkArray = (arr: string[], size: number) =>
+        Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+          arr.slice(i * size, i * size + size),
+        );
+
+      const chunks = chunkArray(examIds, 30);
+      for (const chunk of chunks) {
+        if (chunk.length === 0) continue;
+        const akQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "in", chunk),
+        );
+        const akSnap = await getDocs(akQuery);
+        akSnap.docs.forEach((doc) => {
+          const data = doc.data();
+          const eId = data.examId;
+          if (!answerKeysMap[eId] || (data.version || 0) > (answerKeysMap[eId].version || 0)) {
+            answerKeysMap[eId] = data;
+          }
+        });
+      }
+
+      cacheRealm.write(() => {
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const eId = docSnap.id;
+          const akJson = answerKeysMap[eId] ? JSON.stringify(answerKeysMap[eId]) : "";
+
+          cacheRealm.create(
+            "QuizCache",
+            {
+              id: eId,
+              title: data.title || "Untitled Exam",
+              subject: data.subject || data.className || "No Subject",
+              status: data.status || "Draft",
+              papersCount: data.scanned_papers || 0,
+              questionCount: data.num_items || 0,
+              answerKey: akJson,
+              createdBy: data.createdBy,
+              createdAt: data.createdAt?.toDate?.() || new Date(),
+              updatedAt: data.updatedAt?.toDate?.() || new Date(),
+              instructorId: data.instructorId || "",
+              examCode: data.examCode || data.room || "",
+              choicesPerItem: data.choices_per_item || 4,
+            },
+            Realm.UpdateMode.Modified,
+          );
+        });
+      });
+      console.log("[ExamService] Background sync complete.");
+    } catch (error) {
+      console.warn("[ExamService] Background sync failed:", error);
     }
   }
 
@@ -194,7 +284,26 @@ export class ExamService {
 
         if (sQuiz) {
           stagingRealm.write(() => {
-            sQuiz.answerKey = JSON.stringify({ answers });
+            const currentAnswers = JSON.parse(sQuiz.answerKey || '{"questionSettings":[]}');
+            const questionSettings = answers.map((ans, idx) => {
+              const existing = (currentAnswers.questionSettings || []).find(
+                (q: any) => q.questionNumber === idx + 1
+              );
+              return {
+                questionNumber: idx + 1,
+                correctAnswer: ans,
+                points: existing?.points ?? 1,
+                choiceLabels: existing?.choiceLabels ?? {}
+              };
+            });
+
+            sQuiz.answerKey = JSON.stringify({
+              answers,
+              questionSettings,
+              numItems: answers.length,
+              version: (currentAnswers.version || 1) + 1,
+              updatedAt: new Date().toISOString()
+            });
           });
           return;
         }
@@ -339,10 +448,7 @@ export class ExamService {
       console.log("[ExamService] ===== FETCHING EXAM =====");
       console.log("[ExamService] Exam ID:", examId);
 
-      const { NetworkService } = await import("./networkService");
-      const isOnline = await NetworkService.isOnline();
-
-      // 0. Handle Staging IDs directly
+      // 0. Handle Staging IDs directly - FASTEST & HIGHEST PRIORITY
       if (examId.startsWith("staging_")) {
         console.log("[ExamService] Resolving Staging Exam ID:", examId);
         const stagingRealm = await RealmService.getStagingRealm();
@@ -395,16 +501,16 @@ export class ExamService {
             },
             answerKey: answerKeyData
               ? {
-                  id: `ak_${examId}`,
-                  examId: examId,
-                  answers: extractedAnswers,
-                  questionSettings: answerKeyData.questionSettings || [],
-                  locked: false,
-                  createdAt: sQuiz.createdAt,
-                  updatedAt: sQuiz.createdAt,
-                  createdBy: sQuiz.createdBy,
-                  version: 1,
-                }
+                id: `ak_${examId}`,
+                examId: examId,
+                answers: extractedAnswers,
+                questionSettings: answerKeyData.questionSettings || [],
+                locked: false,
+                createdAt: sQuiz.createdAt,
+                updatedAt: sQuiz.createdAt,
+                createdBy: sQuiz.createdBy,
+                version: 1,
+              }
               : (null as any),
             templateLayout: {
               name: "Standard Template",
@@ -419,80 +525,124 @@ export class ExamService {
           };
         }
       }
-      if (!isOnline) {
-        const cacheRealm = await RealmService.getCacheRealm();
-        const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>(
-          "QuizCache",
-          examId,
-        );
 
-        if (cachedQuiz) {
-          console.log("[ExamService] Found exam in Cache Realm (Offline)");
-          const answerKeyData = cachedQuiz.answerKey
-            ? JSON.parse(cachedQuiz.answerKey)
-            : null;
-          const totalQuestions = cachedQuiz.questionCount || 20;
+      // 1. Check Cache Realm (Local Mirror) - FAST
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>(
+        "QuizCache",
+        examId,
+      );
 
-          const extractedAnswers: string[] = [];
-          if (answerKeyData?.questionSettings) {
-            for (let i = 0; i < totalQuestions; i++) {
-              const setting = answerKeyData.questionSettings.find(
-                (qs: any) => qs.questionNumber === i + 1,
-              );
-              extractedAnswers.push(setting?.correctAnswer || "");
-            }
-          } else if (
-            answerKeyData?.answers &&
-            Array.isArray(answerKeyData.answers)
-          ) {
-            for (let i = 0; i < totalQuestions; i++) {
-              extractedAnswers.push(answerKeyData.answers[i] || "");
-            }
-          } else {
-            for (let i = 0; i < totalQuestions; i++) {
-              extractedAnswers.push("");
-            }
+      if (cachedQuiz) {
+        console.log("[ExamService] Found exam in Cache Realm (Fast Path)");
+        const answerKeyData = cachedQuiz.answerKey
+          ? JSON.parse(cachedQuiz.answerKey)
+          : null;
+        const totalQuestions = cachedQuiz.questionCount || 20;
+
+        const extractedAnswers: string[] = [];
+        if (answerKeyData?.questionSettings) {
+          for (let i = 0; i < totalQuestions; i++) {
+            const setting = answerKeyData.questionSettings.find(
+              (qs: any) => qs.questionNumber === i + 1,
+            );
+            extractedAnswers.push(setting?.correctAnswer || "");
           }
-
-          return {
-            metadata: {
-              examId: cachedQuiz.id,
-              title: cachedQuiz.title,
-              subject: cachedQuiz.subject,
-              section: "", // Optional
-              date: cachedQuiz.createdAt.toISOString(),
-              examCode: cachedQuiz.examCode || "N/A",
-              status: cachedQuiz.status as any,
-              createdAt: cachedQuiz.createdAt,
-              updatedAt: cachedQuiz.updatedAt,
-              createdBy: cachedQuiz.createdBy,
-              version: 1,
-            },
-            answerKey: answerKeyData
-              ? {
-                  id: answerKeyData.id || "",
-                  examId: examId,
-                  answers: extractedAnswers,
-                  questionSettings: answerKeyData.questionSettings || [],
-                  locked: answerKeyData.locked || false,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                  createdBy: "",
-                  version: 1,
-                }
-              : (null as any),
-            templateLayout: {
-              name: "Standard Template",
-              totalQuestions: totalQuestions,
-              choiceFormat: "A-D", // Default
-              columns: 2,
-              questionsPerColumn: Math.ceil(totalQuestions / 2),
-            },
-            totalQuestions: totalQuestions,
-            choiceFormat: "A-D",
-            lastModified: cachedQuiz.updatedAt,
-          };
+        } else if (
+          answerKeyData?.answers &&
+          Array.isArray(answerKeyData.answers)
+        ) {
+          for (let i = 0; i < totalQuestions; i++) {
+            extractedAnswers.push(answerKeyData.answers[i] || "");
+          }
+        } else {
+          for (let i = 0; i < totalQuestions; i++) {
+            extractedAnswers.push("");
+          }
         }
+
+        return {
+          metadata: {
+            examId: cachedQuiz.id,
+            title: cachedQuiz.title,
+            subject: cachedQuiz.subject,
+            section: "",
+            date: cachedQuiz.createdAt.toISOString(),
+            examCode: cachedQuiz.examCode || "N/A",
+            status: cachedQuiz.status as any,
+            createdAt: cachedQuiz.createdAt,
+            updatedAt: cachedQuiz.updatedAt,
+            createdBy: cachedQuiz.createdBy,
+            version: 1,
+          },
+          answerKey: answerKeyData
+            ? {
+              id: answerKeyData.id || "",
+              examId: examId,
+              answers: extractedAnswers,
+              questionSettings: answerKeyData.questionSettings || [],
+              locked: answerKeyData.locked || false,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              createdBy: "",
+              version: 1,
+            }
+            : (null as any),
+          templateLayout: {
+            name: "Standard Template",
+            totalQuestions: totalQuestions,
+            choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+            columns: 2,
+            questionsPerColumn: Math.ceil(totalQuestions / 2),
+          },
+          totalQuestions: totalQuestions,
+          choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+          lastModified: cachedQuiz.updatedAt,
+        };
+      }
+
+      // 1.5. Check OfflineStorageService (Legacy/Persistence Fallback) - FAST
+      const { OfflineStorageService } = await import("./offlineStorageService");
+      const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
+      if (offlineExam) {
+        console.log("[ExamService] Found exam in OfflineStorageService (Persistence Path)");
+        return {
+          metadata: {
+            examId: examId,
+            examCode: String((offlineExam as any).examCode || examId),
+            title: offlineExam.title,
+            subject: "",
+            section: "",
+            date: offlineExam.createdAt.toISOString(),
+            status: "Active",
+            version: offlineExam.version,
+            createdAt: offlineExam.createdAt,
+            updatedAt: offlineExam.updatedAt,
+            createdBy: offlineExam.createdBy || "",
+          },
+          totalQuestions: offlineExam.questions?.length || 0,
+          choiceFormat: "A-D",
+          answerKey: {
+            id: `ak_${examId}_offline`,
+            examId,
+            answers: offlineExam.answerKey?.answers || [],
+            questionSettings: [],
+            locked: true,
+            createdAt: offlineExam.createdAt,
+            updatedAt: offlineExam.updatedAt,
+            createdBy: offlineExam.createdBy || "",
+            version: offlineExam.version || 1,
+          },
+          lastModified: offlineExam.updatedAt,
+        };
+      }
+
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (!isOnline) {
+        console.log("[ExamService] Device offline and no cache found for:", examId);
+        return null;
       }
 
       // 2. Fetch from Firebase (Always if online, or fallback if cache miss)
@@ -840,16 +990,42 @@ export class ExamService {
   static async isAuthorized(userId: string, examId: string): Promise<boolean> {
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser) {
+      if (!currentUser) return false;
+
+      // 1. Check Staging Realm (Offline creation)
+      if (examId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        try {
+          const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+            "OfflineQuiz",
+            new Realm.BSON.ObjectId(hexId),
+          );
+          return sQuiz ? sQuiz.createdBy === currentUser.uid : false;
+        } catch (e) {
+          console.warn("[ExamService] Failed to find staging exam in isAuthorized:", e);
+          return false;
+        }
+      }
+
+      // 2. Check Cache Realm (Synced data)
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+      if (cachedQuiz) {
+        return cachedQuiz.createdBy === currentUser.uid;
+      }
+
+      // 3. Fallback to Firestore ONLY if online
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+      
+      if (!isOnline) {
+        console.log("[ExamService] Offline and not found in cache. Access denied by default.");
         return false;
       }
 
-      const examRef = doc(db, "exams", examId);
-      const examSnap = await getDoc(examRef);
-
-      if (!examSnap.exists()) {
-        return false;
-      }
+      const examSnap = await getDoc(doc(db, "exams", examId));
+      if (!examSnap.exists()) return false;
 
       const examData = examSnap.data();
       return examData.createdBy === currentUser.uid;
@@ -1049,6 +1225,10 @@ export class ExamService {
    */
   static async hasActiveScanSession(examId: string): Promise<boolean> {
     try {
+      const { NetworkService } = await import("./networkService");
+      const online = await NetworkService.isOnline();
+      if (!online) return false;
+
       const { collection, query, where, getDocs } =
         await import("firebase/firestore");
 
@@ -1062,8 +1242,6 @@ export class ExamService {
       return !querySnapshot.empty;
     } catch (error) {
       console.error("Error checking scan sessions:", error);
-      // Return false if collection doesn't exist or no permissions
-      // This allows the edit functionality to continue working
       return false;
     }
   }

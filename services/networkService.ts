@@ -43,8 +43,14 @@ export class NetworkService {
    */
   static async isOnline(): Promise<boolean> {
     try {
+      // If we already have a status from the listener, use it for speed
+      if (this.unsubscribe) {
+        return this.isConnected;
+      }
+      
       const state = await NetInfo.fetch();
-      return state.isConnected ?? false;
+      this.isConnected = state.isConnected ?? false;
+      return this.isConnected;
     } catch (error) {
       console.error("Error checking network status:", error);
       return false;

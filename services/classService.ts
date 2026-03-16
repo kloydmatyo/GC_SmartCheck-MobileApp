@@ -121,51 +121,14 @@ export class ClassService {
   }
 
   /**
-   * Get all classes for the current user
+   * Get all classes for the current user (Local-First: Cache + Staging)
    */
   static async getClassesByUser(): Promise<Class[]> {
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser) throw new Error("User must be authenticated");
+      if (!currentUser) return [];
 
-      const isOnline = await NetworkService.isOnline();
-
-      if (isOnline) {
-        console.log("[ClassService] Online. Fetching from Firestore...");
-        const q = query(
-          collection(db, this.COLLECTION),
-          where("createdBy", "==", currentUser.uid),
-        );
-        const querySnapshot = await getDocs(q);
-        const classes: Class[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          const createdAt =
-            data.createdAt?.toDate?.() ??
-            (data.created_at ? new Date(data.created_at) : undefined);
-          const updatedAt =
-            data.updatedAt?.toDate?.() ??
-            (data.updated_at ? new Date(data.updated_at) : undefined);
-
-          classes.push({
-            id: doc.id,
-            class_name: data.class_name,
-            course_subject: data.course_subject,
-            room: data.room,
-            section_block: data.section_block,
-            students: data.students || [],
-            instructorId: data.instructorId,
-            createdBy: data.createdBy,
-            created_at: data.created_at,
-            createdAt,
-            updatedAt,
-          });
-        });
-        return classes;
-      }
-
-      // Offline Fallback: Load from Cache + Staging
-      console.log("[ClassService] Offline. Falling back to Realm Cache...");
+      // 1. Load from Staging & Cache Realm - FASTEST
       const cacheRealm = await RealmService.getCacheRealm();
       const cached = cacheRealm.objects<ClassCache>("ClassCache");
 
@@ -204,6 +167,90 @@ export class ClassService {
         });
       });
 
+      // --- LOCAL-FIRST OPTIMIZATION ---
+      // If we have local data, return it IMMEDIATELY for instant UI responsiveness.
+      // We only fetch from Firestore if we're online AND (we have no local data OR we want to background-sync).
+      
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (localClasses.length > 0) {
+        console.log(`[ClassService] Returning ${localClasses.length} local classes instantly.`);
+        
+        // Optional: Trigger background refresh if online without awaiting it
+        if (isOnline) {
+          this.backgroundSyncClasses(currentUser.uid).catch(err => 
+            console.error("[ClassService] Background sync failed:", err)
+          );
+        }
+        
+        return localClasses.sort((a, b) => getClassSortTime(b) - getClassSortTime(a));
+      }
+
+      if (isOnline) {
+        console.log("[ClassService] No local classes, fetching from Firestore...");
+        const q = query(
+          collection(db, this.COLLECTION),
+          where("createdBy", "==", currentUser.uid),
+        );
+        const querySnapshot = await getDocs(q);
+        const firestoreClasses: Class[] = [];
+        
+        // Update Cache Realm with fresh data
+        cacheRealm.write(() => {
+          querySnapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const createdAt = data.createdAt?.toDate?.() ?? (data.created_at ? new Date(data.created_at) : new Date());
+            const updatedAt = data.updatedAt?.toDate?.() ?? (data.updated_at ? new Date(data.updated_at) : new Date());
+
+            const cls: Class = {
+              id: docSnap.id,
+              class_name: data.class_name,
+              course_subject: data.course_subject,
+              room: data.room,
+              section_block: data.section_block,
+              students: data.students || [],
+              instructorId: data.instructorId,
+              createdBy: data.createdBy,
+              created_at: data.created_at,
+              createdAt,
+              updatedAt,
+            };
+            firestoreClasses.push(cls);
+
+            cacheRealm.create("ClassCache", {
+              id: docSnap.id,
+              class_name: data.class_name,
+              course_subject: data.course_subject,
+              room: data.room ?? "",
+              section_block: data.section_block ?? "",
+              students: JSON.stringify(data.students || []),
+              createdBy: data.createdBy,
+              updatedAt: updatedAt,
+            }, Realm.UpdateMode.Modified);
+          });
+        });
+
+        // Combine with staging (not yet synced)
+        const combined = [...firestoreClasses];
+        staging.forEach((s) => {
+          combined.push({
+            id: `staging_${s._id.toHexString()}`,
+            class_name: s.class_name,
+            course_subject: s.course_subject,
+            room: s.room,
+            section_block: s.section_block,
+            students: JSON.parse(s.students || "[]"),
+            createdBy: s.createdBy,
+            created_at: s.createdAt.toISOString(),
+            createdAt: s.createdAt,
+            updatedAt: s.createdAt,
+          });
+        });
+
+        return combined;
+      }
+
       return localClasses;
     } catch (error) {
       console.error("Error fetching classes:", error);
@@ -212,32 +259,137 @@ export class ClassService {
   }
 
   /**
-   * Get a single class by ID
+   * Get a single class by ID (Local-First)
    */
+  /**
+   * Background sync classes from Firestore to Realm Cache
+   */
+  private static async backgroundSyncClasses(userId: string): Promise<void> {
+    try {
+      const cacheRealm = await RealmService.getCacheRealm();
+      const q = query(
+        collection(db, this.COLLECTION),
+        where("createdBy", "==", userId),
+      );
+      const querySnapshot = await getDocs(q);
+
+      cacheRealm.write(() => {
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          const updatedAt =
+            data.updatedAt?.toDate?.() ??
+            (data.updated_at ? new Date(data.updated_at) : new Date());
+
+          cacheRealm.create(
+            "ClassCache",
+            {
+              id: docSnap.id,
+              class_name: data.class_name,
+              course_subject: data.course_subject,
+              room: data.room ?? "",
+              section_block: data.section_block ?? "",
+              students: JSON.stringify(data.students || []),
+              createdBy: data.createdBy,
+              updatedAt: updatedAt,
+            },
+            Realm.UpdateMode.Modified,
+          );
+        });
+      });
+      console.log("[ClassService] Background sync complete.");
+    } catch (error) {
+      console.warn("[ClassService] Background sync failed:", error);
+    }
+  }
+
   static async getClassById(classId: string): Promise<Class | null> {
     try {
-      const docRef = doc(db, this.COLLECTION, classId);
-      const docSnap = await getDoc(docRef);
-
-      if (!docSnap.exists()) {
-        return null;
+      // 0. Handle Staging IDs
+      if (classId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = classId.replace("staging_", "");
+        const sClass = stagingRealm.objectForPrimaryKey<OfflineClass>(
+          "OfflineClass", 
+          new Realm.BSON.ObjectId(hexId)
+        );
+        
+        if (sClass) {
+          return {
+            id: classId,
+            class_name: sClass.class_name,
+            course_subject: sClass.course_subject,
+            room: sClass.room,
+            section_block: sClass.section_block,
+            students: JSON.parse(sClass.students || "[]"),
+            createdBy: sClass.createdBy,
+            created_at: sClass.createdAt.toISOString(),
+            createdAt: sClass.createdAt,
+            updatedAt: sClass.createdAt,
+          };
+        }
       }
 
-      const data = docSnap.data();
-      return {
-        id: docSnap.id,
-        class_name: data.class_name,
-        course_subject: data.course_subject,
-        room: data.room,
-        section_block: data.section_block,
-        students: data.students || [],
-        instructorId: data.instructorId,
-        isArchived: data.isArchived || false,
-        createdBy: data.createdBy,
-        created_at: data.created_at,
-        createdAt: data.createdAt?.toDate(),
-        updatedAt: data.updatedAt?.toDate(),
-      };
+      // 1. Check Cache Realm - FAST
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      
+      if (cached) {
+        return {
+          id: cached.id,
+          class_name: cached.class_name,
+          course_subject: cached.course_subject,
+          room: cached.room,
+          section_block: cached.section_block,
+          students: JSON.parse(cached.students || "[]"),
+          createdBy: cached.createdBy,
+          created_at: cached.updatedAt.toISOString(),
+          createdAt: cached.updatedAt,
+          updatedAt: cached.updatedAt,
+        };
+      }
+
+      // 2. Fallback to Firebase if online
+      const { NetworkService } = await import("./networkService");
+      if (await NetworkService.isOnline()) {
+        const docRef = doc(db, this.COLLECTION, classId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const cls = {
+            id: docSnap.id,
+            class_name: data.class_name,
+            course_subject: data.course_subject,
+            room: data.room,
+            section_block: data.section_block,
+            students: data.students || [],
+            instructorId: data.instructorId,
+            isArchived: data.isArchived || false,
+            createdBy: data.createdBy,
+            created_at: data.created_at,
+            createdAt: data.createdAt?.toDate(),
+            updatedAt: data.updatedAt?.toDate(),
+          };
+
+          // Update cache
+          cacheRealm.write(() => {
+            cacheRealm.create("ClassCache", {
+              id: docSnap.id,
+              class_name: data.class_name,
+              course_subject: data.course_subject,
+              room: data.room ?? "",
+              section_block: data.section_block ?? "",
+              students: JSON.stringify(data.students || []),
+              createdBy: data.createdBy,
+              updatedAt: cls.updatedAt || new Date(),
+            }, Realm.UpdateMode.Modified);
+          });
+
+          return cls;
+        }
+      }
+
+      return null;
     } catch (error) {
       console.error("Error fetching class:", error);
       throw error;

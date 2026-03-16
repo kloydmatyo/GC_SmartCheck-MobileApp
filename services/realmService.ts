@@ -199,6 +199,38 @@ export class GradeCache extends Realm.Object<GradeCache> {
     };
 }
 
+export class StudentCache extends Realm.Object<StudentCache> {
+    id!: string;
+    student_id!: string;
+    first_name!: string;
+    last_name!: string;
+    grade?: string;
+    email?: string;
+    section?: string;
+    is_active!: boolean;
+    createdBy!: string;
+    created_at!: string;
+    updated_at!: string;
+
+    static schema: Realm.ObjectSchema = {
+        name: "StudentCache",
+        primaryKey: "id",
+        properties: {
+            id: "string",
+            student_id: { type: "string", indexed: true },
+            first_name: "string",
+            last_name: "string",
+            grade: "string?",
+            email: "string?",
+            section: "string?",
+            is_active: { type: "bool", default: true },
+            createdBy: "string",
+            created_at: "string",
+            updated_at: "string",
+        },
+    };
+}
+
 // --- REALM INSTANCE MANAGEMENT ---
 
 let stagingRealm: Realm | null = null;
@@ -212,8 +244,8 @@ const STAGING_CONFIG: Realm.Configuration = {
 
 const CACHE_CONFIG: Realm.Configuration = {
     path: "cache.realm",
-    schema: [ClassCache, QuizCache, GradeCache],
-    schemaVersion: 7,
+    schema: [ClassCache, QuizCache, GradeCache, StudentCache],
+    schemaVersion: 8,
     deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 
