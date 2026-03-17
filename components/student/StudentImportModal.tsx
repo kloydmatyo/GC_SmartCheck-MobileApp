@@ -147,6 +147,7 @@ export function StudentImportModal({
         selectedFile.mimeType || "text/csv",
         fileContent,
         (nextProgress) => setProgress(nextProgress),
+        selectedClassId ?? undefined,
       );
 
       setResult(importResult);

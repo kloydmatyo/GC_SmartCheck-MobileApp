@@ -327,6 +327,7 @@ export class StudentImportService {
    */
   static async checkForDuplicates(
     rows: ImportRow[],
+    classId?: string,
   ): Promise<Map<string, number[]>> {
     const duplicates = new Map<string, number[]>();
 
@@ -352,7 +353,7 @@ export class StudentImportService {
     // Check against existing database (Firestore + local cache)
     try {
       const studentIds = Array.from(idMap.keys());
-      const existingIds = await this.checkExistingStudents(studentIds);
+      const existingIds = await this.checkExistingStudents(studentIds, classId);
 
       existingIds.forEach((studentId) => {
         const rowNumbers = idMap.get(studentId) || [];
@@ -375,38 +376,28 @@ export class StudentImportService {
    */
   private static async checkExistingStudents(
     studentIds: string[],
+    classId?: string,
   ): Promise<string[]> {
     try {
-      const existing: string[] = [];
-
-      // First check local cache (if available) - much faster
-      try {
-        const { StudentDatabaseService } = await import("@/services/studentDatabaseService");
-        await StudentDatabaseService.initializeDatabase();
-        
-        // Check each ID against the cache
-        for (const studentId of studentIds) {
-          const cached = await StudentDatabaseService.getStudentById(studentId);
-          if (cached) {
-            existing.push(studentId);
-          }
-        }
-        
-        console.log(`[Import] Cache check: ${existing.length}/${studentIds.length} IDs already exist`);
-      } catch (cacheError) {
-        console.warn("[Import] Cache check failed, falling back to Firestore:", cacheError);
+      // If a classId is provided, only check within that specific class.
+      // This allows the same student to be enrolled in multiple classes.
+      if (classId) {
+        const { ClassService } = await import("@/services/classService");
+        const classData = await ClassService.getClassById(classId);
+        if (!classData) return [];
+        const classStudentIds = new Set(classData.students.map((s: any) => s.student_id));
+        const existing = studentIds.filter((id) => classStudentIds.has(id));
+        console.log(`[Import] Class check: ${existing.length}/${studentIds.length} IDs already in this class`);
+        return existing;
       }
 
-      // Also check Firestore directly (for consistency and to catch any cache misses)
+      // Fallback: no classId provided - check global students collection
       const studentsRef = collection(db, "students");
       const firestoreExisting: string[] = [];
-
-      // Query in batches of 10 (Firestore 'in' query limit)
       for (let i = 0; i < studentIds.length; i += 10) {
         const batch = studentIds.slice(i, i + 10);
         const q = query(studentsRef, where("student_id", "in", batch));
         const querySnapshot = await getDocs(q);
-
         querySnapshot.forEach((doc: any) => {
           const data = doc.data();
           if (data.student_id && !firestoreExisting.includes(data.student_id)) {
@@ -414,14 +405,7 @@ export class StudentImportService {
           }
         });
       }
-
-      console.log(`[Import] Firestore check: ${firestoreExisting.length}/${studentIds.length} IDs already exist`);
-
-      // Combine results from both sources (deduplicate)
-      const allExisting = [...new Set([...existing, ...firestoreExisting])];
-      console.log(`[Import] Total existing IDs: ${allExisting.length}`);
-
-      return allExisting;
+      return firestoreExisting;
     } catch (error) {
       console.error("[Import] Failed to check existing students:", error);
       return [];
@@ -562,6 +546,7 @@ export class StudentImportService {
     mimeType: string,
     fileContent: string,
     onProgress?: (progress: number) => void,
+    classId?: string,
   ): Promise<ImportResult> {
     const sessionId = `import_${Date.now()}`;
     const timestamp = new Date().toISOString();
@@ -641,7 +626,7 @@ export class StudentImportService {
       onProgress?.(30);
 
       // REQ 26: Check for duplicates
-      const duplicates = await this.checkForDuplicates(validRows);
+      const duplicates = await this.checkForDuplicates(validRows, classId);
       const duplicateCount = duplicates.size;
 
       // Track duplicate IDs for better error reporting

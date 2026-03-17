@@ -341,11 +341,15 @@ export class ClassService {
         }
       }
 
-      // 1. Check Cache Realm - FAST
+      // When online, always fetch fresh from Firestore to avoid stale cache.
+      // Only use cache as fallback when offline.
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
       const cacheRealm = await RealmService.getCacheRealm();
       const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
-      
-      if (cached) {
+
+      if (!isOnline && cached) {
         return {
           id: cached.id,
           class_name: cached.class_name,
@@ -359,10 +363,8 @@ export class ClassService {
           updatedAt: cached.updatedAt,
         };
       }
+      if (isOnline) {
 
-      // 2. Fallback to Firebase if online
-      const { NetworkService } = await import("./networkService");
-      if (await NetworkService.isOnline()) {
         const docRef = doc(db, this.COLLECTION, classId);
         const docSnap = await getDoc(docRef);
 

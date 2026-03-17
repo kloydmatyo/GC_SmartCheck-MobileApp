@@ -720,6 +720,7 @@ export default function ClassDetailsScreen() {
       }
 
       setImportProgress(100);
+      if (successCount > 0) await loadClassData();
 
       if (errors.length > 0) {
         setImportErrors({
@@ -745,6 +746,7 @@ export default function ClassDetailsScreen() {
         text2: "Could not import students",
       });
     } finally {
+      if (successCount > 0) await loadClassData();
       setImporting(false);
     }
   };
@@ -1449,6 +1451,7 @@ export default function ClassDetailsScreen() {
       <StudentImportModal
         visible={showImportModal}
         onClose={() => setShowImportModal(false)}
+        selectedClassId={classId}
         onImportComplete={handleImportComplete}
       />
 
