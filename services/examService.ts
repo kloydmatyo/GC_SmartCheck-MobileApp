@@ -34,8 +34,9 @@ export class ExamService {
         localExams.push({
           id: q.id,
           title: q.title,
-          class: q.subject, // Map subject to class for UI consistency
-          classId: (q as any).classId || "", // We should ideally have classId in Cache
+          class: q.subject,
+          classId: q.classId || "",
+          className: q.className || "",
           date: q.createdAt.toLocaleDateString(),
           createdAt: q.createdAt,
           updatedAt: q.updatedAt,
@@ -69,21 +70,16 @@ export class ExamService {
       const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
 
-      if (localExams.length > 0) {
-        console.log(`[ExamService] Returning ${localExams.length} local exams instantly.`);
-        
-        // Match ClassService pattern: refresh background if online
-        if (isOnline) {
-             this.backgroundSyncExams(currentUser.uid).catch(err => 
-                 console.error("[ExamService] Background sync failed:", err)
-             );
-        }
-        
+      // When online, always fetch fresh from Firestore to avoid stale cache.
+      // Offline-created (staging) exams are merged in below.
+      if (!isOnline && localExams.length > 0) {
+        console.log(`[ExamService] Offline - returning ${localExams.length} cached exams.`);
         return localExams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
       }
 
+
       if (isOnline) {
-        console.log("[ExamService] No local exams, fetching from Firestore...");
+        console.log("[ExamService] Online - fetching fresh from Firestore...");
         const q = query(
           collection(db, "exams"),
           where("createdBy", "==", currentUser.uid),
@@ -133,6 +129,8 @@ export class ExamService {
                 id: eId,
                 title: data.title || "Untitled Exam",
                 subject: data.subject || data.className || "No Subject",
+                className: data.className || "",
+                classId: data.classId || "",
                 status: data.status || "Draft",
                 papersCount: data.scanned_papers || 0,
                 questionCount: data.num_items || 0,
@@ -238,6 +236,8 @@ export class ExamService {
               id: eId,
               title: data.title || "Untitled Exam",
               subject: data.subject || data.className || "No Subject",
+              className: data.className || "",
+              classId: data.classId || "",
               status: data.status || "Draft",
               papersCount: data.scanned_papers || 0,
               questionCount: data.num_items || 0,
@@ -414,6 +414,33 @@ export class ExamService {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      // Write to local cache immediately so it shows up without a full sync
+      const cacheRealm = await RealmService.getCacheRealm();
+      cacheRealm.write(() => {
+        cacheRealm.create(
+          "QuizCache",
+          {
+            id: docRef.id,
+            title: examData.title || "Untitled Exam",
+            subject: examData.subject || examData.className || "General",
+            className: examData.className || "",
+            classId: examData.classId || "",
+            status: "Draft",
+            papersCount: 0,
+            questionCount: examData.num_items || 0,
+            answerKey: "",
+            createdBy: currentUser.uid,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            instructorId: examData.instructorId || "",
+            examCode: examData.examCode || "",
+            choicesPerItem: examData.choices_per_item || 4,
+          },
+          Realm.UpdateMode.Modified,
+        );
+      });
+
       return docRef.id;
     } catch (err) {
       console.error("Error in createExam:", err);

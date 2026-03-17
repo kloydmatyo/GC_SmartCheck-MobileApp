@@ -238,68 +238,58 @@ export default function ClassDetailsScreen() {
     }
   }, [classId]);
 
+  const classDataRef = useRef<Class | null>(null);
+  useEffect(() => { classDataRef.current = classData; }, [classData]);
+
   const loadExams = useCallback(async () => {
     const requestId = ++examLoadRequestRef.current;
     try {
       setExamRowsLoading(true);
-      setExamRows([]);
       const currentUser = auth.currentUser;
-      if (!currentUser || !classData) {
+      const currentClassData = classDataRef.current;
+      if (!currentUser || !currentClassData) {
         setExamRows([]);
         return;
       }
 
-      // Use the optimized Local-First ExamService instead of direct Firestore call
-      // Force refresh of the service just in case there's a load order issue
       const { ExamService } = await import("../../services/examService");
       const allExams = await ExamService.getExamsByUser();
+
+      if (requestId !== examLoadRequestRef.current) return;
 
       const linkedExams = allExams
         .filter((exam) => {
           if (exam.isArchived) return false;
-          
-          // Match by classId or class name
-          const className = classData.class_name.trim().toLowerCase();
-          const matchesId = exam.classId && exam.classId === classData.id;
+          const className = currentClassData.class_name.trim().toLowerCase();
+          const matchesId = exam.classId && exam.classId === currentClassData.id;
           const matchesName = exam.className && exam.className.trim().toLowerCase() === className;
           const matchesLegacyClass = exam.class && exam.class.trim().toLowerCase() === className;
-
           return matchesId || matchesName || matchesLegacyClass;
         })
-        .map((exam) => {
-          return {
-            id: exam.id,
-            title: exam.title || "Untitled Exam",
-            questions: exam.num_items || exam.totalQuestions || 0,
-            scans: exam.papers || 0,
-            average: 0, // Stats will be loaded below
-            subject: exam.class || exam.subject || "General",
-            examCode: exam.examCode || "",
-            classId: exam.classId,
-            className: exam.className,
-          } as ExamRow;
-        });
+        .map((exam) => ({
+          id: exam.id,
+          title: exam.title || "Untitled Exam",
+          questions: exam.num_items || exam.totalQuestions || 0,
+          scans: exam.papers || 0,
+          average: 0,
+          subject: exam.class || exam.subject || "General",
+          examCode: exam.examCode || "",
+          classId: exam.classId,
+          className: exam.className,
+        } as ExamRow));
 
-      if (requestId !== examLoadRequestRef.current) return;
       setExamRows(linkedExams);
 
       // Background update for stats
       const examsWithStats = await Promise.all(
         linkedExams.map(async (exam) => {
           try {
-            // Check if online before calling DashboardService (which might be slow)
             const { NetworkService } = await import("@/services/networkService");
             const isOnline = await NetworkService.isOnline();
             if (!isOnline) return exam;
-
             const stats = await DashboardService.getExamStats(exam.id);
-            return {
-              ...exam,
-              scans: stats.totalGraded,
-              average: stats.classAverage,
-            };
-          } catch (error) {
-            console.warn(`Failed to load stats for exam ${exam.id}:`, error);
+            return { ...exam, scans: stats.totalGraded, average: stats.classAverage };
+          } catch {
             return exam;
           }
         }),
@@ -315,10 +305,9 @@ export default function ClassDetailsScreen() {
       if (requestId !== examLoadRequestRef.current) return;
       setExamRowsLoading(false);
     }
-  }, [classData]);
+  }, []);
 
   useEffect(() => {
-    examLoadRequestRef.current += 1;
     setExamRows([]);
     setExamRowsLoading(true);
     clearExamSelection();
@@ -362,11 +351,12 @@ export default function ClassDetailsScreen() {
     }, [loadClassData]),
   );
 
-  useFocusEffect(
-    useCallback(() => {
+  // Re-run loadExams once classData arrives (it may be null when useFocusEffect first fires)
+  useEffect(() => {
+    if (classData) {
       loadExams();
-    }, [loadExams]),
-  );
+    }
+  }, [classData, loadExams]);
 
   const students = useMemo<StudentRow[]>(() => {
     if (!classData) return [];

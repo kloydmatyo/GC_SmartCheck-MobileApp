@@ -78,7 +78,7 @@ export default function CreateQuizScreen() {
   const [numQuestions, setNumQuestions] = useState<number | null>(null);
   const [subject, setSubject] = useState("");
   const [examType] = useState<"board" | "diagnostic">("board");
-  const [choicesPerItem] = useState<number>(5);
+  const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
   const [examDate, setExamDate] = useState<Date | null>(new Date());
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
@@ -115,6 +115,7 @@ export default function CreateQuizScreen() {
       setQuizName("");
       setNumQuestions(null);
       setSubject("");
+      setChoicesPerItem(4);
       setExamDate(new Date());
       setSelectedClassId(classIdParam || null);
       setLoading(false);
@@ -553,6 +554,61 @@ export default function CreateQuizScreen() {
             ))}
           </View>
         </View>
+        <View style={styles.section}>
+          <Text style={styles.formLabel}>Number of Answer Choices</Text>
+          <View style={styles.questionOptionRow}>
+            <TouchableOpacity
+              style={[
+                styles.choiceOption,
+                choicesPerItem === 4 && styles.choiceOptionActive,
+              ]}
+              onPress={() => setChoicesPerItem(4)}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceOptionTitle,
+                  choicesPerItem === 4 && styles.choiceOptionTitleActive,
+                ]}
+              >
+                A, B, C, D
+              </Text>
+              <Text
+                style={[
+                  styles.choiceOptionSub,
+                  choicesPerItem === 4 && styles.choiceOptionSubActive,
+                ]}
+              >
+                4 Choices (Most Common)
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.choiceOption,
+                choicesPerItem === 5 && styles.choiceOptionActive,
+              ]}
+              onPress={() => setChoicesPerItem(5)}
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.choiceOptionTitle,
+                  choicesPerItem === 5 && styles.choiceOptionTitleActive,
+                ]}
+              >
+                A, B, C, D, E
+              </Text>
+              <Text
+                style={[
+                  styles.choiceOptionSub,
+                  choicesPerItem === 5 && styles.choiceOptionSubActive,
+                ]}
+              >
+                5 Choices (Extended)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
 
       </ScrollView>
@@ -606,6 +662,14 @@ export default function CreateQuizScreen() {
               <Text style={styles.reviewLabel}>Number of Questions</Text>
               <View style={styles.reviewPill}>
                 <Text style={styles.reviewPillText}>{numQuestions}</Text>
+              </View>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Answer Choices</Text>
+              <View style={styles.reviewPill}>
+                <Text style={styles.reviewPillText}>
+                  {choicesPerItem === 4 ? "A, B, C, D" : "A, B, C, D, E"}
+                </Text>
               </View>
             </View>
             <View style={styles.reviewRow}>
@@ -972,5 +1036,39 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: "#FFFFFF",
+  },
+  choiceOption: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  choiceOptionActive: {
+    backgroundColor: "#1A3A2A",
+    borderColor: "#1A3A2A",
+  },
+  choiceOptionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#31394A",
+    textAlign: "center",
+  },
+  choiceOptionTitleActive: {
+    color: "#FFFFFF",
+  },
+  choiceOptionSub: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#8A93A2",
+    textAlign: "center",
+  },
+  choiceOptionSubActive: {
+    color: "#A8D5B8",
   },
 });

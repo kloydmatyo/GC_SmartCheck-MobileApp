@@ -132,14 +132,15 @@ export class ClassCache extends Realm.Object<ClassCache> {
 }
 
 export class QuizCache extends Realm.Object<QuizCache> {
-    id!: string; // Firestore ID
+    id!: string;
     title!: string;
     subject!: string;
-    className?: string; // Cache the linked class name for faster UI
+    className?: string;
+    classId?: string;
     status!: string;
     papersCount!: number;
     questionCount!: number;
-    answerKey?: string; // JSON
+    answerKey?: string;
     createdBy!: string;
     createdAt!: Date;
     updatedAt!: Date;
@@ -155,6 +156,7 @@ export class QuizCache extends Realm.Object<QuizCache> {
             title: "string",
             subject: "string",
             className: "string?",
+            classId: "string?",
             status: "string",
             papersCount: { type: "int", default: 0 },
             questionCount: "int",
@@ -255,7 +257,7 @@ const STAGING_CONFIG: Realm.Configuration = {
 const CACHE_CONFIG: Realm.Configuration = {
     path: "cache.realm",
     schema: [ClassCache, QuizCache, GradeCache, StudentCache],
-    schemaVersion: 9,
+    schemaVersion: 10,
     deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 
@@ -288,7 +290,19 @@ export class RealmService {
      */
     static async getCacheRealm(): Promise<Realm> {
         if (!cacheRealm || cacheRealm.isClosed) {
-            cacheRealm = await Realm.open(CACHE_CONFIG);
+            try {
+                cacheRealm = await Realm.open(CACHE_CONFIG);
+            } catch (error: any) {
+                if (error?.message?.includes("already opened with different schema version")) {
+                    if (cacheRealm && !cacheRealm.isClosed) {
+                        cacheRealm.close();
+                    }
+                    cacheRealm = null;
+                    cacheRealm = await Realm.open(CACHE_CONFIG);
+                } else {
+                    throw error;
+                }
+            }
         }
         return cacheRealm;
     }
