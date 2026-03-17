@@ -1050,8 +1050,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   choiceOptionActive: {
-    backgroundColor: "#1A3A2A",
-    borderColor: "#1A3A2A",
+    backgroundColor: "#EAF7F0",
+    borderColor: "#3ED598",
   },
   choiceOptionTitle: {
     fontSize: 15,
@@ -1060,7 +1060,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   choiceOptionTitleActive: {
-    color: "#FFFFFF",
+    color: "#1DAF72",
   },
   choiceOptionSub: {
     fontSize: 11,
@@ -1069,6 +1069,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   choiceOptionSubActive: {
-    color: "#A8D5B8",
+    color: "#1DAF72",
   },
 });

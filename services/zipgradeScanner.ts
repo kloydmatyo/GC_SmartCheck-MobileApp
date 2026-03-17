@@ -467,11 +467,11 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     //
     // Student ID is at top (Y: 0%-18%), skip it
     return [
-      { xMin: 0.25, xMax: 0.52, yMin: 0.2, yMax: 0.41, startQ: 1, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.405, yMax: 0.56, startQ: 11, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.55, yMax: 0.71, startQ: 21, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.2, yMax: 0.405, startQ: 31, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.41, yMax: 0.56, startQ: 41, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
+      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
+      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────

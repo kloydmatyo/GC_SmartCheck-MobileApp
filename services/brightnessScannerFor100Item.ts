@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Brightness-Based Scanner for 100-Item Templates
  * 
  * This scanner uses brightness sampling instead of contour detection

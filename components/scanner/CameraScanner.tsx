@@ -213,9 +213,6 @@ export default function CameraScanner({
             {/* Bottom Mask - flex: 1 for perfect vertical centering */}
             <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
           </View>
-          <Text style={styles.instructionText}>
-            Align answer sheet within the frame
-          </Text>
         </TouchableOpacity>
 
         {/* UI Overlay Layer (Frame and Controls) */}
@@ -240,9 +237,6 @@ export default function CameraScanner({
             >
               <View style={styles.frameContent}>
                 <Ionicons name="camera-outline" size={54} color="#00FF7F" />
-                <Text style={styles.frameText}>
-                  Align the answer sheet within the{"\n"}frame
-                </Text>
               </View>
 
               {/* Corner Markers */}
