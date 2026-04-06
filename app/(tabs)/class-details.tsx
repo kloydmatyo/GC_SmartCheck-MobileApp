@@ -861,13 +861,13 @@ export default function ClassDetailsScreen() {
             </View>
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)}>
-                <Ionicons name="swap-vertical-outline" size={14} color="#fff" />
+                <Ionicons name="swap-vertical-outline" size={14} color="#20BE7B" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.exportButtonSmall} onPress={handleExportStudents}>
-                <Ionicons name="download-outline" size={14} color="#fff" />
+                <Ionicons name="download-outline" size={14} color="#20BE7B" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.importButton} onPress={() => setShowImportModal(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color="#fff" />
+                <Ionicons name="cloud-upload-outline" size={14} color="#20BE7B" />
               </TouchableOpacity>
             </View>
           </View>
@@ -1574,7 +1574,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#4a7a6e",
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1582,7 +1582,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#1e6b4f",
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1651,7 +1651,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#2d7a5f",
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
     justifyContent: "center",
   },

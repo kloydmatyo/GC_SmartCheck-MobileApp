@@ -26,24 +26,41 @@ export class UserService {
       }
 
       // Try to get user profile from users collection
-      const userRef = doc(db, "users", targetUserId);
-      const userSnap = await getDoc(userRef);
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
 
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        return {
-          uid: userSnap.id,
-          email: userData.email || currentUser?.email || "",
-          fullName:
-            userData.fullName || currentUser?.displayName || "Unknown User",
-          instructorId: userData.instructorId || "INSTRUCTOR-000",
-          role: userData.role || "instructor",
-          createdAt: userData.createdAt?.toDate() || new Date(),
-          updatedAt: userData.updatedAt?.toDate() || new Date(),
-        };
+      if (isOnline) {
+        try {
+          const userRef = doc(db, "users", targetUserId);
+          const userSnap = await Promise.race([
+            getDoc(userRef),
+            new Promise<any>((_, reject) =>
+              setTimeout(() => reject(new Error("Network timeout")), 3000),
+            ),
+          ]);
+
+          if (userSnap && userSnap.exists()) {
+            const userData = userSnap.data();
+            return {
+              uid: userSnap.id,
+              email: userData.email || currentUser?.email || "",
+              fullName:
+                userData.fullName || currentUser?.displayName || "Unknown User",
+              instructorId: userData.instructorId || "INSTRUCTOR-000",
+              role: userData.role || "instructor",
+              createdAt: userData.createdAt?.toDate() || new Date(),
+              updatedAt: userData.updatedAt?.toDate() || new Date(),
+            };
+          }
+        } catch (error) {
+          console.warn(
+            `[UserService] Failed to fetch user profile, using fallback:`,
+            error,
+          );
+        }
       }
 
-      // If no profile found, return basic info from auth
+      // If no profile found, or offline, return basic info from auth
       return {
         uid: targetUserId,
         email: currentUser?.email || "",
@@ -82,10 +99,23 @@ export class UserService {
 
       if (!targetUserId) return false;
 
-      const userRef = doc(db, "users", targetUserId);
-      const userSnap = await getDoc(userRef);
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
 
-      return userSnap.exists();
+      if (!isOnline) {
+        console.log("[UserService] Offline, user profile existence check bypassed.");
+        return false;
+      }
+
+      const userRef = doc(db, "users", targetUserId);
+      const userSnap = await Promise.race([
+        getDoc(userRef),
+        new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error("Network timeout")), 3000),
+        ),
+      ]);
+
+      return userSnap && userSnap.exists();
     } catch (error) {
       console.error("Error checking user profile:", error);
       return false;

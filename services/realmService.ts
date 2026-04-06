@@ -110,7 +110,9 @@ export class ClassCache extends Realm.Object<ClassCache> {
     class_name!: string;
     course_subject!: string;
     room?: string;
+    year?: string;
     section_block?: string;
+    isArchived?: boolean;
     students!: string;
     createdBy!: string;
     updatedAt!: Date;
@@ -123,7 +125,9 @@ export class ClassCache extends Realm.Object<ClassCache> {
             class_name: "string",
             course_subject: "string",
             room: "string?",
+            year: "string?",
             section_block: "string?",
+            isArchived: { type: "bool", default: false },
             students: "string",
             createdBy: "string",
             updatedAt: "date",
@@ -241,7 +245,7 @@ let cacheRealm: Realm | null = null;
 const STAGING_CONFIG: Realm.Configuration = {
     path: "staging.realm",
     schema: [OfflineGrade, OfflineClass, OfflineQuiz],
-    schemaVersion: 8,
+    schemaVersion: 9,
     migration: (oldRealm, newRealm) => {
         if (oldRealm.schemaVersion < 8) {
             const oldObjects = oldRealm.objects<any>("OfflineClass");
@@ -257,7 +261,7 @@ const STAGING_CONFIG: Realm.Configuration = {
 const CACHE_CONFIG: Realm.Configuration = {
     path: "cache.realm",
     schema: [ClassCache, QuizCache, GradeCache, StudentCache],
-    schemaVersion: 10,
+    schemaVersion: 11,
     deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 

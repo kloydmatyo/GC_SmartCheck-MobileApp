@@ -24,6 +24,7 @@ import {
   View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { ClassService } from "../../services/classService";
 
 type ArchivedMode = "classes" | "exams";
 
@@ -193,7 +194,7 @@ export default function ArchivedScreen() {
 
   const restoreClass = async (id: string) => {
     try {
-      await updateDoc(doc(db, "classes", id), { isArchived: false });
+      await ClassService.updateClass(id, { isArchived: false });
       setRestoreTarget(null);
       Toast.show({
         type: "save_result",

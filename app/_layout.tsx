@@ -5,7 +5,7 @@ import {
   ThemeProvider,
 } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
-import { Stack, usePathname } from "expo-router";
+import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
@@ -25,7 +25,6 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const appState = useRef<AppStateStatus>(AppState.currentState);
-  const pathname = usePathname();
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | null>(null);
@@ -116,14 +115,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  const isHomeTab =
-    pathname === "/" ||
-    pathname === "/(tabs)" ||
-    pathname === "/(tabs)/index";
-
-  const showSyncOverlay =
-    isHomeTab && (isSyncing || syncStatus === "synced");
-
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <Stack screenOptions={{ headerShown: false }}>
@@ -137,7 +128,7 @@ export default function RootLayout() {
       </Stack>
       <StatusBar style="auto" />
       <Toast config={toastConfig} />
-      {showSyncOverlay && (
+      {(isSyncing || syncStatus === "synced") && (
         <View style={styles.syncOverlay} pointerEvents="none">
           <View style={styles.syncContainer}>
             {isSyncing ? (
