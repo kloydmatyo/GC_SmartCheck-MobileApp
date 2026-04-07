@@ -3,7 +3,7 @@ import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -82,6 +82,8 @@ function AnimatedFillBar({
 
 export default function ClassesScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const requestedEditClassId = params.editClassId as string | undefined;
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
@@ -95,6 +97,7 @@ export default function ClassesScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
+  const [consumedEditRequestId, setConsumedEditRequestId] = useState<string | null>(null);
   const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
 
 const [classMenuPosition, setClassMenuPosition] = useState({
@@ -227,6 +230,22 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       })();
     }, [loadClasses]),
   );
+
+  useEffect(() => {
+    if (
+      !requestedEditClassId ||
+      requestedEditClassId === consumedEditRequestId ||
+      classes.length === 0
+    ) {
+      return;
+    }
+
+    const targetClass = classes.find((item) => item.id === requestedEditClassId);
+    if (!targetClass) return;
+
+    setConsumedEditRequestId(requestedEditClassId);
+    handleEditClass(targetClass);
+  }, [requestedEditClassId, consumedEditRequestId, classes]);
 
   const colors = darkModeEnabled
     ? {

@@ -267,6 +267,7 @@ export default function TabLayout() {
         name="edit-exam"
         options={{
           href: null,
+          tabBarStyle: { display: "none" },
         }}
       />
       <Tabs.Screen

@@ -142,12 +142,14 @@ export class QuizCache extends Realm.Object<QuizCache> {
     className?: string;
     classId?: string;
     status!: string;
+    structureLocked?: boolean;
     papersCount!: number;
     questionCount!: number;
     answerKey?: string;
     createdBy!: string;
     createdAt!: Date;
     updatedAt!: Date;
+    version?: number;
     instructorId?: string;
     examCode?: string;
     choicesPerItem?: number;
@@ -162,12 +164,14 @@ export class QuizCache extends Realm.Object<QuizCache> {
             className: "string?",
             classId: "string?",
             status: "string",
+            structureLocked: { type: "bool", default: false },
             papersCount: { type: "int", default: 0 },
             questionCount: "int",
             answerKey: "string?",
             createdBy: "string",
             createdAt: "date",
             updatedAt: "date",
+            version: { type: "int", default: 1 },
             instructorId: "string?",
             examCode: "string?",
             choicesPerItem: { type: "int", default: 4 },
@@ -261,7 +265,7 @@ const STAGING_CONFIG: Realm.Configuration = {
 const CACHE_CONFIG: Realm.Configuration = {
     path: "cache.realm",
     schema: [ClassCache, QuizCache, GradeCache, StudentCache],
-    schemaVersion: 11,
+    schemaVersion: 12,
     deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 

@@ -132,12 +132,14 @@ export class ExamService {
                 className: data.className || "",
                 classId: data.classId || "",
                 status: data.status || "Draft",
+                structureLocked: Boolean(data.structureLocked),
                 papersCount: data.scanned_papers || 0,
                 questionCount: data.num_items || 0,
                 answerKey: akJson,
                 createdBy: data.createdBy,
                 createdAt: data.createdAt?.toDate?.() || new Date(),
                 updatedAt: data.updatedAt?.toDate?.() || new Date(),
+                version: data.version || 1,
                 instructorId: data.instructorId || "",
                 examCode: data.examCode || data.room || "",
                 choicesPerItem: data.choices_per_item || 4,
@@ -239,12 +241,14 @@ export class ExamService {
               className: data.className || "",
               classId: data.classId || "",
               status: data.status || "Draft",
+              structureLocked: Boolean(data.structureLocked),
               papersCount: data.scanned_papers || 0,
               questionCount: data.num_items || 0,
               answerKey: akJson,
               createdBy: data.createdBy,
               createdAt: data.createdAt?.toDate?.() || new Date(),
               updatedAt: data.updatedAt?.toDate?.() || new Date(),
+              version: data.version || 1,
               instructorId: data.instructorId || "",
               examCode: data.examCode || data.room || "",
               choicesPerItem: data.choices_per_item || 4,
@@ -427,12 +431,14 @@ export class ExamService {
             className: examData.className || "",
             classId: examData.classId || "",
             status: "Draft",
+            structureLocked: Boolean(examData.structureLocked),
             papersCount: 0,
             questionCount: examData.num_items || 0,
             answerKey: "",
             createdBy: currentUser.uid,
             createdAt: new Date(),
             updatedAt: new Date(),
+            version: 1,
             instructorId: examData.instructorId || "",
             examCode: examData.examCode || "",
             choicesPerItem: examData.choices_per_item || 4,
@@ -589,19 +595,20 @@ export class ExamService {
         }
 
         return {
-          metadata: {
-            examId: cachedQuiz.id,
-            title: cachedQuiz.title,
-            subject: cachedQuiz.subject,
-            section: "",
-            date: cachedQuiz.createdAt.toISOString(),
-            examCode: cachedQuiz.examCode || "N/A",
-            status: cachedQuiz.status as any,
-            createdAt: cachedQuiz.createdAt,
-            updatedAt: cachedQuiz.updatedAt,
-            createdBy: cachedQuiz.createdBy,
-            version: 1,
-          },
+            metadata: {
+              examId: cachedQuiz.id,
+              title: cachedQuiz.title,
+              subject: cachedQuiz.subject,
+              section: "",
+              date: cachedQuiz.createdAt.toISOString(),
+              examCode: cachedQuiz.examCode || "N/A",
+              status: cachedQuiz.status as any,
+              structureLocked: Boolean(cachedQuiz.structureLocked),
+              createdAt: cachedQuiz.createdAt,
+              updatedAt: cachedQuiz.updatedAt,
+              createdBy: cachedQuiz.createdBy,
+              version: cachedQuiz.version || 1,
+            },
           answerKey: answerKeyData
             ? {
               id: answerKeyData.id || "",
@@ -885,6 +892,7 @@ export class ExamService {
             date: examData.created_at,
             examCode: examData.examCode || examData.room || "N/A",
             status: examData.status || "Draft",
+            structureLocked: Boolean(examData.structureLocked),
             createdAt: examData.createdAt?.toDate() || new Date(),
             updatedAt: examData.updatedAt?.toDate() || new Date(),
             createdBy: examData.createdBy || "",
@@ -968,10 +976,11 @@ export class ExamService {
           date: cachedQuiz.createdAt.toISOString(),
           examCode: "",
           status: cachedQuiz.status as any,
+          structureLocked: Boolean(cachedQuiz.structureLocked),
           createdAt: cachedQuiz.createdAt,
           updatedAt: cachedQuiz.updatedAt,
           createdBy: cachedQuiz.createdBy,
-          version: 1,
+          version: cachedQuiz.version || 1,
         },
         answerKey: answerKeyData
           ? {
@@ -1093,6 +1102,8 @@ export class ExamService {
     switch (status) {
       case "Draft":
         return "#9e9e9e";
+      case "Final":
+        return "#20BE7B";
       case "Scheduled":
         return "#ff9800";
       case "Active":
@@ -1114,6 +1125,9 @@ export class ExamService {
       subject?: string | null;
       section?: string | null;
       date?: string | null;
+      num_items?: number;
+      choices_per_item?: 4 | 5;
+      structureLocked?: boolean;
     },
     expectedVersion: number,
   ): Promise<number> {
@@ -1157,6 +1171,39 @@ export class ExamService {
           updatedAt: serverTimestamp(),
         });
 
+        const cacheRealm = await RealmService.getCacheRealm();
+        const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
+          "QuizCache",
+          examId,
+        );
+        cacheRealm.write(() => {
+          cacheRealm.create(
+            "QuizCache",
+            {
+              id: examId,
+              status: examData.status || "Draft",
+              structureLocked:
+                updateData.structureLocked ?? Boolean(examData.structureLocked),
+              questionCount: updateData.num_items ?? examData.num_items ?? 0,
+              updatedAt: new Date(),
+              version: newVersion,
+              choicesPerItem:
+                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+              title: updateData.title ?? examData.title ?? "Untitled Exam",
+              subject: examData.subject || examData.className || "No Subject",
+              className: examData.className || "",
+              classId: examData.classId || "",
+              papersCount: examData.scanned_papers || 0,
+              answerKey: existingCachedExam?.answerKey || "",
+              createdBy: examData.createdBy || currentUser.uid,
+              createdAt: examData.createdAt?.toDate?.() || new Date(),
+              instructorId: examData.instructorId || "",
+              examCode: examData.examCode || examData.room || "",
+            },
+            Realm.UpdateMode.Modified,
+          );
+        });
+
         return newVersion;
       } catch (updateError: any) {
         // Handle network errors specifically
@@ -1189,6 +1236,9 @@ export class ExamService {
       subject?: string | null;
       section?: string | null;
       date?: string | null;
+      num_items?: number;
+      choices_per_item?: 4 | 5;
+      structureLocked?: boolean;
     },
   ): Promise<number> {
     try {
@@ -1223,6 +1273,39 @@ export class ExamService {
           ...updateData,
           version: newVersion,
           updatedAt: serverTimestamp(),
+        });
+
+        const cacheRealm = await RealmService.getCacheRealm();
+        const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
+          "QuizCache",
+          examId,
+        );
+        cacheRealm.write(() => {
+          cacheRealm.create(
+            "QuizCache",
+            {
+              id: examId,
+              status: examData.status || "Draft",
+              structureLocked:
+                updateData.structureLocked ?? Boolean(examData.structureLocked),
+              questionCount: updateData.num_items ?? examData.num_items ?? 0,
+              updatedAt: new Date(),
+              version: newVersion,
+              choicesPerItem:
+                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+              title: updateData.title ?? examData.title ?? "Untitled Exam",
+              subject: examData.subject || examData.className || "No Subject",
+              className: examData.className || "",
+              classId: examData.classId || "",
+              papersCount: examData.scanned_papers || 0,
+              answerKey: existingCachedExam?.answerKey || "",
+              createdBy: examData.createdBy || currentUser.uid,
+              createdAt: examData.createdAt?.toDate?.() || new Date(),
+              instructorId: examData.instructorId || "",
+              examCode: examData.examCode || examData.room || "",
+            },
+            Realm.UpdateMode.Modified,
+          );
         });
 
         return newVersion;

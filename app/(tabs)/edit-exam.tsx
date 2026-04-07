@@ -2,16 +2,15 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { doc, onSnapshot } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    KeyboardAvoidingView,
     Modal,
     Platform,
     SafeAreaView,
     ScrollView,
-    StatusBar,
     StyleSheet,
     Text,
     TextInput,
@@ -26,30 +25,39 @@ import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
 
 export default function EditExamScreen() {
+  const NUM_QUESTIONS_OPTIONS = [20, 50, 100] as const;
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
+  const classId = params.classId as string | undefined;
+  const returnTo = params.returnTo as string | undefined;
+  const returnTab = params.tab as string | undefined;
+  const closeEditExam = () =>
+    returnTo === "exam-preview"
+      ? router.replace(
+          `/(tabs)/exam-preview?examId=${examId}${
+            classId ? `&classId=${classId}` : ""
+          }${returnTab ? `&tab=${returnTab}` : ""}&refresh=${Date.now()}`,
+        )
+      : classId
+      ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
+      : router.back();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [originalMetadata, setOriginalMetadata] = useState<ExamMetadata | null>(
     null,
   );
-
-  // Real-time conflict detection
-  const [remoteVersion, setRemoteVersion] = useState<number>(1);
-  const [conflictDetected, setConflictDetected] = useState(false);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-  const isInitialLoadRef = useRef(true);
-
   // Editable fields
   const [title, setTitle] = useState("");
-  const [subject, setSubject] = useState("");
-  const [section, setSection] = useState("");
   const [scheduleDate, setScheduleDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
+  const [initialTotalQuestions, setInitialTotalQuestions] = useState(0);
+  const [initialChoicesPerItem, setInitialChoicesPerItem] = useState<4 | 5>(4);
+  const [structureLocked, setStructureLocked] = useState(false);
 
-  // Non-editable fields (for display)
+  // Locked fields (for display)
   const [examCode, setExamCode] = useState("");
   const [status, setStatus] = useState<
     "Draft" | "Scheduled" | "Active" | "Completed"
@@ -63,15 +71,22 @@ export default function EditExamScreen() {
 
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showFinalizeConfirmModal, setShowFinalizeConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
-  const [headerTopPadding, setHeaderTopPadding] = useState(56);
-
-  useEffect(() => {
-    const top =
-      Platform.OS === "android" ? (StatusBar.currentHeight || 0) + 16 : 56;
-    setHeaderTopPadding(top);
-  }, []);
+  const displayStatus = structureLocked ? "Final" : status;
+  const statusChipColors =
+    displayStatus === "Final"
+      ? {
+          backgroundColor: darkModeEnabled ? "#173528" : "#E9F8F1",
+          borderColor: darkModeEnabled ? "#24533E" : "#CFEEDD",
+          textColor: "#14925F",
+        }
+      : {
+          backgroundColor: darkModeEnabled ? "#2A313A" : "#F3F5F8",
+          borderColor: darkModeEnabled ? "#414A56" : "#E2E8F0",
+          textColor: darkModeEnabled ? "#D7DEE7" : "#6B7280",
+        };
 
   useFocusEffect(
     React.useCallback(() => {
@@ -95,13 +110,17 @@ export default function EditExamScreen() {
         cardBg: "#1f2b26",
         border: "#34483f",
         title: "#e7f1eb",
+        inputBg: "#18211d",
+        muted: "#9DB8A8",
       }
     : {
-        bg: "#edf3ee",
-        headerBg: "#3d5a3d",
-        cardBg: "#f3f7f4",
-        border: "#cad9cf",
-        title: "#eef7f0",
+        bg: "#F7F7F8",
+        headerBg: "#FFFFFF",
+        cardBg: "#FFFFFF",
+        border: "#E8EBF0",
+        title: "#111827",
+        inputBg: "#FFFFFF",
+        muted: "#6B7280",
       };
 
   useEffect(() => {
@@ -109,58 +128,10 @@ export default function EditExamScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId]);
 
-  // Real-time listener for concurrent edit detection
-  useEffect(() => {
-    if (!examId) return;
-
-    const examRef = doc(db, "exams", examId);
-
-    const unsubscribe = onSnapshot(
-      examRef,
-      (snapshot) => {
-        if (!snapshot.exists()) return;
-
-        const data = snapshot.data();
-        const currentRemoteVersion = data.version || 1;
-
-        // Skip initial load
-        if (isInitialLoadRef.current) {
-          isInitialLoadRef.current = false;
-          setRemoteVersion(currentRemoteVersion);
-          return;
-        }
-
-        // Check if version changed (someone else edited)
-        if (currentRemoteVersion > remoteVersion && !saving) {
-          setRemoteVersion(currentRemoteVersion);
-          setConflictDetected(true);
-
-          Toast.show({
-            type: "warning",
-            text1: "Exam Updated",
-            text2: "This exam was modified by another user",
-            visibilityTime: 5000,
-          });
-        }
-      },
-      (error) => {
-        console.error("Error listening to exam changes:", error);
-      },
-    );
-
-    unsubscribeRef.current = unsubscribe;
-
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-    };
-  }, [examId, remoteVersion, saving]);
-
   useEffect(() => {
     checkForChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, subject, section, scheduleDate]);
+  }, [title, scheduleDate, totalQuestions, choicesPerItem]);
 
   const loadExamData = async () => {
     try {
@@ -173,7 +144,7 @@ export default function EditExamScreen() {
           text1: "Authentication Error",
           text2: "You must be logged in to edit exams.",
         });
-        router.back();
+        closeEditExam();
         return;
       }
 
@@ -188,7 +159,7 @@ export default function EditExamScreen() {
           text1: "Access Denied",
           text2: "You are not authorized to edit this exam.",
         });
-        router.back();
+        closeEditExam();
         return;
       }
 
@@ -199,7 +170,7 @@ export default function EditExamScreen() {
           text1: "Error",
           text2: "Exam not found.",
         });
-        router.back();
+        closeEditExam();
         return;
       }
 
@@ -208,7 +179,7 @@ export default function EditExamScreen() {
         Alert.alert(
           "Edit Restricted",
           `Cannot edit exam. Exam status is "${examData.metadata.status}". Only Draft exams can be edited.`,
-          [{ text: "OK", onPress: () => router.back() }],
+          [{ text: "OK", onPress: closeEditExam }],
         );
         return;
       }
@@ -219,29 +190,28 @@ export default function EditExamScreen() {
         Alert.alert(
           "Edit Restricted",
           "Cannot edit exam. There is an active scan session for this exam.",
-          [{ text: "OK", onPress: () => router.back() }],
+          [{ text: "OK", onPress: closeEditExam }],
         );
         return;
       }
 
-      // Set editable fields
+      // Set editable field
       setOriginalMetadata(examData.metadata);
       setTitle(examData.metadata.title);
-      setSubject(examData.metadata.subject || "");
-      setSection(examData.metadata.section || "");
       setScheduleDate(
         examData.metadata.date ? new Date(examData.metadata.date) : null,
       );
+      setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
+      setStructureLocked(Boolean(examData.metadata.structureLocked));
 
-      // Set non-editable fields
+      // Set remaining fields
       setExamCode(examData.metadata.examCode);
       setStatus(examData.metadata.status);
       setTotalQuestions(examData.totalQuestions);
+      setInitialTotalQuestions(examData.totalQuestions);
+      setInitialChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
       setVersion(examData.metadata.version);
 
-      // Initialize remote version tracking
-      setRemoteVersion(examData.metadata.version);
-      setConflictDetected(false);
     } catch (error) {
       console.error("Error loading exam:", error);
       Toast.show({
@@ -249,7 +219,7 @@ export default function EditExamScreen() {
         text1: "Error",
         text2: "Failed to load exam data.",
       });
-      router.back();
+      closeEditExam();
     } finally {
       setLoading(false);
     }
@@ -260,13 +230,12 @@ export default function EditExamScreen() {
 
     const changed =
       title !== originalMetadata.title ||
-      subject !== (originalMetadata.subject || "") ||
-      section !== (originalMetadata.section || "") ||
+      totalQuestions !== initialTotalQuestions ||
+      choicesPerItem !== initialChoicesPerItem ||
       scheduleDate?.toISOString() !==
         (originalMetadata.date
           ? new Date(originalMetadata.date).toISOString()
           : null);
-
     setHasChanges(changed);
   };
 
@@ -287,7 +256,6 @@ export default function EditExamScreen() {
       setTitleError("");
     }
 
-    // Validate date
     if (scheduleDate) {
       const now = new Date();
       now.setHours(0, 0, 0, 0);
@@ -324,30 +292,6 @@ export default function EditExamScreen() {
       return;
     }
 
-    // Check for conflicts before showing confirmation
-    if (conflictDetected) {
-      Alert.alert(
-        "Conflict Detected",
-        "This exam was modified by another user. Your changes may overwrite theirs. Do you want to refresh and see the latest version?",
-        [
-          {
-            text: "Refresh",
-            onPress: () => {
-              loadExamData();
-              setConflictDetected(false);
-            },
-          },
-          {
-            text: "Save Anyway",
-            style: "destructive",
-            onPress: () => setShowConfirmModal(true),
-          },
-          { text: "Cancel", style: "cancel" },
-        ],
-      );
-      return;
-    }
-
     setShowConfirmModal(true);
   };
 
@@ -379,6 +323,9 @@ export default function EditExamScreen() {
       subject?: string | null;
       section?: string | null;
       date?: string | null;
+      num_items?: number;
+      choices_per_item?: 4 | 5;
+      structureLocked?: boolean;
     },
     expectedVersion: number,
   ): Promise<number> => {
@@ -417,14 +364,20 @@ export default function EditExamScreen() {
         throw new Error("User not authenticated");
       }
 
+      const { doc, getDoc } = await import("firebase/firestore");
+      const latestExamSnap = await getDoc(doc(db, "exams", examId));
+      const latestVersion = latestExamSnap.exists()
+        ? Number(latestExamSnap.data().version ?? version ?? 1)
+        : version;
+
       const startTime = Date.now();
 
       // Prepare update data
       const updateData = {
         title: title.trim(),
-        subject: subject.trim() || null,
-        section: section.trim() || null,
         date: scheduleDate?.toISOString() || null,
+        num_items: totalQuestions,
+        choices_per_item: choicesPerItem,
       };
 
       // Track changes for audit log
@@ -436,22 +389,22 @@ export default function EditExamScreen() {
             new: updateData.title,
           };
         }
-        if (updateData.subject !== (originalMetadata.subject ?? null)) {
-          changes.subject = {
-            old: originalMetadata.subject ?? null,
-            new: updateData.subject,
-          };
-        }
-        if (updateData.section !== (originalMetadata.section ?? null)) {
-          changes.section = {
-            old: originalMetadata.section ?? null,
-            new: updateData.section,
-          };
-        }
         if (updateData.date !== (originalMetadata.date ?? null)) {
           changes.date = {
             old: originalMetadata.date ?? null,
             new: updateData.date,
+          };
+        }
+        if (updateData.num_items !== initialTotalQuestions) {
+          changes.num_items = {
+            old: initialTotalQuestions,
+            new: updateData.num_items,
+          };
+        }
+        if (updateData.choices_per_item !== initialChoicesPerItem) {
+          changes.choices_per_item = {
+            old: initialChoicesPerItem,
+            new: updateData.choices_per_item,
           };
         }
       }
@@ -459,7 +412,7 @@ export default function EditExamScreen() {
       // Update exam with version check
       const updatedVersion = await updateExamWithRetry(
         updateData,
-        version, // Current version we're editing
+        latestVersion,
       );
       updateApplied = true;
       persistedVersion = updatedVersion;
@@ -486,6 +439,8 @@ export default function EditExamScreen() {
           const templateDoc = templatesSnapshot.docs[0];
           const templateUpdateData: any = {
             examName: updateData.title,
+            questionCount: updateData.num_items,
+            choicesPerItem: updateData.choices_per_item,
             updatedAt: serverTimestamp(),
             updatedBy: currentUser.uid,
           };
@@ -509,18 +464,16 @@ export default function EditExamScreen() {
 
       // Update local state
       setVersion(updatedVersion);
-      setRemoteVersion(updatedVersion);
       setOriginalMetadata({
         ...originalMetadata!,
         title: updateData.title,
-        subject: updateData.subject || undefined,
-        section: updateData.section || undefined,
         date: updateData.date || undefined,
         version: updatedVersion,
         updatedAt: new Date(),
       });
+      setInitialTotalQuestions(updateData.num_items);
+      setInitialChoicesPerItem(updateData.choices_per_item);
       setHasChanges(false);
-      setConflictDetected(false);
 
       Toast.show({
         type: "success",
@@ -528,12 +481,7 @@ export default function EditExamScreen() {
         text2: `Exam updated successfully in ${(duration / 1000).toFixed(2)}s`,
       });
 
-      // Navigate back after a short delay
-      setTimeout(() => {
-        router.replace(
-          `/(tabs)/exam-preview?examId=${examId}&refresh=${Date.now()}`,
-        );
-      }, 1500);
+      closeEditExam();
     } catch (error: any) {
       console.error("Error saving exam:", error);
 
@@ -543,9 +491,9 @@ export default function EditExamScreen() {
         try {
           const rollbackData = {
             title: originalMetadata.title,
-            subject: originalMetadata.subject ?? null,
-            section: originalMetadata.section ?? null,
             date: originalMetadata.date ?? null,
+            num_items: initialTotalQuestions,
+            choices_per_item: initialChoicesPerItem,
           };
 
           const rolledBackVersion = await ExamService.updateExamWithVersionCheck(
@@ -555,15 +503,13 @@ export default function EditExamScreen() {
           );
 
           setVersion(rolledBackVersion);
-          setRemoteVersion(rolledBackVersion);
           setTitle(originalMetadata.title);
-          setSubject(originalMetadata.subject || "");
-          setSection(originalMetadata.section || "");
           setScheduleDate(
             originalMetadata.date ? new Date(originalMetadata.date) : null,
           );
+          setTotalQuestions(initialTotalQuestions);
+          setChoicesPerItem(initialChoicesPerItem);
           setHasChanges(false);
-          setConflictDetected(false);
         } catch (rollbackError) {
           console.error("Rollback failed after save error:", rollbackError);
           await loadExamData();
@@ -583,13 +529,7 @@ export default function EditExamScreen() {
         errorMessage =
           "This exam was modified by another user while you were editing. Please refresh and try again.";
         Alert.alert(errorTitle, errorMessage, [
-          {
-            text: "Refresh",
-            onPress: () => {
-              loadExamData();
-              setConflictDetected(false);
-            },
-          },
+          { text: "Refresh", onPress: loadExamData },
           { text: "Cancel", style: "cancel" },
         ]);
       } else if (errorText.includes("conflict")) {
@@ -624,13 +564,6 @@ export default function EditExamScreen() {
     }
   };
 
-  const handleDateChange = (event: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate) {
-      setScheduleDate(selectedDate);
-    }
-  };
-
   if (loading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
@@ -640,156 +573,260 @@ export default function EditExamScreen() {
     );
   }
 
+  const handleDateChange = (_event: any, selectedDate?: Date) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      setScheduleDate(selectedDate);
+    }
+  };
+
+  const confirmFinalize = async () => {
+    setShowFinalizeConfirmModal(false);
+    setSaving(true);
+
+    try {
+      const { doc, getDoc } = await import("firebase/firestore");
+      const latestExamSnap = await getDoc(doc(db, "exams", examId));
+      const latestVersion = latestExamSnap.exists()
+        ? Number(latestExamSnap.data().version ?? version ?? 1)
+        : version;
+
+      const updatedVersion = await updateExamWithRetry(
+        {
+          num_items: totalQuestions,
+          choices_per_item: choicesPerItem,
+          structureLocked: true,
+        },
+        latestVersion,
+      );
+
+      setStructureLocked(true);
+      setVersion(updatedVersion);
+      setInitialTotalQuestions(totalQuestions);
+      setInitialChoicesPerItem(choicesPerItem);
+      setOriginalMetadata((prev) =>
+        prev
+          ? {
+              ...prev,
+              structureLocked: true,
+              version: updatedVersion,
+              updatedAt: new Date(),
+            }
+          : prev,
+      );
+      setHasChanges(
+        title !== (originalMetadata?.title ?? "") ||
+          scheduleDate?.toISOString() !==
+            (originalMetadata?.date
+              ? new Date(originalMetadata.date).toISOString()
+              : null),
+      );
+
+      Toast.show({
+        type: "success",
+        text1: "Finalized",
+        text2: "Total questions and answer choices are now locked.",
+      });
+    } catch (error: any) {
+      console.error("Error finalizing exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Finalize Failed",
+        text2: error?.message || "Could not finalize exam.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            paddingTop: headerTopPadding,
-            backgroundColor: colors.headerBg,
-            borderBottomColor: colors.border,
-          },
-        ]}
-      >
-        <TouchableOpacity style={styles.backIcon} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={colors.title} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.title }]}>Edit Exam</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Conflict Warning Banner */}
-        {conflictDetected && (
-          <View style={styles.conflictBanner}>
-            <Ionicons name="warning" size={24} color="#ff9800" />
-            <View style={styles.conflictTextContainer}>
-              <Text style={styles.conflictTitle}>Conflict Detected</Text>
-              <Text style={styles.conflictMessage}>
-                This exam was modified by another user. Your changes may
-                overwrite theirs.
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={() => {
-                loadExamData();
-                setConflictDetected(false);
-              }}
-            >
-              <Ionicons name="refresh" size={20} color="#fff" />
-              <Text style={styles.refreshButtonText}>Refresh</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Status Badge */}
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.bg }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <SafeAreaView style={styles.container}>
         <View
           style={[
-            styles.statusBadge,
-            { backgroundColor: ExamService.getStatusColor(status) },
+            styles.createScreenHeader,
+            {
+              backgroundColor: colors.headerBg,
+              borderBottomColor: colors.border,
+            },
           ]}
         >
-          <Text style={styles.statusText}>{status}</Text>
-        </View>
-
-        {/* Editable Fields Section */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <Text style={styles.sectionTitle}>Editable Fields</Text>
-
-          {/* Title */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              Exam Title <Text style={styles.required}>*</Text>
-            </Text>
-            <TextInput
-              style={[styles.input, titleError ? styles.inputError : null]}
-              value={title}
-              onChangeText={setTitle}
-              placeholder="Enter exam title"
-              placeholderTextColor="#9ca3af"
-              maxLength={100}
-            />
-            {titleError ? (
-              <Text style={styles.errorText}>{titleError}</Text>
-            ) : null}
-            <Text style={styles.helperText}>{title.length}/100 characters</Text>
-          </View>
-
-          {/* Subject */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Subject</Text>
-            <TextInput
-              style={styles.input}
-              value={subject}
-              onChangeText={setSubject}
-              placeholder="Enter subject (optional)"
-              placeholderTextColor="#9ca3af"
-              maxLength={50}
-            />
-          </View>
-
-          {/* Section */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Section</Text>
-            <TextInput
-              style={styles.input}
-              value={section}
-              onChangeText={setSection}
-              placeholder="Enter section (optional)"
-              placeholderTextColor="#9ca3af"
-              maxLength={50}
-            />
-          </View>
-
-          {/* Schedule Date */}
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Schedule Date</Text>
-            <TouchableOpacity
-              style={[styles.dateButton, dateError ? styles.inputError : null]}
-              onPress={() => setShowDatePicker(true)}
+          <View style={styles.createScreenHeaderSpacer} />
+          <View style={styles.headerTitleGroup}>
+            <Text style={[styles.createSheetTitle, { color: colors.title }]}>Edit Exam</Text>
+            <View
+              style={[
+                styles.headerStatusBadge,
+                {
+                  backgroundColor: statusChipColors.backgroundColor,
+                  borderColor: statusChipColors.borderColor,
+                },
+              ]}
             >
-              <Ionicons name="calendar-outline" size={20} color="#3d5a3d" />
-              <Text style={styles.dateButtonText}>
-                {scheduleDate
-                  ? ExamService.formatDate(scheduleDate)
-                  : "Select date (optional)"}
-              </Text>
-            </TouchableOpacity>
-            {dateError ? (
-              <Text style={styles.errorText}>{dateError}</Text>
-            ) : null}
-            {scheduleDate && (
-              <TouchableOpacity
-                style={styles.clearDateButton}
-                onPress={() => setScheduleDate(null)}
+              <Text
+                style={[
+                  styles.headerStatusText,
+                  { color: statusChipColors.textColor },
+                ]}
               >
-                <Text style={styles.clearDateText}>Clear date</Text>
-              </TouchableOpacity>
-            )}
+                {displayStatus}
+              </Text>
+            </View>
           </View>
-
-          {showDatePicker && (
-            <DateTimePicker
-              value={scheduleDate || new Date()}
-              mode="date"
-              display="default"
-              onChange={handleDateChange}
-              minimumDate={new Date()}
-            />
-          )}
+          <TouchableOpacity
+            style={[
+              styles.createSheetClose,
+              { backgroundColor: darkModeEnabled ? "#24322c" : "#F3F5F8" },
+              saving && styles.closeButtonDisabled,
+            ]}
+            onPress={closeEditExam}
+            disabled={saving}
+          >
+            <Ionicons name="close" size={24} color="#A8AFBC" />
+          </TouchableOpacity>
         </View>
 
-        {/* Locked Fields Section */}
-        <View style={[styles.section, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Locked Fields</Text>
+        <ScrollView
+          style={styles.createSheetBody}
+          contentContainerStyle={styles.createSheetBodyContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+        <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
+          Exam Name <Text style={styles.requiredStar}>*</Text>
+        </Text>
+        <TextInput
+          style={[
+            styles.sheetInput,
+            { backgroundColor: colors.inputBg, borderColor: colors.border, color: darkModeEnabled ? colors.title : "#111827" },
+            title.trim().length >= 3 && styles.sheetInputValid,
+            titleError ? styles.sheetInputError : null,
+          ]}
+          value={title}
+          onChangeText={setTitle}
+          placeholder="Enter exam name"
+          placeholderTextColor="#B5BCC8"
+          maxLength={100}
+        />
+        {titleError ? <Text style={styles.fieldHint}>{titleError}</Text> : null}
+
+        <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
+          Schedule Date
+        </Text>
+        <TouchableOpacity
+          style={[
+            styles.sheetInput,
+            styles.sheetPicker,
+            { backgroundColor: colors.inputBg, borderColor: colors.border },
+            dateError ? styles.sheetInputError : null,
+          ]}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={scheduleDate ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
+            {scheduleDate ? ExamService.formatDate(scheduleDate) : "Select exam date"}
+          </Text>
+          <Ionicons name="calendar-outline" size={18} color="#B5BCC8" />
+        </TouchableOpacity>
+        {dateError ? <Text style={styles.fieldHint}>{dateError}</Text> : null}
+        {showDatePicker && (
+          <DateTimePicker
+            value={scheduleDate || new Date()}
+            mode="date"
+            display="default"
+            onChange={handleDateChange}
+            minimumDate={new Date()}
+          />
+        )}
+
+        {!structureLocked && (
+          <>
+            <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
+              Total Questions
+            </Text>
+            <View style={styles.questionOptionRow}>
+              {NUM_QUESTIONS_OPTIONS.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.questionOption,
+                    totalQuestions === option && styles.questionOptionActive,
+                  ]}
+                  onPress={() => setTotalQuestions(option)}
+                >
+                  <Text
+                    style={[
+                      styles.questionOptionText,
+                      totalQuestions === option && styles.questionOptionTextActive,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
+              Number of Answer Choices
+            </Text>
+            <View style={styles.questionOptionRow}>
+              <TouchableOpacity
+                style={[
+                  styles.choiceOption,
+                  choicesPerItem === 4 && styles.choiceOptionActive,
+                ]}
+                onPress={() => setChoicesPerItem(4)}
+              >
+                <Text
+                  style={[
+                    styles.choiceOptionTitle,
+                    choicesPerItem === 4 && styles.choiceOptionTitleActive,
+                  ]}
+                >
+                  A, B, C, D
+                </Text>
+                <Text
+                  style={[
+                    styles.choiceOptionSub,
+                    choicesPerItem === 4 && styles.choiceOptionSubActive,
+                  ]}
+                >
+                  4 Choices
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.choiceOption,
+                  choicesPerItem === 5 && styles.choiceOptionActive,
+                ]}
+                onPress={() => setChoicesPerItem(5)}
+              >
+                <Text
+                  style={[
+                    styles.choiceOptionTitle,
+                    choicesPerItem === 5 && styles.choiceOptionTitleActive,
+                  ]}
+                >
+                  A, B, C, D, E
+                </Text>
+                <Text
+                  style={[
+                    styles.choiceOptionSub,
+                    choicesPerItem === 5 && styles.choiceOptionSubActive,
+                  ]}
+                >
+                  5 Choices
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        <View style={[styles.lockedCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
+          <View style={styles.lockedCardHeader}>
+            <Text style={[styles.lockedCardTitle, { color: darkModeEnabled ? colors.title : "#111827" }]}>Locked Fields</Text>
             <View style={styles.lockedBadge}>
               <Ionicons name="lock-closed" size={12} color="#fff" />
               <Text style={styles.lockedText}>Read-only</Text>
@@ -801,59 +838,67 @@ export default function EditExamScreen() {
             <Text style={styles.lockedValue}>{examCode}</Text>
           </View>
 
+          <View style={styles.lockedDivider} />
+
+          <View style={styles.lockedField}>
+            <Text style={styles.lockedLabel}>Status</Text>
+            <Text style={styles.lockedValue}>{displayStatus}</Text>
+          </View>
+
+          <View style={styles.lockedDivider} />
+
           <View style={styles.lockedField}>
             <Text style={styles.lockedLabel}>Total Questions</Text>
-            <Text style={styles.lockedValue}>{totalQuestions}</Text>
+            <Text style={styles.lockedValue}>
+              {structureLocked ? totalQuestions : "Not finalized"}
+            </Text>
           </View>
+
+          <View style={styles.lockedDivider} />
+
+          <View style={styles.lockedField}>
+            <Text style={styles.lockedLabel}>Answer Choices</Text>
+            <Text style={styles.lockedValue}>
+              {structureLocked ? (choicesPerItem === 4 ? "A-D" : "A-E") : "Not finalized"}
+            </Text>
+          </View>
+
+          <View style={styles.lockedDivider} />
 
           <View style={styles.lockedField}>
             <Text style={styles.lockedLabel}>Version</Text>
             <Text style={styles.lockedValue}>v{version}</Text>
           </View>
-
-          <Text style={styles.lockedNote}>
-            Structural changes like question count cannot be modified after exam
-            creation.
-          </Text>
         </View>
-      </ScrollView>
 
-      {/* Action Buttons */}
-      <View
-        style={[
-          styles.actionButtons,
-          { backgroundColor: darkModeEnabled ? "#1a2520" : "#e5efe8", borderTopColor: colors.border },
-        ]}
-      >
-        <TouchableOpacity
-          style={styles.cancelButton}
-          onPress={() => router.back()}
-          disabled={saving}
-        >
-          <Text style={styles.cancelButtonText}>Cancel</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.saveButton,
-            (!hasChanges || saving) && styles.saveButtonDisabled,
-          ]}
-          onPress={handleSave}
-          disabled={!hasChanges || saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <Ionicons
-                name="checkmark-circle-outline"
-                size={20}
-                color="#fff"
-              />
-              <Text style={styles.saveButtonText}>Save Changes</Text>
-            </>
+        </ScrollView>
+
+        <View style={styles.createScreenFooter}>
+          {!hasChanges && <Text style={styles.validationText}>No changes detected.</Text>}
+          {!structureLocked && (
+            <TouchableOpacity
+              style={[styles.secondaryActionButton, saving && styles.createButtonDisabled]}
+              onPress={() => setShowFinalizeConfirmModal(true)}
+              disabled={saving}
+            >
+              <Text style={styles.secondaryActionButtonText}>Finalize</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={[
+              styles.sheetPrimaryButton,
+              (!hasChanges || saving) && styles.createButtonDisabled,
+            ]}
+            onPress={handleSave}
+            disabled={!hasChanges || saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.sheetPrimaryButtonText}>Save Changes</Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
       {/* Confirmation Modal */}
       <Modal
@@ -888,51 +933,112 @@ export default function EditExamScreen() {
         </View>
       </Modal>
 
+      <Modal
+        visible={showFinalizeConfirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFinalizeConfirmModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Ionicons name="lock-closed-outline" size={48} color="#ff9800" />
+            <Text style={styles.modalTitle}>Finalize Exam</Text>
+            <Text style={styles.modalMessage}>
+              Once you click finalize, you will no longer be able to change the
+              total questions and number of answer choices.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowFinalizeConfirmModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={confirmFinalize}
+              >
+                <Text style={styles.modalConfirmText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
-    </SafeAreaView>
+
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#edf3ee",
+    backgroundColor: "#F7F7F8",
   },
   centerContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#edf3ee",
+    backgroundColor: "#F7F7F8",
     padding: 20,
   },
-  header: {
+  createScreenHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
     paddingTop: 56,
     paddingBottom: 16,
-    backgroundColor: "#3d5a3d",
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#2f4a38",
+    borderBottomColor: "#EEF1F5",
   },
-  backIcon: {
-    padding: 4,
+  createScreenHeaderSpacer: {
+    width: 44,
+    height: 44,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#eef7f0",
+  headerTitleGroup: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
-  placeholder: {
-    width: 32,
+  createSheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
   },
-  scrollView: {
+  headerStatusBadge: {
+    minWidth: 76,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerStatusText: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  createSheetClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeButtonDisabled: {
+    opacity: 0.4,
+  },
+  createSheetBody: {
     flex: 1,
   },
-  scrollContent: {
+  createSheetBodyContent: {
     padding: 20,
-    paddingBottom: 40,
+    paddingBottom: 120,
   },
   conflictBanner: {
     flexDirection: "row",
@@ -972,37 +1078,140 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  statusBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 20,
+  sheetLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginBottom: 10,
+    marginTop: 14,
   },
-  statusText: {
-    color: "#fff",
-    fontSize: 14,
+  requiredStar: {
+    color: "#EF4444",
+  },
+  sheetInput: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetInputValid: {
+    borderColor: "#1FC27D",
+    backgroundColor: "#F0FDF8",
+  },
+  sheetInputError: {
+    borderColor: "#EF4444",
+    backgroundColor: "#FFF5F5",
+  },
+  sheetPicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetPickerValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetPickerPlaceholder: {
+    fontSize: 16,
+    color: "#B5BCC8",
+  },
+  questionOptionRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 2,
+  },
+  questionOption: {
+    flex: 1,
+    height: 78,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  questionOptionActive: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#3ED598",
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  questionOptionText: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#31394A",
+  },
+  questionOptionTextActive: {
+    color: "#1DAF72",
+  },
+  choiceOption: {
+    flex: 1,
+    minHeight: 92,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    justifyContent: "center",
+    gap: 6,
+  },
+  choiceOptionActive: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#3ED598",
+    shadowColor: "#1FC27D",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  choiceOptionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#31394A",
+  },
+  choiceOptionTitleActive: {
+    color: "#1DAF72",
+  },
+  choiceOptionSub: {
+    fontSize: 12,
+    color: "#6B7280",
     fontWeight: "600",
   },
-  section: {
-    backgroundColor: "#f3f7f4",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#cad9cf",
+  choiceOptionSubActive: {
+    color: "#1DAF72",
   },
-  sectionHeader: {
+  fieldHint: {
+    fontSize: 11,
+    color: "#EF4444",
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  lockedCard: {
+    marginTop: 22,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 18,
+  },
+  lockedCardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#2b4337",
-    marginBottom: 12,
+  lockedCardTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#111827",
   },
   lockedBadge: {
     flexDirection: "row",
@@ -1018,31 +1227,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "600",
   },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#2b4337",
-    marginBottom: 8,
-  },
-  required: {
-    color: "#e74c3c",
-  },
-  input: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#cad9cf",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    color: "#2b4337",
-  },
-  inputError: {
-    borderColor: "#e74c3c",
-    borderWidth: 2,
-  },
   errorText: {
     color: "#e74c3c",
     fontSize: 12,
@@ -1053,35 +1237,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  dateButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#cad9cf",
-    borderRadius: 8,
-    padding: 12,
-    gap: 8,
-  },
-  dateButtonText: {
-    fontSize: 16,
-    color: "#2b4337",
-  },
-  clearDateButton: {
-    marginTop: 8,
-    alignSelf: "flex-start",
-  },
-  clearDateText: {
-    color: "#e74c3c",
-    fontSize: 14,
-  },
   lockedField: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d7e4db",
+  },
+  lockedDivider: {
+    height: 1,
+    backgroundColor: "#E5E7EB",
   },
   lockedLabel: {
     fontSize: 14,
@@ -1103,46 +1267,49 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#4f6b5a",
   },
-  actionButtons: {
-    flexDirection: "row",
-    padding: 16,
-    gap: 12,
-    backgroundColor: "#e5efe8",
+  createScreenFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 34,
+    backgroundColor: "#F7F7F8",
     borderTopWidth: 1,
-    borderTopColor: "#cad9cf",
+    borderTopColor: "#EEF1F5",
   },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 14,
+  sheetPrimaryButton: {
+    height: 58,
+    borderRadius: 16,
+    backgroundColor: "#1FC27D",
     alignItems: "center",
     justifyContent: "center",
+  },
+  secondaryActionButton: {
+    height: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#cad9cf",
-  },
-  cancelButtonText: {
-    color: "#3d5a3d",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: "#2d7a5f",
-    borderRadius: 8,
-    padding: 14,
-    flexDirection: "row",
+    borderColor: "#1FC27D",
+    backgroundColor: "#EAF7F0",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    marginBottom: 10,
   },
-  saveButtonDisabled: {
-    backgroundColor: "#9ca3af",
+  secondaryActionButtonText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#14925F",
   },
-  saveButtonText: {
-    color: "#fff",
-    fontSize: 15,
+  sheetPrimaryButtonText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  createButtonDisabled: {
+    opacity: 0.45,
+  },
+  validationText: {
+    marginBottom: 10,
+    fontSize: 12,
     fontWeight: "600",
+    color: "#9CA3AF",
   },
   modalOverlay: {
     flex: 1,

@@ -128,6 +128,7 @@ function AnimatedStatBar({
 }
 
 export default function ClassDetailsScreen() {
+  const YEAR_OPTIONS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
   const router = useRouter();
   const params = useLocalSearchParams();
   const classId = params.classId as string;
@@ -180,13 +181,21 @@ export default function ClassDetailsScreen() {
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] = useState(false);
   const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
+  const [editClassModalVisible, setEditClassModalVisible] = useState(false);
+  const [yearPickerVisible, setYearPickerVisible] = useState(false);
   const [examMenuVisible, setExamMenuVisible] = useState(false);
   const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
   const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
   const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
-  const [deleteExamConfirmVisible, setDeleteExamConfirmVisible] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [addingStudent, setAddingStudent] = useState(false);
+  const [savingClassEdit, setSavingClassEdit] = useState(false);
+  const [classForm, setClassForm] = useState({
+    class_name: "",
+    course_subject: "",
+    room: "",
+    year: "",
+  });
   const studentSearchInputRef = useRef<TextInput>(null);
   const tabSlideAnim = useRef(new Animated.Value(0)).current;
   const listNavPillWidth = listNavWidth > 0 ? (listNavWidth - 6) / 2 : 120;
@@ -240,6 +249,90 @@ export default function ClassDetailsScreen() {
 
   const classDataRef = useRef<Class | null>(null);
   useEffect(() => { classDataRef.current = classData; }, [classData]);
+
+  const trimmedClassForm = {
+    class_name: classForm.class_name.trim(),
+    course_subject: classForm.course_subject.trim(),
+    room: classForm.room.trim(),
+  };
+  const canSaveClassEdit =
+    trimmedClassForm.class_name.length >= 4 &&
+    trimmedClassForm.course_subject.length >= 5 &&
+    Boolean(classForm.year) &&
+    (trimmedClassForm.room.length === 0 || /^\d{3}$/.test(trimmedClassForm.room)) &&
+    !savingClassEdit;
+
+  const openEditClassModal = useCallback(() => {
+    if (!classData) return;
+    setClassForm({
+      class_name: classData.class_name ?? "",
+      course_subject: classData.course_subject ?? "",
+      room: classData.room ?? "",
+      year: classData.year ?? "",
+    });
+    setSettingsMenuVisible(false);
+    setEditClassModalVisible(true);
+  }, [classData]);
+
+  const closeEditClassModal = useCallback(() => {
+    setEditClassModalVisible(false);
+    setYearPickerVisible(false);
+  }, []);
+
+  const handleSaveClassEdit = async () => {
+    if (!classData) return;
+
+    if (!trimmedClassForm.class_name) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
+      return;
+    }
+    if (trimmedClassForm.class_name.length < 4) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Program must be at least 4 characters" });
+      return;
+    }
+    if (!trimmedClassForm.course_subject) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course is required" });
+      return;
+    }
+    if (trimmedClassForm.course_subject.length < 5) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course must be at least 5 characters" });
+      return;
+    }
+    if (!classForm.year) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Year is required" });
+      return;
+    }
+    if (trimmedClassForm.room.length > 0 && !/^\d{3}$/.test(trimmedClassForm.room)) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Room must be exactly 3 digits" });
+      return;
+    }
+
+    try {
+      setSavingClassEdit(true);
+      await ClassService.updateClass(classData.id, {
+        class_name: trimmedClassForm.class_name,
+        course_subject: trimmedClassForm.course_subject,
+        room: trimmedClassForm.room || undefined,
+        year: classForm.year,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Success",
+        text2: "Class updated successfully",
+      });
+      closeEditClassModal();
+      await loadClassData();
+    } catch (error) {
+      console.error("Error updating class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to update class",
+      });
+    } finally {
+      setSavingClassEdit(false);
+    }
+  };
 
   const loadExams = useCallback(async () => {
     const requestId = ++examLoadRequestRef.current;
@@ -397,7 +490,7 @@ export default function ClassDetailsScreen() {
       typeof pageX === "number"
         ? Math.min(Math.max(16, pageX - menuWidth + 24), screenWidth - menuWidth - 16)
         : fallbackLeft;
-    const top = typeof pageY === "number" ? Math.max(96, pageY - 8) : 150;
+    const top = typeof pageY === "number" ? Math.max(96, pageY - 72) : 140;
 
     setSelectedExam(exam);
     setExamMenuPosition({ top, left });
@@ -411,7 +504,6 @@ export default function ClassDetailsScreen() {
   const clearExamSelection = useCallback(() => {
     setSelectedExam(null);
     setArchiveExamConfirmVisible(false);
-    setDeleteExamConfirmVisible(false);
   }, []);
 
   const handleImportComplete = async (result: ImportResult) => {
@@ -632,6 +724,7 @@ export default function ClassDetailsScreen() {
   };
 
   const handleBulkImport = async (fileContent: string, isExcel: boolean) => {
+    let successCount = 0;
     try {
       const isExcelFile = isExcel;
       let rows;
@@ -697,7 +790,6 @@ export default function ClassDetailsScreen() {
         errors.push(...duplicateInClassErrors);
       }
 
-      let successCount = 0;
       for (const student of validStudents) {
         try {
           await ClassService.addStudent(classId, student);
@@ -756,21 +848,10 @@ export default function ClassDetailsScreen() {
     setArchiveClassConfirmVisible(true);
   };
 
-  const requestDeleteClass = () => {
-    setSettingsMenuVisible(false);
-    setDeleteClassConfirmVisible(true);
-  };
-
   const requestArchiveExam = () => {
     if (!selectedExam) return;
     setExamMenuVisible(false);
     setArchiveExamConfirmVisible(true);
-  };
-
-  const requestDeleteExam = () => {
-    if (!selectedExam) return;
-    setExamMenuVisible(false);
-    setDeleteExamConfirmVisible(true);
   };
 
   const stats = useMemo(() => {
@@ -950,7 +1031,7 @@ export default function ClassDetailsScreen() {
                 >
                   <View style={styles.examBody}>
                     <Text style={styles.examTitle}>{exam.title}</Text>
-                    <Text style={styles.examMeta}>{exam.questions} items · {exam.subject}</Text>
+                    <Text style={styles.examMeta}>{exam.questions} items</Text>
                     {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
                   </View>
                   <View style={styles.examRight}>
@@ -1164,16 +1245,16 @@ export default function ClassDetailsScreen() {
                 Archive Class
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                requestDeleteClass();
-              }}
-            >
-              <Text style={[styles.menuItemText, styles.menuDeleteText]}>
-                Delete Class
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  openEditClassModal();
+                }}
+              >
+                <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                  Edit Class
+                </Text>
+              </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1248,8 +1329,16 @@ export default function ClassDetailsScreen() {
             <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
               <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={requestDeleteExam}>
-              <Text style={[styles.menuItemText, styles.menuDeleteText]}>Delete Exam</Text>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                closeExamMenu();
+                if (selectedExam) {
+                  router.push(`/(tabs)/edit-exam?examId=${selectedExam.id}&classId=${classId}`);
+                }
+              }}
+            >
+              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>Edit Exam</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1432,28 +1521,171 @@ export default function ClassDetailsScreen() {
         }}
       />
 
-<ConfirmationModal
-  visible={deleteExamConfirmVisible}
-  title="Delete Item"
-  message={`Are you sure you want to delete ${
-    selectedExam?.title ?? "this exam"
-  }? This action cannot be undone.`}
-  cancelText="Cancel"
-  confirmText="Delete"
-  destructive
-  onCancel={clearExamSelection}
-  onConfirm={() => {
-    setDeleteExamConfirmVisible(false);
-    handleDeleteExam();
-  }}
-/>
-
       <StudentImportModal
         visible={showImportModal}
         onClose={() => setShowImportModal(false)}
         selectedClassId={classId}
         onImportComplete={handleImportComplete}
       />
+
+      <Modal
+        visible={editClassModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={closeEditClassModal}
+      >
+        <View style={styles.createScreen}>
+          <View style={styles.createScreenHeader}>
+            <View style={styles.createScreenHeaderSpacer} />
+            <Text style={styles.createSheetTitle}>Edit Class</Text>
+            <TouchableOpacity
+              style={styles.createSheetClose}
+              onPress={closeEditClassModal}
+              disabled={savingClassEdit}
+            >
+              <Ionicons name="close" size={24} color="#A8AFBC" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.createSheetBody}
+            contentContainerStyle={styles.createSheetBodyContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.sheetLabel}>
+              Program <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter program"
+              placeholderTextColor="#B5BCC8"
+              value={classForm.class_name}
+              onChangeText={(text) =>
+                setClassForm((prev) => ({ ...prev, class_name: text }))
+              }
+              maxLength={50}
+            />
+            {trimmedClassForm.class_name.length > 0 &&
+            trimmedClassForm.class_name.length < 4 ? (
+              <Text style={styles.fieldHint}>At least 4 characters required</Text>
+            ) : null}
+
+            <Text style={styles.sheetLabel}>
+              Course <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter course"
+              placeholderTextColor="#B5BCC8"
+              value={classForm.course_subject}
+              onChangeText={(text) =>
+                setClassForm((prev) => ({ ...prev, course_subject: text }))
+              }
+              maxLength={50}
+            />
+            {trimmedClassForm.course_subject.length > 0 &&
+            trimmedClassForm.course_subject.length < 5 ? (
+              <Text style={styles.fieldHint}>At least 5 characters required</Text>
+            ) : null}
+
+            <Text style={styles.sheetLabel}>
+              Year <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={styles.sheetPicker}
+              onPress={() => setYearPickerVisible(true)}
+            >
+              <Text
+                style={
+                  classForm.year
+                    ? styles.sheetPickerValue
+                    : styles.sheetPickerPlaceholder
+                }
+              >
+                {classForm.year || "Select year level"}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#B5BCC8" />
+            </TouchableOpacity>
+
+            <Text style={styles.sheetLabel}>
+              Room <Text style={styles.optionalLabel}>(Optional)</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter room"
+              placeholderTextColor="#B5BCC8"
+              keyboardType="numeric"
+              maxLength={3}
+              value={classForm.room}
+              onChangeText={(text) => {
+                const digits = text.replace(/[^0-9]/g, "").slice(0, 3);
+                setClassForm((prev) => ({ ...prev, room: digits }));
+              }}
+            />
+            {trimmedClassForm.room.length > 0 &&
+            !/^\d{3}$/.test(trimmedClassForm.room) ? (
+              <Text style={styles.fieldHint}>Exactly 3 digits</Text>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.createScreenFooter}>
+            <TouchableOpacity
+              style={[
+                styles.sheetPrimaryButton,
+                !canSaveClassEdit && styles.createButtonDisabled,
+              ]}
+              onPress={handleSaveClassEdit}
+              disabled={!canSaveClassEdit}
+            >
+              {savingClassEdit ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.sheetPrimaryButtonText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={yearPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setYearPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setYearPickerVisible(false)}
+        >
+          <View style={styles.yearPickerContent}>
+            <Text style={styles.yearPickerTitle}>Select Year Level</Text>
+            {YEAR_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.yearPickerItem,
+                  classForm.year === option && styles.yearPickerItemSelected,
+                ]}
+                onPress={() => {
+                  setClassForm((prev) => ({ ...prev, year: option }));
+                  setYearPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.yearPickerItemText,
+                    classForm.year === option && styles.yearPickerItemTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
 
     </View>
@@ -2025,6 +2257,147 @@ const styles = StyleSheet.create({
   },
   menuDeleteText: {
     color: "#EF4444",
+  },
+  createScreen: {
+    flex: 1,
+    backgroundColor: "#F7F7F8",
+  },
+  createScreenHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    paddingTop: 56,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+  },
+  createScreenHeaderSpacer: {
+    width: 44,
+    height: 44,
+  },
+  createSheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  createSheetClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F5F8",
+  },
+  createSheetBody: {
+    flex: 1,
+  },
+  createSheetBodyContent: {
+    padding: 20,
+    paddingBottom: 120,
+  },
+  sheetLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginBottom: 10,
+    marginTop: 14,
+  },
+  requiredStar: {
+    color: "#EF4444",
+  },
+  optionalLabel: {
+    color: "#94A3B8",
+    fontWeight: "700",
+  },
+  sheetInput: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetPicker: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetPickerValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetPickerPlaceholder: {
+    fontSize: 16,
+    color: "#B5BCC8",
+  },
+  fieldHint: {
+    fontSize: 11,
+    color: "#EF4444",
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  createScreenFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 22,
+    backgroundColor: "#F7F7F8",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F5",
+  },
+  sheetPrimaryButton: {
+    height: 58,
+    borderRadius: 16,
+    backgroundColor: "#1FC27D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetPrimaryButtonText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  createButtonDisabled: {
+    opacity: 0.45,
+  },
+  yearPickerContent: {
+    width: 260,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 18,
+  },
+  yearPickerTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginBottom: 12,
+  },
+  yearPickerItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  yearPickerItemSelected: {
+    backgroundColor: "#EAF7F0",
+  },
+  yearPickerItemText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  yearPickerItemTextSelected: {
+    color: "#14925F",
   },
   loadingText: {
     marginTop: 14,

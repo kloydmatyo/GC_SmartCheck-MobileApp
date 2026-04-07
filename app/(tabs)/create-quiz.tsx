@@ -5,6 +5,7 @@ import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
@@ -80,6 +81,7 @@ export default function CreateQuizScreen() {
   const [examType] = useState<"board" | "diagnostic">("board");
   const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
   const [examDate, setExamDate] = useState<Date | null>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
@@ -489,8 +491,16 @@ export default function CreateQuizScreen() {
   const canProceed = Boolean(
     quizName.trim() &&
     quizName.trim().length <= MAX_FIELD_LENGTH &&
-    numQuestions,
+    numQuestions &&
+    examDate,
   );
+
+  const handleDateChange = (_event: any, selectedDate?: Date) => {
+    setShowDatePicker(Platform.OS === "ios");
+    if (selectedDate) {
+      setExamDate(selectedDate);
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -608,6 +618,29 @@ export default function CreateQuizScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.formLabel}>Schedule Date</Text>
+          <TouchableOpacity
+            style={styles.dateButton}
+            onPress={() => setShowDatePicker(true)}
+            disabled={loading}
+          >
+            <Ionicons name="calendar-outline" size={20} color="#1DAF72" />
+            <Text style={styles.dateButtonText}>
+              {examDate ? formatDateForStorage(examDate) : "Select exam date"}
+            </Text>
+          </TouchableOpacity>
+          {showDatePicker && (
+            <DateTimePicker
+              value={examDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={handleDateChange}
+              minimumDate={new Date()}
+            />
+          )}
         </View>
 
 
@@ -807,6 +840,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 16,
     color: "#1F2937",
+  },
+  dateButton: {
+    height: 64,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: "#1F2937",
+    fontWeight: "600",
   },
   questionOptionRow: {
     flexDirection: "row",
