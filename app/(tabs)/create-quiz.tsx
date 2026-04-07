@@ -5,7 +5,6 @@ import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
@@ -55,12 +54,6 @@ const generateExamCode = (): string => {
 const formatDateForStorage = (date: Date): string =>
   date.toISOString().split("T")[0];
 
-const toStartOfDay = (date: Date): Date => {
-  const normalized = new Date(date);
-  normalized.setHours(0, 0, 0, 0);
-  return normalized;
-};
-
 export default function CreateQuizScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -80,8 +73,6 @@ export default function CreateQuizScreen() {
   const [subject, setSubject] = useState("");
   const [examType] = useState<"board" | "diagnostic">("board");
   const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
-  const [examDate, setExamDate] = useState<Date | null>(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
@@ -118,7 +109,6 @@ export default function CreateQuizScreen() {
       setNumQuestions(null);
       setSubject("");
       setChoicesPerItem(4);
-      setExamDate(new Date());
       setSelectedClassId(classIdParam || null);
       setLoading(false);
       setReviewVisible(false);
@@ -263,28 +253,6 @@ export default function CreateQuizScreen() {
       return;
     }
 
-    if (!examDate) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select an exam date",
-      });
-      return;
-    }
-
-    const today = toStartOfDay(new Date());
-    const selectedDate = toStartOfDay(examDate);
-    if (selectedDate < today) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Exam date cannot be in the past",
-      });
-      return;
-    }
-
     if (!reviewExamCode) {
       setReviewExamCode(generateExamCode());
     }
@@ -323,30 +291,6 @@ export default function CreateQuizScreen() {
       return;
     }
 
-
-
-    if (!examDate) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select an exam date",
-      });
-      return;
-    }
-
-    const today = toStartOfDay(new Date());
-    const selectedDate = toStartOfDay(examDate);
-    if (selectedDate < today) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Exam date cannot be in the past",
-      });
-      return;
-    }
-
     try {
       setLoading(true);
       const currentUser = auth.currentUser;
@@ -373,7 +317,7 @@ export default function CreateQuizScreen() {
       console.log("User profile:", userProfile);
       console.log("Instructor ID:", instructorId);
 
-      const currentDate = formatDateForStorage(examDate);
+      const currentDate = formatDateForStorage(new Date());
       const selectedClass =
         classOptions.find((cls) => cls.id === selectedClassId) || null;
 
@@ -491,16 +435,8 @@ export default function CreateQuizScreen() {
   const canProceed = Boolean(
     quizName.trim() &&
     quizName.trim().length <= MAX_FIELD_LENGTH &&
-    numQuestions &&
-    examDate,
+    numQuestions,
   );
-
-  const handleDateChange = (_event: any, selectedDate?: Date) => {
-    setShowDatePicker(Platform.OS === "ios");
-    if (selectedDate) {
-      setExamDate(selectedDate);
-    }
-  };
 
   return (
     <KeyboardAvoidingView
@@ -620,30 +556,6 @@ export default function CreateQuizScreen() {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.formLabel}>Schedule Date</Text>
-          <TouchableOpacity
-            style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
-            disabled={loading}
-          >
-            <Ionicons name="calendar-outline" size={20} color="#1DAF72" />
-            <Text style={styles.dateButtonText}>
-              {examDate ? formatDateForStorage(examDate) : "Select exam date"}
-            </Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={examDate || new Date()}
-              mode="date"
-              display="default"
-              onChange={handleDateChange}
-              minimumDate={new Date()}
-            />
-          )}
-        </View>
-
-
       </ScrollView>
 
       <View style={styles.lightFooter}>
@@ -704,12 +616,6 @@ export default function CreateQuizScreen() {
                   {choicesPerItem === 4 ? "A, B, C, D" : "A, B, C, D, E"}
                 </Text>
               </View>
-            </View>
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Exam Date</Text>
-              <Text style={styles.reviewValue}>
-                {examDate ? formatDateForStorage(examDate) : "Not set"}
-              </Text>
             </View>
             <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>Exam Code</Text>
@@ -840,22 +746,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     fontSize: 16,
     color: "#1F2937",
-  },
-  dateButton: {
-    height: 64,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#E8EBF0",
-    paddingHorizontal: 18,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  dateButtonText: {
-    fontSize: 16,
-    color: "#1F2937",
-    fontWeight: "600",
   },
   questionOptionRow: {
     flexDirection: "row",

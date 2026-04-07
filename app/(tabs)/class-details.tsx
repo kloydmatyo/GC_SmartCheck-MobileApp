@@ -2,7 +2,6 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,9 +9,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Animated,
-  Dimensions,
   DeviceEventEmitter,
-  FlatList,
+  Dimensions,
   Modal,
   Platform,
   ScrollView,
@@ -20,31 +18,26 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 import Toast from "react-native-toast-message";
 import * as XLSX from "xlsx";
 
-import { auth, db } from "@/config/firebase";
 import { StudentImportModal } from "@/components/student/StudentImportModal";
+import { auth, db } from "@/config/firebase";
 
 import { DashboardService } from "@/services/dashboardService";
 import { ImportResult } from "@/types/student";
 
 import {
-  collection,
   deleteDoc,
   doc,
-  getDocs,
-  query,
-  updateDoc,
-  where,
+  updateDoc
 } from "firebase/firestore";
 
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
-import { ExamService } from "../../services/examService";
 import { StudentImportService } from "../../services/studentImportService";
 import { Class } from "../../types/class";
 
@@ -66,6 +59,7 @@ type ExamRow = {
   scans: number;
   average: number;
   subject: string;
+  createdDate?: string;
   examCode?: string;
   classId?: string;
   className?: string;
@@ -366,6 +360,7 @@ export default function ClassDetailsScreen() {
           scans: exam.papers || 0,
           average: 0,
           subject: exam.class || exam.subject || "General",
+          createdDate: exam.date || "No date",
           examCode: exam.examCode || "",
           classId: exam.classId,
           className: exam.className,
@@ -1027,15 +1022,26 @@ export default function ClassDetailsScreen() {
               <View key={exam.id} style={styles.examCard}>
                 <TouchableOpacity
                   style={styles.examCardPressable}
-                  onPress={() => router.push(`/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`)}
-                >
-                  <View style={styles.examBody}>
-                    <Text style={styles.examTitle}>{exam.title}</Text>
-                    <Text style={styles.examMeta}>{exam.questions} items</Text>
-                    {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
-                  </View>
-                  <View style={styles.examRight}>
-                    <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
+                    onPress={() => router.push(`/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`)}
+                  >
+                    <View style={styles.examBody}>
+                      <Text style={styles.examTitle}>{exam.title}</Text>
+                      <Text style={styles.examMeta}>{exam.questions} items</Text>
+                      {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
+                      {exam.createdDate ? (
+                        <View style={styles.examDateRow}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={12}
+                            color="#7E8798"
+                            style={styles.examDateIcon}
+                          />
+                          <Text style={styles.examMeta}>{exam.createdDate}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.examRight}>
+                      <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
                       {exam.average > 0 ? `${exam.average}%` : "—"}
                     </Text>
                   </View>
@@ -2011,9 +2017,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#9CA3AF",
   },
+  examDateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+  examDateIcon: {
+    marginTop: 5,
+  },
   examCodeMeta: {
-    marginTop: 3,
-    fontSize: 11,
+    marginTop: 5,
+    fontSize: 12,
     color: "#6B7280",
     fontWeight: "600",
   },

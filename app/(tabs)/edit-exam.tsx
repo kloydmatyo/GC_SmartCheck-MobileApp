@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import DateTimePicker from "@react-native-community/datetimepicker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -50,8 +49,6 @@ export default function EditExamScreen() {
   );
   // Editable fields
   const [title, setTitle] = useState("");
-  const [scheduleDate, setScheduleDate] = useState<Date | null>(null);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
   const [initialTotalQuestions, setInitialTotalQuestions] = useState(0);
   const [initialChoicesPerItem, setInitialChoicesPerItem] = useState<4 | 5>(4);
@@ -67,7 +64,6 @@ export default function EditExamScreen() {
 
   // Validation errors
   const [titleError, setTitleError] = useState("");
-  const [dateError, setDateError] = useState("");
 
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -131,7 +127,7 @@ export default function EditExamScreen() {
   useEffect(() => {
     checkForChanges();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, scheduleDate, totalQuestions, choicesPerItem]);
+  }, [title, totalQuestions, choicesPerItem]);
 
   const loadExamData = async () => {
     try {
@@ -198,9 +194,6 @@ export default function EditExamScreen() {
       // Set editable field
       setOriginalMetadata(examData.metadata);
       setTitle(examData.metadata.title);
-      setScheduleDate(
-        examData.metadata.date ? new Date(examData.metadata.date) : null,
-      );
       setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
       setStructureLocked(Boolean(examData.metadata.structureLocked));
 
@@ -231,11 +224,7 @@ export default function EditExamScreen() {
     const changed =
       title !== originalMetadata.title ||
       totalQuestions !== initialTotalQuestions ||
-      choicesPerItem !== initialChoicesPerItem ||
-      scheduleDate?.toISOString() !==
-        (originalMetadata.date
-          ? new Date(originalMetadata.date).toISOString()
-          : null);
+      choicesPerItem !== initialChoicesPerItem;
     setHasChanges(changed);
   };
 
@@ -254,20 +243,6 @@ export default function EditExamScreen() {
       isValid = false;
     } else {
       setTitleError("");
-    }
-
-    if (scheduleDate) {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-
-      if (scheduleDate < now) {
-        setDateError("Schedule date cannot be in the past");
-        isValid = false;
-      } else {
-        setDateError("");
-      }
-    } else {
-      setDateError("");
     }
 
     return isValid;
@@ -375,7 +350,6 @@ export default function EditExamScreen() {
       // Prepare update data
       const updateData = {
         title: title.trim(),
-        date: scheduleDate?.toISOString() || null,
         num_items: totalQuestions,
         choices_per_item: choicesPerItem,
       };
@@ -387,12 +361,6 @@ export default function EditExamScreen() {
           changes.title = {
             old: originalMetadata.title,
             new: updateData.title,
-          };
-        }
-        if (updateData.date !== (originalMetadata.date ?? null)) {
-          changes.date = {
-            old: originalMetadata.date ?? null,
-            new: updateData.date,
           };
         }
         if (updateData.num_items !== initialTotalQuestions) {
@@ -467,7 +435,6 @@ export default function EditExamScreen() {
       setOriginalMetadata({
         ...originalMetadata!,
         title: updateData.title,
-        date: updateData.date || undefined,
         version: updatedVersion,
         updatedAt: new Date(),
       });
@@ -491,7 +458,6 @@ export default function EditExamScreen() {
         try {
           const rollbackData = {
             title: originalMetadata.title,
-            date: originalMetadata.date ?? null,
             num_items: initialTotalQuestions,
             choices_per_item: initialChoicesPerItem,
           };
@@ -504,9 +470,6 @@ export default function EditExamScreen() {
 
           setVersion(rolledBackVersion);
           setTitle(originalMetadata.title);
-          setScheduleDate(
-            originalMetadata.date ? new Date(originalMetadata.date) : null,
-          );
           setTotalQuestions(initialTotalQuestions);
           setChoicesPerItem(initialChoicesPerItem);
           setHasChanges(false);
@@ -573,13 +536,6 @@ export default function EditExamScreen() {
     );
   }
 
-  const handleDateChange = (_event: any, selectedDate?: Date) => {
-    setShowDatePicker(false);
-    if (selectedDate) {
-      setScheduleDate(selectedDate);
-    }
-  };
-
   const confirmFinalize = async () => {
     setShowFinalizeConfirmModal(false);
     setSaving(true);
@@ -615,11 +571,7 @@ export default function EditExamScreen() {
           : prev,
       );
       setHasChanges(
-        title !== (originalMetadata?.title ?? "") ||
-          scheduleDate?.toISOString() !==
-            (originalMetadata?.date
-              ? new Date(originalMetadata.date).toISOString()
-              : null),
+        title !== (originalMetadata?.title ?? ""),
       );
 
       Toast.show({
@@ -712,34 +664,6 @@ export default function EditExamScreen() {
           maxLength={100}
         />
         {titleError ? <Text style={styles.fieldHint}>{titleError}</Text> : null}
-
-        <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
-          Schedule Date
-        </Text>
-        <TouchableOpacity
-          style={[
-            styles.sheetInput,
-            styles.sheetPicker,
-            { backgroundColor: colors.inputBg, borderColor: colors.border },
-            dateError ? styles.sheetInputError : null,
-          ]}
-          onPress={() => setShowDatePicker(true)}
-        >
-          <Text style={scheduleDate ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
-            {scheduleDate ? ExamService.formatDate(scheduleDate) : "Select exam date"}
-          </Text>
-          <Ionicons name="calendar-outline" size={18} color="#B5BCC8" />
-        </TouchableOpacity>
-        {dateError ? <Text style={styles.fieldHint}>{dateError}</Text> : null}
-        {showDatePicker && (
-          <DateTimePicker
-            value={scheduleDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={handleDateChange}
-            minimumDate={new Date()}
-          />
-        )}
 
         {!structureLocked && (
           <>
