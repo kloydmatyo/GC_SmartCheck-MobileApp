@@ -300,15 +300,15 @@ const [classMenuPosition, setClassMenuPosition] = useState({
   const hasTooLong = [trimmedForm.class_name, trimmedForm.course_subject].some(
     (value) => value.length > MAX_FIELD_LENGTH,
   );
-  const canCreateClass =
+  const isClassFormValid =
     !hasMissingRequired &&
     !hasClassNameTooShort &&
     !hasCourseSubjectTooShort &&
     !hasRoomInvalid &&
     !hasTooLong &&
     trimmedForm.class_name.length >= 4 &&
-    trimmedForm.course_subject.length >= 5 &&
-    !creating;
+    trimmedForm.course_subject.length >= 5;
+  const canCreateClass = isClassFormValid && !creating;
 
   const handleEditClass = (classItem: Class) => {
     setSelectedClass(classItem);
@@ -417,6 +417,9 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           <View style={styles.classHeader}>
             <View style={styles.classHeaderLeft}>
               <Text style={styles.className}>{item.class_name}</Text>
+              {!!item.course_subject && (
+                <Text style={styles.classCourse}>{item.course_subject}</Text>
+              )}
             </View>
             <View style={styles.classHeaderRight}>
               <Text style={[styles.classRate, { color: accentColor }]}>
@@ -737,10 +740,10 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               </View>
             </View>
 
-          </ScrollView>
-
-          <View style={styles.createScreenFooter}>
-            {!canCreateClass && (
+            </ScrollView>
+  
+            <View style={styles.createScreenFooter}>
+            {!isClassFormValid && (
               <Text style={styles.validationText}>
                 {hasTooLong
                   ? "Keep each field under 50 characters."
@@ -1024,6 +1027,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#1F2937",
     lineHeight: 24,
+  },
+  classCourse: {
+    marginTop: 3,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
   },
   classHeaderLeft: {
     flex: 1,
