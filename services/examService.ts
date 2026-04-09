@@ -314,6 +314,23 @@ export class ExamService {
         throw new Error("Staging quiz not found");
       }
 
+      const updateCachedAnswerKey = async (
+        resolvedExamId: string,
+        answerKeyPayload: Record<string, any>,
+      ) => {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedQuiz = cacheRealm.objectForPrimaryKey<QuizCache>(
+          "QuizCache",
+          resolvedExamId,
+        );
+        if (!cachedQuiz) return;
+
+        cacheRealm.write(() => {
+          cachedQuiz.answerKey = JSON.stringify(answerKeyPayload);
+          cachedQuiz.updatedAt = new Date();
+        });
+      };
+
       if (!isOnline) {
         // Queue for sync if it's a Firestore ID but we're offline
         console.log("[ExamService] Offline. Queueing answer key update...");
@@ -324,6 +341,18 @@ export class ExamService {
           await import("./offlineStorageService");
         await OfflineStorageService.queueUpdate(examId, "update", {
           answerKey: { answers, locked: false },
+        });
+
+        await updateCachedAnswerKey(examId, {
+          examId,
+          answers,
+          locked: false,
+          version: 1,
+          questionSettings: answers.map((a, i) => ({
+            questionNumber: i + 1,
+            correctAnswer: a,
+            points: 1,
+          })),
         });
         return;
       }
@@ -371,6 +400,11 @@ export class ExamService {
       };
 
       await setDoc(akRef, answerKeyData, { merge: true });
+      await updateCachedAnswerKey(examId, {
+        id: akRef.id,
+        ...answerKeyData,
+        updatedAt: new Date().toISOString(),
+      });
       console.log("[ExamService] Answer key updated online");
     } catch (err) {
       console.error("Error in updateAnswerKey:", err);

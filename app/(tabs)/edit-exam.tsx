@@ -68,6 +68,7 @@ export default function EditExamScreen() {
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showFinalizeConfirmModal, setShowFinalizeConfirmModal] = useState(false);
+  const [showDiscardConfirmModal, setShowDiscardConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const displayStatus = structureLocked ? "Final" : status;
@@ -268,6 +269,15 @@ export default function EditExamScreen() {
     }
 
     setShowConfirmModal(true);
+  };
+
+  const handleAttemptClose = () => {
+    if (saving) return;
+    if (hasChanges) {
+      setShowDiscardConfirmModal(true);
+      return;
+    }
+    closeEditExam();
   };
 
   const getErrorText = (error: any): string =>
@@ -634,7 +644,7 @@ export default function EditExamScreen() {
               { backgroundColor: darkModeEnabled ? "#24322c" : "#F3F5F8" },
               saving && styles.closeButtonDisabled,
             ]}
-            onPress={closeEditExam}
+            onPress={handleAttemptClose}
             disabled={saving}
           >
             <Ionicons name="close" size={24} color="#A8AFBC" />
@@ -883,6 +893,40 @@ export default function EditExamScreen() {
                 onPress={confirmFinalize}
               >
                 <Text style={styles.modalConfirmText}>Accept</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDiscardConfirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDiscardConfirmModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Ionicons name="warning-outline" size={48} color="#ff9800" />
+            <Text style={styles.modalTitle}>Discard Changes</Text>
+            <Text style={styles.modalMessage}>
+              You have unsaved exam changes. Leave without saving?
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowDiscardConfirmModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Stay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmButton}
+                onPress={() => {
+                  setShowDiscardConfirmModal(false);
+                  closeEditExam();
+                }}
+              >
+                <Text style={styles.modalConfirmText}>Discard</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -177,6 +177,8 @@ export default function ClassDetailsScreen() {
   const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
   const [editClassModalVisible, setEditClassModalVisible] = useState(false);
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
+  const [discardEditClassConfirmVisible, setDiscardEditClassConfirmVisible] =
+    useState(false);
   const [examMenuVisible, setExamMenuVisible] = useState(false);
   const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
   const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
@@ -255,6 +257,13 @@ export default function ClassDetailsScreen() {
     Boolean(classForm.year) &&
     (trimmedClassForm.room.length === 0 || /^\d{3}$/.test(trimmedClassForm.room)) &&
     !savingClassEdit;
+  const hasEditClassChanges = Boolean(
+    classData &&
+      (trimmedClassForm.class_name !== (classData.class_name ?? "") ||
+        trimmedClassForm.course_subject !== (classData.course_subject ?? "") ||
+        trimmedClassForm.room !== (classData.room ?? "") ||
+        classForm.year !== (classData.year ?? "")),
+  );
 
   const openEditClassModal = useCallback(() => {
     if (!classData) return;
@@ -272,6 +281,15 @@ export default function ClassDetailsScreen() {
     setEditClassModalVisible(false);
     setYearPickerVisible(false);
   }, []);
+
+  const handleAttemptCloseEditClassModal = useCallback(() => {
+    if (savingClassEdit) return;
+    if (hasEditClassChanges) {
+      setDiscardEditClassConfirmVisible(true);
+      return;
+    }
+    closeEditClassModal();
+  }, [closeEditClassModal, hasEditClassChanges, savingClassEdit]);
 
   const handleSaveClassEdit = async () => {
     if (!classData) return;
@@ -1538,7 +1556,7 @@ export default function ClassDetailsScreen() {
         visible={editClassModalVisible}
         animationType="slide"
         transparent={false}
-        onRequestClose={closeEditClassModal}
+        onRequestClose={handleAttemptCloseEditClassModal}
       >
         <View style={styles.createScreen}>
           <View style={styles.createScreenHeader}>
@@ -1546,7 +1564,7 @@ export default function ClassDetailsScreen() {
             <Text style={styles.createSheetTitle}>Edit Class</Text>
             <TouchableOpacity
               style={styles.createSheetClose}
-              onPress={closeEditClassModal}
+              onPress={handleAttemptCloseEditClassModal}
               disabled={savingClassEdit}
             >
               <Ionicons name="close" size={24} color="#A8AFBC" />
@@ -1599,7 +1617,11 @@ export default function ClassDetailsScreen() {
               Year <Text style={styles.requiredStar}>*</Text>
             </Text>
             <TouchableOpacity
-              style={styles.sheetPicker}
+              style={[
+                styles.sheetInput,
+                classForm.year && styles.sheetInputValid,
+                styles.sheetPicker,
+              ]}
               onPress={() => setYearPickerVisible(true)}
             >
               <Text
@@ -1692,6 +1714,20 @@ export default function ClassDetailsScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmationModal
+        visible={discardEditClassConfirmVisible}
+        title="Discard Changes"
+        message="You have unsaved class changes. Leave without saving?"
+        cancelText="Stay"
+        confirmText="Discard"
+        destructive
+        onCancel={() => setDiscardEditClassConfirmVisible(false)}
+        onConfirm={() => {
+          setDiscardEditClassConfirmVisible(false);
+          closeEditClassModal();
+        }}
+      />
 
 
     </View>
@@ -2336,6 +2372,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#111827",
+  },
+  sheetInputValid: {
+    borderColor: "#1FC27D",
+    backgroundColor: "#F0FDF8",
   },
   sheetPicker: {
     height: 62,

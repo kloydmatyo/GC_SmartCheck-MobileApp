@@ -99,6 +99,7 @@ export default function ClassesScreen() {
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [consumedEditRequestId, setConsumedEditRequestId] = useState<string | null>(null);
   const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
+  const [discardClassConfirmVisible, setDiscardClassConfirmVisible] = useState(false);
 
 const [classMenuPosition, setClassMenuPosition] = useState({
   top: 0,
@@ -309,6 +310,30 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     trimmedForm.class_name.length >= 4 &&
     trimmedForm.course_subject.length >= 5;
   const canCreateClass = isClassFormValid && !creating;
+  const hasClassFormChanges = editingClassId
+    ? Boolean(
+        selectedClass &&
+          (trimmedForm.class_name !== (selectedClass.class_name ?? "") ||
+            trimmedForm.course_subject !== (selectedClass.course_subject ?? "") ||
+            trimmedForm.room !== (selectedClass.room ?? "") ||
+            formData.year !== (selectedClass.year ?? "")),
+      )
+    : Boolean(
+        trimmedForm.class_name ||
+          trimmedForm.course_subject ||
+          trimmedForm.room ||
+          formData.year,
+      );
+
+  const handleAttemptCloseClassModal = () => {
+    if (creating) return;
+    if (hasClassFormChanges) {
+      setDiscardClassConfirmVisible(true);
+      return;
+    }
+    setModalVisible(false);
+    resetForm();
+  };
 
   const handleEditClass = (classItem: Class) => {
     setSelectedClass(classItem);
@@ -628,15 +653,12 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       />
 
       {/* Create Class Modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => {
-          setModalVisible(false);
-          resetForm();
-        }}
-      >
+        <Modal
+          visible={modalVisible}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={handleAttemptCloseClassModal}
+        >
         <KeyboardAvoidingView
           style={styles.createScreen}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -644,14 +666,11 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           <View style={styles.createScreenHeader}>
             <View style={styles.createScreenHeaderSpacer} />
             <Text style={styles.createSheetTitle}>{editingClassId ? "Edit Class" : "Create Class"}</Text>
-            <TouchableOpacity
-              style={styles.createSheetClose}
-              onPress={() => {
-                setModalVisible(false);
-                resetForm();
-              }}
-              disabled={creating}
-            >
+              <TouchableOpacity
+                style={styles.createSheetClose}
+                onPress={handleAttemptCloseClassModal}
+                disabled={creating}
+              >
               <Ionicons name="close" size={24} color="#A8AFBC" />
             </TouchableOpacity>
           </View>
@@ -704,7 +723,11 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               Year <Text style={styles.requiredStar}>*</Text>
             </Text>
             <TouchableOpacity
-              style={[styles.sheetInput, styles.sheetPicker]}
+              style={[
+                styles.sheetInput,
+                formData.year && styles.sheetInputValid,
+                styles.sheetPicker,
+              ]}
               onPress={() => setYearPickerVisible(true)}
             >
               <Text style={formData.year ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
@@ -886,8 +909,8 @@ const [classMenuPosition, setClassMenuPosition] = useState({
         </TouchableOpacity>
       </Modal>
 
-      <ConfirmationModal
-        visible={archiveConfirmVisible}
+        <ConfirmationModal
+          visible={archiveConfirmVisible}
         title="Archive Item"
         message={`Are you sure you want to archive ${selectedClass?.class_name ?? "this class"}? You can still view it later in the archived section.`}
         cancelText="Cancel"
@@ -899,10 +922,25 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             setArchiveConfirmVisible(false);
             archiveClass(selectedClass);
           }
-        }}
-      />
+          }}
+        />
 
-    </View>
+        <ConfirmationModal
+          visible={discardClassConfirmVisible}
+          title="Discard Changes"
+          message="You have unsaved class changes. Leave without saving?"
+          cancelText="Stay"
+          confirmText="Discard"
+          destructive
+          onCancel={() => setDiscardClassConfirmVisible(false)}
+          onConfirm={() => {
+            setDiscardClassConfirmVisible(false);
+            setModalVisible(false);
+            resetForm();
+          }}
+        />
+
+      </View>
   );
 }
 
