@@ -13,6 +13,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Image,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -39,7 +40,33 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-type ScannerState = "exam-select" | "camera" | "results";
+// Helper to merge two 100-item scan results (page 1 + page 2)
+function mergeStage1Stage2Results(
+  stage1Result: ScanResult,
+  stage2Result: ScanResult,
+): ScanResult {
+  const mergedAnswers = [
+    ...stage1Result.answers,
+    ...stage2Result.answers.map((a) => ({
+      questionNumber: a.questionNumber + 50,
+      selectedAnswer: a.selectedAnswer,
+    })),
+  ];
+
+  return {
+    studentId: stage1Result.studentId,
+    answers: mergedAnswers,
+    confidence: (stage1Result.confidence + stage2Result.confidence) / 2,
+    processedImageUri: stage1Result.processedImageUri,
+  };
+}
+
+type ScannerState =
+  | "exam-select"
+  | "camera-stage1"
+  | "confirm-stage1"
+  | "camera-stage2"
+  | "results";
 
 interface ScannerScreenProps {
   onClose: () => void;
@@ -84,9 +111,17 @@ export default function ScannerScreen({
       setExamQuestionCount(20);
       setSelectedClass(null);
       setSelectedExam(null);
-      // stay in camera mode but clear selections
     }
   }, [resetFlag]);
+
+  // 2-Stage Scanner State
+  const [isStage1Mode, setIsStage1Mode] = useState(false);
+  const [stage1Result, setStage1Result] = useState<ScanResult | null>(null);
+  const [stage1Image, setStage1Image] = useState<string | undefined>(undefined);
+  const [stage1GradingResult, setStage1GradingResult] = useState<
+    GradingResult | null
+  >(null);
+
   const [gradingResult, setGradingResult] = useState<GradingResult | null>(
     null,
   );
@@ -177,9 +212,50 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
-      // stay in camera mode with exam selected
+      setIsStage1Mode(questionCount >= 100);
+      setStage1Result(null);
+      setStage1Image(undefined);
+      setStage1GradingResult(null);
     }
   }, [selectedExam]);
+
+  const processScanResult = async (
+    scanResult: ScanResult,
+    isValidId: boolean,
+  ): Promise<GradingResult> => {
+    const rawCount = scanResult.answers?.length || 20;
+    let answerKey: string[] = [];
+
+    try {
+      const { ExamService } = await import("../../services/examService");
+      const examData = await withTimeout(
+        ExamService.getExamById(activeExamId),
+        2500,
+      );
+      if (examData?.answerKey?.answers) {
+        answerKey = examData.answerKey.answers;
+      } else {
+        throw new Error("Missing key");
+      }
+    } catch (error) {
+      answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
+        (ak) => ak.correctAnswer,
+      );
+    }
+
+    const answerKeyFormatted = answerKey.map((answer, index) => ({
+      questionNumber: index + 1,
+      correctAnswer: answer,
+      points: 1,
+    }));
+
+    const result = GradingService.gradeAnswers(
+      scanResult,
+      answerKeyFormatted,
+    );
+    result.metadata = { ...result.metadata, isValidId: isValidId } as any;
+    return result;
+  };
 
   const handleScanComplete = async (
     scanResult: ScanResult,
@@ -187,16 +263,10 @@ export default function ScannerScreen({
   ) => {
     try {
       const studentId = scanResult.studentId;
-
-      // Ensure that a valid student ID was parsed
       const isInvalidId =
-        !studentId || studentId === "Unknown" || /^0+$/.test(studentId); // catches 0000000, 00000000, etc.
+        !studentId || studentId === "Unknown" || /^0+$/.test(studentId);
 
       if (isInvalidId) {
-        console.warn(
-          `[ScannerScreen] Unreadable student ID ("${studentId}") — prompting manual entry`,
-        );
-        // Show manual entry modal instead of hard-blocking
         setManualIdModal({
           visible: true,
           pendingScan: { ...scanResult, studentId: "" },
@@ -206,14 +276,9 @@ export default function ScannerScreen({
         return;
       }
 
-      console.log(`[ScannerScreen] Detected student ID: ${studentId}`);
-
-      // ── 1. Fast Student Verification ──
       let isValidId = false;
       const netState = await NetInfo.fetch();
-
       if (netState.isConnected && netState.isInternetReachable) {
-        console.log(`[Firestore] Verifying student ID: ${studentId}...`);
         try {
           const q = query(
             collection(db, "students"),
@@ -221,9 +286,7 @@ export default function ScannerScreen({
           );
           const snap = await withTimeout(getDocs(q), 2000);
           isValidId = !snap.empty;
-
           if (!isValidId) {
-            // Fallback to class check
             const classesSnapshot = await withTimeout(
               getDocs(collection(db, "classes")),
               2500,
@@ -240,14 +303,10 @@ export default function ScannerScreen({
             }
           }
         } catch (err) {
-          console.warn(
-            "[ScannerScreen] Student verification timed out. Assuming valid.",
-          );
           isValidId = true;
         }
       } else {
-        console.log("[ScannerScreen] Offline - Skipping network validation.");
-        isValidId = true; // Trust ID while offline
+        isValidId = true;
       }
 
       if (!isValidId) {
@@ -257,42 +316,89 @@ export default function ScannerScreen({
         );
       }
 
-      // ── 2. Fetch Answer Key (Fast Timeout) ──
-      const rawCount = scanResult.answers?.length || 20;
-      let answerKey: string[] = [];
-
-      try {
-        const { ExamService } = await import("../../services/examService");
-        const examData = await withTimeout(
-          ExamService.getExamById(activeExamId),
-          2500,
-        );
-        if (examData?.answerKey?.answers) {
-          answerKey = examData.answerKey.answers;
-        } else {
-          throw new Error("Missing key");
-        }
-      } catch (error) {
-        console.warn(
-          "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
-        );
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.correctAnswer,
-        );
+      // 2-STAGE: STAGE 1
+      if (isStage1Mode && !stage1Result) {
+        const stage1Graded = await processScanResult(scanResult, isValidId);
+        setStage1Result(scanResult);
+        setStage1Image(imageUri);
+        setStage1GradingResult(stage1Graded);
+        setCurrentState("confirm-stage1");
+        return;
       }
 
-      const answerKeyFormatted = answerKey.map((answer, index) => ({
-        questionNumber: index + 1,
-        correctAnswer: answer,
-        points: 1,
-      }));
+      // 2-STAGE: STAGE 2
+      if (isStage1Mode && stage1Result) {
+        if (stage1Result.studentId !== scanResult.studentId) {
+          Alert.alert(
+            "Student ID Mismatch",
+            `Page 1: ${stage1Result.studentId}\nPage 2: ${scanResult.studentId}`,
+            [{ text: "Retake", onPress: () => setCurrentState("camera-stage2") }],
+          );
+          return;
+        }
 
-      // ── 3. Grade & Duplicate Check ──
-      const result = GradingService.gradeAnswers(
-        scanResult,
-        answerKeyFormatted,
-      );
-      result.metadata = { ...result.metadata, isValidId: isValidId } as any;
+        const mergedScanResult = mergeStage1Stage2Results(
+          stage1Result,
+          scanResult,
+        );
+        const finalResult = await processScanResult(mergedScanResult, isValidId);
+
+        let duplicateCheck = null;
+        try {
+          duplicateCheck = await withTimeout(
+            DuplicateScoreDetectionService.checkForDuplicates(
+              finalResult,
+              activeExamId,
+            ),
+            2000,
+          );
+        } catch (err) {
+          /* proceed */
+        }
+
+        if (
+          duplicateCheck &&
+          (duplicateCheck.matchType === "exact" ||
+            duplicateCheck.matchType === "high")
+        ) {
+          setPendingResult(finalResult);
+          setDuplicateMatch(duplicateCheck);
+          setShowDuplicateModal(true);
+          return;
+        }
+
+        const savedResult = await StorageService.saveScanResult(
+          finalResult,
+          stage1Image!,
+        );
+        GradeStorageService.saveGradingResult(finalResult, activeExamId).then(
+          (saveResult) => {
+            if (saveResult.status === "saved") {
+              Toast.show({
+                type: "success",
+                text1: "Saved",
+                text2: `Score: ${finalResult.score}/${finalResult.totalPoints}`,
+              });
+            } else if (saveResult.status === "pending") {
+              Toast.show({
+                type: "info",
+                text1: "Queued Offline",
+                text2: "Data saved in RealmDB for later sync.",
+              });
+            }
+          },
+        );
+
+        setGradingResult(savedResult);
+        setScannedImage(stage1Image);
+        setStage1Result(null);
+        setStage1Image(undefined);
+        setCurrentState("results");
+        return;
+      }
+
+      // SINGLE-STAGE (20, 50 items)
+      const result = await processScanResult(scanResult, isValidId);
 
       let duplicateCheck = null;
       try {
@@ -304,7 +410,7 @@ export default function ScannerScreen({
           2000,
         );
       } catch (err) {
-        /* proceed if check hangs */
+        /* proceed */
       }
 
       if (
@@ -318,10 +424,7 @@ export default function ScannerScreen({
         return;
       }
 
-      // ── 4. Save Pipeline ──
       const savedResult = await StorageService.saveScanResult(result, imageUri);
-
-      // Async Firestore/Realm save
       GradeStorageService.saveGradingResult(result, activeExamId).then(
         (saveResult) => {
           if (saveResult.status === "saved") {
@@ -351,6 +454,36 @@ export default function ScannerScreen({
 
   const handleRetrySave = () =>
     handleFirestoreRetrySave(gradingResult!, activeExamId);
+
+  const handleConfirmStage1 = () => {
+    setCurrentState("camera-stage2");
+  };
+
+  const handleRetryStage1 = () => {
+    setStage1Result(null);
+    setStage1Image(undefined);
+    setStage1GradingResult(null);
+    setCurrentState("camera-stage1");
+  };
+
+  const handleSkipStage2 = async () => {
+    if (!stage1GradingResult || !stage1Image) return;
+    try {
+      const savedResult = await StorageService.saveScanResult(
+        stage1GradingResult,
+        stage1Image,
+      );
+      GradeStorageService.saveGradingResult(stage1GradingResult, activeExamId);
+      setGradingResult(savedResult);
+      setScannedImage(stage1Image);
+      setStage1Result(null);
+      setStage1Image(undefined);
+      setStage1GradingResult(null);
+      setCurrentState("results");
+    } catch (error) {
+      Alert.alert("Error", "Failed to save stage 1 results");
+    }
+  };
 
   const handleFirestoreRetrySave = async (
     result: GradingResult,
@@ -512,18 +645,70 @@ export default function ScannerScreen({
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
-      {/* ── Camera (Always Visible) ── */}
-      {currentState !== "results" && (
+
+      {/* Stage 1 Confirmation Modal */}
+      {currentState === "confirm-stage1" && stage1GradingResult && (
+        <View style={styles.container}>
+          <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
+          <View style={styles.stage1ConfirmContainer}>
+            {stage1Image && (
+              <Image
+                source={{ uri: stage1Image }}
+                style={styles.stage1ConfirmImage}
+              />
+            )}
+            <View style={styles.stage1ConfirmContent}>
+              <Text style={styles.stage1ConfirmTitle}>Page 1 Complete</Text>
+              <Text style={styles.stage1ConfirmSubtitle}>
+                Student ID: {stage1GradingResult.studentId}
+              </Text>
+              <View style={styles.stage1ScoreBox}>
+                <Text style={styles.stage1ScoreLabel}>Page 1 Score</Text>
+                <Text style={styles.stage1Score}>
+                  {stage1GradingResult.score}/{stage1GradingResult.totalPoints}
+                </Text>
+                <Text style={styles.stage1Percentage}>
+                  {stage1GradingResult.percentage.toFixed(1)}%
+                </Text>
+              </View>
+              <View style={styles.stage1Modal}>
+                <TouchableOpacity
+                  style={[styles.stage1Button, styles.stage1RetryButton]}
+                  onPress={handleRetryStage1}
+                >
+                  <Text style={styles.stage1ButtonText}>Retake Page 1</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.stage1Button, styles.stage1SkipButton]}
+                  onPress={handleSkipStage2}
+                >
+                  <Text style={styles.stage1ButtonText}>Save Page 1 Only</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.stage1Button, styles.stage1ConfirmButton]}
+                  onPress={handleConfirmStage1}
+                >
+                  <Text style={styles.stage1ButtonText}>Scan Page 2</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* Camera */}
+      {currentState !== "results" && currentState !== "confirm-stage1" && (
         <CameraScanner
-          key={`cam-${scanCount}`}
+          key={`cam-${scanCount}-${stage1Result ? "stage2" : "stage1"}`}
           questionCount={examQuestionCount}
+          stage={currentState === "camera-stage2" ? 2 : 1}
           onScanComplete={handleScanComplete}
           onCancel={handleClose}
         />
       )}
 
       {/* ── Header Overlay (Back + Title) ── */}
-      {currentState !== "results" && (
+      {currentState !== "results" && currentState !== "confirm-stage1" && (
         <View style={styles.headerOverlay}>
           <TouchableOpacity
             onPress={handleClose}
@@ -537,7 +722,7 @@ export default function ScannerScreen({
       )}
 
       {/* ── Selectors Overlay (Class & Exam side-by-side) ── */}
-      {currentState !== "results" && (
+      {currentState !== "results" && currentState !== "confirm-stage1" && (
         <View style={styles.selectorsOverlay}>
           <TouchableOpacity
             style={styles.selectorField}
@@ -1002,5 +1187,92 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "600",
+  },
+  // ── Stage 1 Confirmation Styles ──
+  stage1ConfirmContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+    justifyContent: "flex-end",
+  },
+  stage1ConfirmImage: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  stage1ConfirmContent: {
+    backgroundColor: "rgba(0, 0, 0, 0.9)",
+    paddingHorizontal: 20,
+    paddingBottom: 32,
+    paddingTop: 24,
+  },
+  stage1ConfirmTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#00ff7f",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  stage1ConfirmSubtitle: {
+    fontSize: 15,
+    color: "#888",
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  stage1ScoreBox: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: 24,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(0, 255, 127, 0.3)",
+  },
+  stage1ScoreLabel: {
+    fontSize: 13,
+    color: "#888",
+    marginBottom: 8,
+    fontWeight: "500",
+  },
+  stage1Score: {
+    fontSize: 32,
+    fontWeight: "bold",
+    color: "#00ff7f",
+    marginBottom: 4,
+  },
+  stage1Percentage: {
+    fontSize: 16,
+    color: "#aaa",
+    fontWeight: "600",
+  },
+  stage1Modal: {
+    flexDirection: "column",
+    gap: 12,
+  },
+  stage1Button: {
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
+  stage1RetryButton: {
+    borderColor: "#ff6b6b",
+    borderWidth: 2,
+  },
+  stage1SkipButton: {
+    borderColor: "#6c757d",
+    borderWidth: 2,
+  },
+  stage1ConfirmButton: {
+    backgroundColor: "#00ff7f",
+    borderColor: "#00ff7f",
+    borderWidth: 0,
+  },
+  stage1ButtonText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#000",
   },
 });

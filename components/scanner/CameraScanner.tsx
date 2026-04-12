@@ -14,12 +14,14 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
+  stage?: 1 | 2;
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
 }
 
 export default function CameraScanner({
-  questionCount = 20, // Default to 20 if not provided
+  questionCount = 20,
+  stage = 1,
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
@@ -237,6 +239,9 @@ export default function CameraScanner({
             >
               <View style={styles.frameContent}>
                 <Ionicons name="camera-outline" size={54} color="#00FF7F" />
+                {questionCount >= 100 && (
+                  <Text style={styles.stageIndicator}>Page {stage}</Text>
+                )}
               </View>
 
               {/* Corner Markers */}
@@ -306,6 +311,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
+  },
+  stageIndicator: {
+    color: "#00FF7F",
+    fontSize: 18,
+    fontWeight: "bold",
+    marginTop: 12,
+    letterSpacing: 1,
   },
   frameText: {
     color: "#fff",
