@@ -24,6 +24,7 @@ import {
   View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import { ClassService } from "../../services/classService";
 
 type ArchivedMode = "classes" | "exams";
 
@@ -144,13 +145,11 @@ export default function ArchivedScreen() {
               (Array.isArray(data.questions) ? data.questions.length : 0) ||
               (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0) ||
               0;
-            const subject = String(data.subject || "Exam").trim();
             const className = String(data.className || "").trim();
-            const subtitleParts = [subject, className].filter(Boolean);
             return {
               id: item.id,
               title: data.title || "Archived Exam",
-              subtitle: subtitleParts.join(" - ") || "Exam",
+              subtitle: className,
               dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
               questions,
             };
@@ -193,7 +192,7 @@ export default function ArchivedScreen() {
 
   const restoreClass = async (id: string) => {
     try {
-      await updateDoc(doc(db, "classes", id), { isArchived: false });
+      await ClassService.updateClass(id, { isArchived: false });
       setRestoreTarget(null);
       Toast.show({
         type: "save_result",
@@ -386,13 +385,17 @@ export default function ArchivedScreen() {
                         <Ionicons name="ellipsis-vertical" size={18} color="#9AA2B1" />
                       </TouchableOpacity>
                     </View>
-                    <Text style={styles.examSubtitle}>
-                      {item.subtitle} - {item.questions} Qs
-                    </Text>
+                    {item.subtitle ? (
+                      <Text style={styles.examSubtitle}>{item.subtitle}</Text>
+                    ) : null}
                     <View style={styles.metaRow}>
                       <View style={styles.metaItem}>
                         <Ionicons name="calendar-outline" size={14} color="#9AA2B1" />
                         <Text style={styles.metaText}>{item.dateLabel}</Text>
+                      </View>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="help-circle-outline" size={14} color="#9AA2B1" />
+                        <Text style={styles.metaText}>{item.questions} Qs</Text>
                       </View>
                     </View>
                   </View>
@@ -411,7 +414,6 @@ export default function ArchivedScreen() {
           )}
         </ScrollView>
       )}
-
 
       <ConfirmationModal
         visible={Boolean(restoreTarget)}
@@ -622,24 +624,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     color: "#6B7280",
-  },
-  restoreButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#E8EBF0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  deleteButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#E8EBF0",
-    alignItems: "center",
-    justifyContent: "center",
   },
   menuTrigger: {
     width: 28,

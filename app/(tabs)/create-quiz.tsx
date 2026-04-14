@@ -1,3 +1,4 @@
+import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
@@ -16,7 +17,7 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Clipboard,
@@ -54,12 +55,6 @@ const generateExamCode = (): string => {
 const formatDateForStorage = (date: Date): string =>
   date.toISOString().split("T")[0];
 
-const toStartOfDay = (date: Date): Date => {
-  const normalized = new Date(date);
-  normalized.setHours(0, 0, 0, 0);
-  return normalized;
-};
-
 export default function CreateQuizScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -79,13 +74,14 @@ export default function CreateQuizScreen() {
   const [subject, setSubject] = useState("");
   const [examType] = useState<"board" | "diagnostic">("board");
   const [choicesPerItem, setChoicesPerItem] = useState<4 | 5>(4);
-  const [examDate, setExamDate] = useState<Date | null>(new Date());
   const [classesLoading, setClassesLoading] = useState(false);
   const [classOptions, setClassOptions] = useState<ClassOption[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [createdExamId, setCreatedExamId] = useState<string | null>(null);
   const [reviewVisible, setReviewVisible] = useState(false);
   const [reviewExamCode, setReviewExamCode] = useState<string | null>(null);
+  const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
+  const createLockRef = useRef(false);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
     type: "success" | "error" | "info";
@@ -116,9 +112,9 @@ export default function CreateQuizScreen() {
       setNumQuestions(null);
       setSubject("");
       setChoicesPerItem(4);
-      setExamDate(new Date());
       setSelectedClassId(classIdParam || null);
       setLoading(false);
+      createLockRef.current = false;
       setReviewVisible(false);
       setReviewExamCode(null);
 
@@ -261,28 +257,6 @@ export default function CreateQuizScreen() {
       return;
     }
 
-    if (!examDate) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select an exam date",
-      });
-      return;
-    }
-
-    const today = toStartOfDay(new Date());
-    const selectedDate = toStartOfDay(examDate);
-    if (selectedDate < today) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Exam date cannot be in the past",
-      });
-      return;
-    }
-
     if (!reviewExamCode) {
       setReviewExamCode(generateExamCode());
     }
@@ -290,6 +264,8 @@ export default function CreateQuizScreen() {
   };
 
   const handleSave = async () => {
+    if (createLockRef.current) return;
+
     // Validation
     if (!quizName.trim()) {
       setStatusModal({
@@ -321,31 +297,8 @@ export default function CreateQuizScreen() {
       return;
     }
 
-
-
-    if (!examDate) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Please select an exam date",
-      });
-      return;
-    }
-
-    const today = toStartOfDay(new Date());
-    const selectedDate = toStartOfDay(examDate);
-    if (selectedDate < today) {
-      setStatusModal({
-        visible: true,
-        type: "error",
-        title: "Error",
-        message: "Exam date cannot be in the past",
-      });
-      return;
-    }
-
     try {
+      createLockRef.current = true;
       setLoading(true);
       const currentUser = auth.currentUser;
 
@@ -371,7 +324,7 @@ export default function CreateQuizScreen() {
       console.log("User profile:", userProfile);
       console.log("Instructor ID:", instructorId);
 
-      const currentDate = formatDateForStorage(examDate);
+      const currentDate = formatDateForStorage(new Date());
       const selectedClass =
         classOptions.find((cls) => cls.id === selectedClassId) || null;
 
@@ -483,6 +436,7 @@ export default function CreateQuizScreen() {
       });
     } finally {
       setLoading(false);
+      createLockRef.current = false;
     }
   };
 
@@ -491,6 +445,22 @@ export default function CreateQuizScreen() {
     quizName.trim().length <= MAX_FIELD_LENGTH &&
     numQuestions,
   );
+  const hasUnsavedExamDraft = Boolean(
+    quizName.trim() ||
+      numQuestions ||
+      subject.trim() ||
+      choicesPerItem !== 4 ||
+      reviewVisible,
+  );
+
+  const handleAttemptClose = () => {
+    if (loading || createLockRef.current) return;
+    if (hasUnsavedExamDraft) {
+      setDiscardConfirmVisible(true);
+      return;
+    }
+    goBack();
+  };
 
   return (
     <KeyboardAvoidingView
@@ -501,9 +471,12 @@ export default function CreateQuizScreen() {
         <View style={styles.placeholder} />
         <Text style={styles.lightHeaderTitle}>Create Exam</Text>
         <TouchableOpacity
-          style={[styles.closeButton, loading && { opacity: 0.45 }]}
-          onPress={goBack}
-          disabled={loading}
+          style={[
+            styles.closeButton,
+            (loading || createLockRef.current) && { opacity: 0.45 },
+          ]}
+          onPress={handleAttemptClose}
+          disabled={loading || createLockRef.current}
         >
           <Ionicons name="close" size={22} color="#A8AFBC" />
         </TouchableOpacity>
@@ -610,7 +583,6 @@ export default function CreateQuizScreen() {
           </View>
         </View>
 
-
       </ScrollView>
 
       <View style={styles.lightFooter}>
@@ -673,12 +645,6 @@ export default function CreateQuizScreen() {
               </View>
             </View>
             <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Exam Date</Text>
-              <Text style={styles.reviewValue}>
-                {examDate ? formatDateForStorage(examDate) : "Not set"}
-              </Text>
-            </View>
-            <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>Exam Code</Text>
               <View style={styles.reviewValueRow}>
                 <Text style={styles.reviewValue}>
@@ -709,9 +675,16 @@ export default function CreateQuizScreen() {
 
             <View style={styles.reviewActions}>
               <TouchableOpacity
-                style={styles.reviewSecondaryButton}
-                onPress={() => setReviewVisible(false)}
-                disabled={loading}
+                style={[
+                  styles.reviewSecondaryButton,
+                  (loading || createLockRef.current) &&
+                    styles.reviewSecondaryButtonDisabled,
+                ]}
+                onPress={() => {
+                  if (loading || createLockRef.current) return;
+                  setReviewVisible(false);
+                }}
+                disabled={loading || createLockRef.current}
               >
                 <Text style={styles.reviewSecondaryText}>Edit</Text>
               </TouchableOpacity>
@@ -744,6 +717,20 @@ export default function CreateQuizScreen() {
             message: "",
           })
         }
+      />
+
+      <ConfirmationModal
+        visible={discardConfirmVisible}
+        title="Discard Changes"
+        message="You have unsaved exam details. Leave without saving?"
+        cancelText="Stay"
+        confirmText="Discard"
+        destructive
+        onCancel={() => setDiscardConfirmVisible(false)}
+        onConfirm={() => {
+          setDiscardConfirmVisible(false);
+          goBack();
+        }}
       />
     </KeyboardAvoidingView>
   );
@@ -1018,6 +1005,9 @@ const styles = StyleSheet.create({
     borderColor: "#E5E7EB",
     alignItems: "center",
     justifyContent: "center",
+  },
+  reviewSecondaryButtonDisabled: {
+    opacity: 0.45,
   },
   reviewSecondaryText: {
     fontSize: 15,

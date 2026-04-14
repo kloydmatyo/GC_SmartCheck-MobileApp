@@ -106,7 +106,9 @@ export class ClassService {
             class_name: classData.class_name,
             course_subject: classData.course_subject,
             ...(classData.room ? { room: classData.room } : {}),
+            ...(classData.year ? { year: classData.year } : {}),
             ...(classData.section_block ? { section_block: classData.section_block } : {}),
+            isArchived: classData.isArchived || false,
             students: JSON.stringify(classData.students || []),
             createdBy: currentUser.uid,
             updatedAt: new Date(),
@@ -145,7 +147,9 @@ export class ClassService {
           class_name: c.class_name,
           course_subject: c.course_subject,
           room: c.room,
+          year: c.year,
           section_block: c.section_block,
+          isArchived: c.isArchived,
           students: JSON.parse(c.students || "[]"),
           createdBy: c.createdBy,
           created_at: c.updatedAt.toISOString(),
@@ -210,9 +214,11 @@ export class ClassService {
               class_name: data.class_name,
               course_subject: data.course_subject,
               room: data.room,
+              year: data.year,
               section_block: data.section_block,
               students: data.students || [],
               instructorId: data.instructorId,
+              isArchived: data.isArchived || false,
               createdBy: data.createdBy,
               created_at: data.created_at,
               createdAt,
@@ -225,7 +231,9 @@ export class ClassService {
               class_name: data.class_name,
               course_subject: data.course_subject,
               room: data.room ?? "",
+              year: data.year ?? "",
               section_block: data.section_block ?? "",
+              isArchived: data.isArchived || false,
               students: JSON.stringify(data.students || []),
               createdBy: data.createdBy,
               updatedAt: updatedAt,
@@ -293,7 +301,9 @@ export class ClassService {
               class_name: data.class_name,
               course_subject: data.course_subject,
               room: data.room ?? undefined,
+              year: data.year ?? undefined,
               section_block: data.section_block ?? undefined,
+              isArchived: data.isArchived || false,
               students: JSON.stringify(data.students || []),
               createdBy: data.createdBy,
               updatedAt: updatedAt,
@@ -355,7 +365,9 @@ export class ClassService {
           class_name: cached.class_name,
           course_subject: cached.course_subject,
           room: cached.room,
+          year: cached.year,
           section_block: cached.section_block,
+          isArchived: cached.isArchived,
           students: JSON.parse(cached.students || "[]"),
           createdBy: cached.createdBy,
           created_at: cached.updatedAt.toISOString(),
@@ -375,6 +387,7 @@ export class ClassService {
             class_name: data.class_name,
             course_subject: data.course_subject,
             room: data.room,
+            year: data.year,
             section_block: data.section_block,
             students: data.students || [],
             instructorId: data.instructorId,
@@ -392,7 +405,9 @@ export class ClassService {
               class_name: data.class_name,
               course_subject: data.course_subject,
               room: data.room ?? "",
+              year: data.year ?? "",
               section_block: data.section_block ?? "",
+              isArchived: data.isArchived || false,
               students: JSON.stringify(data.students || []),
               createdBy: data.createdBy,
               updatedAt: cls.updatedAt || new Date(),
@@ -423,6 +438,21 @@ export class ClassService {
         ...updates,
         updatedAt: Timestamp.now(),
       });
+
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      if (cached) {
+        cacheRealm.write(() => {
+          if (updates.class_name !== undefined) cached.class_name = updates.class_name;
+          if (updates.course_subject !== undefined) cached.course_subject = updates.course_subject;
+          if (updates.room !== undefined) cached.room = updates.room ?? "";
+          if (updates.year !== undefined) cached.year = updates.year ?? "";
+          if (updates.section_block !== undefined) cached.section_block = updates.section_block ?? "";
+          if (updates.isArchived !== undefined) cached.isArchived = updates.isArchived;
+          if (updates.students !== undefined) cached.students = JSON.stringify(updates.students);
+          cached.updatedAt = new Date();
+        });
+      }
     } catch (error) {
       console.error("Error updating class:", error);
       throw error;
