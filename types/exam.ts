@@ -6,6 +6,7 @@ export interface ExamMetadata {
   date?: string;
   examCode: string;
   status: "Draft" | "Scheduled" | "Active" | "Completed";
+  structureLocked?: boolean;
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;

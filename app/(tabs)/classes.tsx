@@ -3,7 +3,7 @@ import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -82,6 +82,8 @@ function AnimatedFillBar({
 
 export default function ClassesScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const requestedEditClassId = params.editClassId as string | undefined;
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [classes, setClasses] = useState<Class[]>([]);
@@ -93,10 +95,11 @@ export default function ClassesScreen() {
   const [creating, setCreating] = useState(false);
   const [classMenuVisible, setClassMenuVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
-  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  const [editingClassId, setEditingClassId] = useState<string | null>(null);
+  const [consumedEditRequestId, setConsumedEditRequestId] = useState<string | null>(null);
   const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
-  const [deleting, setDeleting] = useState(false);
+  const [discardClassConfirmVisible, setDiscardClassConfirmVisible] = useState(false);
 
 const [classMenuPosition, setClassMenuPosition] = useState({
   top: 0,
@@ -145,9 +148,18 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     course_subject: "",
     room: "",
     year: "",
-    school_year: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
   });
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
+
+  const resetForm = () => {
+    setFormData({
+      class_name: "",
+      course_subject: "",
+      room: "",
+      year: "",
+    });
+    setEditingClassId(null);
+  };
 
   // Fetch recent quizzes for each class (Optimized: uses ExamService Cache)
   const loadRecentQuizzes = async (classIds: string[]) => {
@@ -220,6 +232,22 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     }, [loadClasses]),
   );
 
+  useEffect(() => {
+    if (
+      !requestedEditClassId ||
+      requestedEditClassId === consumedEditRequestId ||
+      classes.length === 0
+    ) {
+      return;
+    }
+
+    const targetClass = classes.find((item) => item.id === requestedEditClassId);
+    if (!targetClass) return;
+
+    setConsumedEditRequestId(requestedEditClassId);
+    handleEditClass(targetClass);
+  }, [requestedEditClassId, consumedEditRequestId, classes]);
+
   const colors = darkModeEnabled
     ? {
         screenBg: "#111815",
@@ -260,7 +288,6 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     class_name: formData.class_name.trim(),
     course_subject: formData.course_subject.trim(),
     room: formData.room.trim(),
-    school_year: formData.school_year.trim(),
   };
   const requiredFields = [
     trimmedForm.class_name,
@@ -271,50 +298,56 @@ const [classMenuPosition, setClassMenuPosition] = useState({
   const hasClassNameTooShort = trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4;
   const hasCourseSubjectTooShort = trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5;
   const hasRoomInvalid = trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room);
-  const hasTooLong = [trimmedForm.class_name, trimmedForm.course_subject, trimmedForm.school_year].some(
+  const hasTooLong = [trimmedForm.class_name, trimmedForm.course_subject].some(
     (value) => value.length > MAX_FIELD_LENGTH,
   );
-  const canCreateClass =
+  const isClassFormValid =
     !hasMissingRequired &&
     !hasClassNameTooShort &&
     !hasCourseSubjectTooShort &&
     !hasRoomInvalid &&
     !hasTooLong &&
     trimmedForm.class_name.length >= 4 &&
-    trimmedForm.course_subject.length >= 5 &&
-    !creating;
+    trimmedForm.course_subject.length >= 5;
+  const canCreateClass = isClassFormValid && !creating;
+  const hasClassFormChanges = editingClassId
+    ? Boolean(
+        selectedClass &&
+          (trimmedForm.class_name !== (selectedClass.class_name ?? "") ||
+            trimmedForm.course_subject !== (selectedClass.course_subject ?? "") ||
+            trimmedForm.room !== (selectedClass.room ?? "") ||
+            formData.year !== (selectedClass.year ?? "")),
+      )
+    : Boolean(
+        trimmedForm.class_name ||
+          trimmedForm.course_subject ||
+          trimmedForm.room ||
+          formData.year,
+      );
 
-  // Delete class
-  const handleDeleteClass = async () => {
-    if (!selectedClass) return;
-
-    try {
-      setDeleting(true);
-      await ClassService.deleteClass(selectedClass.id);
-
-      // Remove from local state immediately
-      setClasses((prev) => prev.filter((c) => c.id !== selectedClass.id));
-
-      Toast.show({
-        type: "delete_result",
-        text1: "Success",
-        text2: "Class deleted successfully",
-      });
-
-      setDeleteConfirmVisible(false);
-    } catch (error) {
-      console.error("Error deleting class:", error);
-      Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to delete class",
-      });
-    } finally {
-      setDeleting(false);
+  const handleAttemptCloseClassModal = () => {
+    if (creating) return;
+    if (hasClassFormChanges) {
+      setDiscardClassConfirmVisible(true);
+      return;
     }
+    setModalVisible(false);
+    resetForm();
   };
 
-  // Create new class
+  const handleEditClass = (classItem: Class) => {
+    setSelectedClass(classItem);
+    setEditingClassId(classItem.id);
+    setFormData({
+      class_name: classItem.class_name ?? "",
+      course_subject: classItem.course_subject ?? "",
+      room: classItem.room ?? "",
+      year: classItem.year ?? "",
+    });
+    setClassMenuVisible(false);
+    setModalVisible(true);
+  };
+
   const handleCreateClass = async () => {
     if (!trimmedForm.class_name) {
       Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
@@ -343,29 +376,35 @@ const [classMenuPosition, setClassMenuPosition] = useState({
 
     try {
       setCreating(true);
-      await ClassService.createClass({
-        class_name: trimmedForm.class_name,
-        course_subject: trimmedForm.course_subject,
-        room: trimmedForm.room || undefined,
-        year: formData.year,
-        school_year: trimmedForm.school_year || undefined,
-      });
+      if (editingClassId) {
+        await ClassService.updateClass(editingClassId, {
+          class_name: trimmedForm.class_name,
+          course_subject: trimmedForm.course_subject,
+          room: trimmedForm.room || undefined,
+          year: formData.year,
+        });
+        Toast.show({ type: "success", text1: "Success", text2: "Class updated successfully" });
+      } else {
+        await ClassService.createClass({
+          class_name: trimmedForm.class_name,
+          course_subject: trimmedForm.course_subject,
+          room: trimmedForm.room || undefined,
+          year: formData.year,
+        });
+        Toast.show({ type: "success", text1: "Success", text2: "Class created successfully" });
+      }
 
-      Toast.show({ type: "success", text1: "Success", text2: "Class created successfully" });
-
-      setFormData({
-        class_name: "",
-        course_subject: "",
-        room: "",
-        year: "",
-        school_year: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
-      });
+      resetForm();
 
       setModalVisible(false);
       loadClasses();
     } catch (error) {
-      console.error("Error creating class:", error);
-      Toast.show({ type: "error", text1: "Error", text2: "Failed to create class" });
+      console.error("Error saving class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: editingClassId ? "Failed to update class" : "Failed to create class",
+      });
     } finally {
       setCreating(false);
     }
@@ -403,6 +442,9 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           <View style={styles.classHeader}>
             <View style={styles.classHeaderLeft}>
               <Text style={styles.className}>{item.class_name}</Text>
+              {!!item.course_subject && (
+                <Text style={styles.classCourse}>{item.course_subject}</Text>
+              )}
             </View>
             <View style={styles.classHeaderRight}>
               <Text style={[styles.classRate, { color: accentColor }]}>
@@ -431,6 +473,12 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                 {formatShortDate(item.createdAt)}
               </Text>
             </View>
+            {!!item.year && (
+              <View style={styles.metaItem}>
+                <Ionicons name="school-outline" size={14} color="#7E8798" />
+                <Text style={styles.metaText}>{item.year}</Text>
+              </View>
+            )}
           </View>
 
           <AnimatedFillBar progress={avgScore / 100} color={accentColor} />
@@ -488,36 +536,6 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     setArchiveConfirmVisible(true);
   };
 
-  const deleteClass = async (classItem: Class) => {
-    try {
-      await ClassService.deleteClass(classItem.id);
-      setClassMenuVisible(false);
-      setSelectedClass(null);
-
-      // Remove from local state immediately
-      setClasses((prev) => prev.filter((c) => c.id !== classItem.id));
-
-      Toast.show({
-        type: "delete_result",
-        text1: "Deleted",
-        text2: `${classItem.class_name} deleted successfully`,
-      });
-    } catch (error) {
-      console.error("Error deleting class:", error);
-      Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to delete class",
-      });
-    }
-  };
-
-  const openDeleteConfirm = (classItem: Class) => {
-    setSelectedClass(classItem);
-    setClassMenuVisible(false);
-    setDeleteConfirmVisible(true);
-  };
-
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
@@ -540,7 +558,10 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               styles.addButton,
               darkModeEnabled ? styles.addButtonDark : styles.addButtonLight,
             ]}
-            onPress={() => setModalVisible(true)}
+            onPress={() => {
+              resetForm();
+              setModalVisible(true);
+            }}
           >
             <Text
               style={[
@@ -584,7 +605,10 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             styles.addButton,
             darkModeEnabled ? styles.addButtonDark : styles.addButtonLight,
           ]}
-          onPress={() => setModalVisible(true)}
+          onPress={() => {
+            resetForm();
+            setModalVisible(true);
+          }}
         >
           <Text
             style={[
@@ -629,24 +653,24 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       />
 
       {/* Create Class Modal */}
-      <Modal
-        visible={modalVisible}
-        animationType="slide"
-        transparent={false}
-        onRequestClose={() => setModalVisible(false)}
-      >
+        <Modal
+          visible={modalVisible}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={handleAttemptCloseClassModal}
+        >
         <KeyboardAvoidingView
           style={styles.createScreen}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.createScreenHeader}>
             <View style={styles.createScreenHeaderSpacer} />
-            <Text style={styles.createSheetTitle}>Create Class</Text>
-            <TouchableOpacity
-              style={styles.createSheetClose}
-              onPress={() => setModalVisible(false)}
-              disabled={creating}
-            >
+            <Text style={styles.createSheetTitle}>{editingClassId ? "Edit Class" : "Create Class"}</Text>
+              <TouchableOpacity
+                style={styles.createSheetClose}
+                onPress={handleAttemptCloseClassModal}
+                disabled={creating}
+              >
               <Ionicons name="close" size={24} color="#A8AFBC" />
             </TouchableOpacity>
           </View>
@@ -699,7 +723,11 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               Year <Text style={styles.requiredStar}>*</Text>
             </Text>
             <TouchableOpacity
-              style={[styles.sheetInput, styles.sheetPicker]}
+              style={[
+                styles.sheetInput,
+                formData.year && styles.sheetInputValid,
+                styles.sheetPicker,
+              ]}
               onPress={() => setYearPickerVisible(true)}
             >
               <Text style={formData.year ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
@@ -735,21 +763,10 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               </View>
             </View>
 
-            <Text style={styles.sheetLabel}>
-              School Year <Text style={styles.optionalLabel}>(Auto-populated)</Text>
-            </Text>
-            <TextInput
-              style={[styles.sheetInput, styles.sheetInputValid]}
-              placeholder="e.g. 2025-2026"
-              placeholderTextColor="#B5BCC8"
-              maxLength={MAX_FIELD_LENGTH}
-              value={formData.school_year}
-              onChangeText={(text) => setFormData({ ...formData, school_year: text })}
-            />
-          </ScrollView>
-
-          <View style={styles.createScreenFooter}>
-            {!canCreateClass && (
+            </ScrollView>
+  
+            <View style={styles.createScreenFooter}>
+            {!isClassFormValid && (
               <Text style={styles.validationText}>
                 {hasTooLong
                   ? "Keep each field under 50 characters."
@@ -762,20 +779,22 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                   : "Complete all required fields to continue."}
               </Text>
             )}
-            <TouchableOpacity
-              style={[
-                styles.sheetPrimaryButton,
-                (!canCreateClass || creating) && styles.createButtonDisabled,
-              ]}
-              onPress={handleCreateClass}
-              disabled={!canCreateClass}
-            >
-              {creating ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.sheetPrimaryButtonText}>Create Class</Text>
-              )}
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.sheetPrimaryButton,
+                  (!canCreateClass || creating) && styles.createButtonDisabled,
+                ]}
+                onPress={handleCreateClass}
+                disabled={!canCreateClass}
+              >
+                {creating ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.sheetPrimaryButtonText}>
+                    {editingClassId ? "Save Changes" : "Create Class"}
+                  </Text>
+                )}
+              </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -878,20 +897,20 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               onPress={() => {
                 setClassMenuVisible(false);
                 if (selectedClass) {
-                  openDeleteConfirm(selectedClass);
+                  handleEditClass(selectedClass);
                 }
               }}
             >
-              <Text style={[styles.menuActionText, { color: "#EF4444" }]}>
-                Delete Class
+              <Text style={[styles.menuActionText, { color: "#20BE7B" }]}>
+                Edit Class
               </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      <ConfirmationModal
-        visible={archiveConfirmVisible}
+        <ConfirmationModal
+          visible={archiveConfirmVisible}
         title="Archive Item"
         message={`Are you sure you want to archive ${selectedClass?.class_name ?? "this class"}? You can still view it later in the archived section.`}
         cancelText="Cancel"
@@ -903,23 +922,25 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             setArchiveConfirmVisible(false);
             archiveClass(selectedClass);
           }
-        }}
-      />
+          }}
+        />
 
-      <ConfirmationModal
-        visible={deleteConfirmVisible}
-        title="Delete Class"
-        message={`Are you sure you want to delete "${selectedClass?.class_name ?? "this class"}"? This action cannot be undone.`}
-        confirmText="Delete"
-        cancelText="Cancel"
-        onConfirm={handleDeleteClass}
-        onCancel={() => setDeleteConfirmVisible(false)}
-        destructive={true}
-        loading={deleting}
-      />
+        <ConfirmationModal
+          visible={discardClassConfirmVisible}
+          title="Discard Changes"
+          message="You have unsaved class changes. Leave without saving?"
+          cancelText="Stay"
+          confirmText="Discard"
+          destructive
+          onCancel={() => setDiscardClassConfirmVisible(false)}
+          onConfirm={() => {
+            setDiscardClassConfirmVisible(false);
+            setModalVisible(false);
+            resetForm();
+          }}
+        />
 
-
-    </View>
+      </View>
   );
 }
 
@@ -1044,6 +1065,12 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#1F2937",
     lineHeight: 24,
+  },
+  classCourse: {
+    marginTop: 3,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6B7280",
   },
   classHeaderLeft: {
     flex: 1,

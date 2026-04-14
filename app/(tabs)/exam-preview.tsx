@@ -10,7 +10,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { deleteDoc, doc, updateDoc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -54,7 +54,6 @@ export default function ExamPreviewScreen() {
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [viewCodeVisible, setViewCodeVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
-  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const loadRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
 
@@ -200,7 +199,6 @@ export default function ExamPreviewScreen() {
     setSettingsMenuVisible(false);
     setViewCodeVisible(false);
     setArchiveConfirmVisible(false);
-    setDeleteConfirmVisible(false);
   };
 
   useEffect(() => {
@@ -235,27 +233,6 @@ export default function ExamPreviewScreen() {
         type: "error",
         text1: "Error",
         text2: "Failed to archive exam",
-      });
-    }
-  };
-
-  const handleDeleteExam = async () => {
-    try {
-      await deleteDoc(doc(db, "exams", examId));
-      setDeleteConfirmVisible(false);
-      setSettingsMenuVisible(false);
-      Toast.show({
-        type: "delete_result",
-        text1: "Deleted",
-        text2: "Exam deleted successfully",
-      });
-      goToQuizzes();
-    } catch (error) {
-      console.error("Error deleting exam:", error);
-      Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to delete exam",
       });
     }
   };
@@ -662,20 +639,24 @@ export default function ExamPreviewScreen() {
                 Archive Exam
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setSettingsMenuVisible(false);
-                setDeleteConfirmVisible(true);
-              }}
-            >
-              <Text style={[styles.menuItemText, styles.menuDeleteText]}>
-                Delete Exam
-              </Text>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  setSettingsMenuVisible(false);
+                  router.push(
+                    `/(tabs)/edit-exam?examId=${examId}${
+                      classId ? `&classId=${classId}` : ""
+                    }&returnTo=exam-preview&tab=${activeTab}`,
+                  );
+                }}
+              >
+                <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                  Edit Exam
+                </Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           </TouchableOpacity>
-        </TouchableOpacity>
-      ) : null}
+        ) : null}
 
       {viewCodeVisible ? (
         <TouchableOpacity
@@ -731,20 +712,7 @@ export default function ExamPreviewScreen() {
         onCancel={() => setArchiveConfirmVisible(false)}
         onConfirm={handleArchiveExam}
       />
-
-      <ConfirmationModal
-        visible={deleteConfirmVisible}
-        title="Delete Item"
-        message={`Are you sure you want to delete ${exam.metadata.title}? This action cannot be undone.`}
-        cancelText="Cancel"
-        confirmText="Delete"
-        destructive
-        onCancel={() => setDeleteConfirmVisible(false)}
-        onConfirm={handleDeleteExam}
-      />
-
-
-    </SafeAreaView>
+      </SafeAreaView>
   );
 }
 

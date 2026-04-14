@@ -26,6 +26,9 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  InteractionManager,
+  Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -72,6 +75,12 @@ export default function EditAnswerKeyScreen() {
   const [incompleteConfirmVisible, setIncompleteConfirmVisible] =
     useState(false);
   const [incompleteCount, setIncompleteCount] = useState(0);
+  const [unansweredModalVisible, setUnansweredModalVisible] = useState(false);
+  const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
+  const [highlightedQuestionNumber, setHighlightedQuestionNumber] = useState<number | null>(null);
+  const [pendingJumpQuestionNumber, setPendingJumpQuestionNumber] = useState<number | null>(null);
+  const saveLockRef = useRef(false);
+  const questionListRef = useRef<FlatList<QuestionAnswer> | null>(null);
   const pendingSaveResolveRef = useRef<((value: boolean) => void) | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const [statusModal, setStatusModal] = useState<{
@@ -87,10 +96,20 @@ export default function EditAnswerKeyScreen() {
     message: "",
   });
 
-  useEffect(() => {
-    loadAnswerKey();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examId]);
+  const resetAnswerKeyScreen = () => {
+    setLoading(true);
+    setExamTitle("Untitled Exam");
+    setExamCode("");
+    setAnswers([]);
+    setAnswerKeyId("");
+    setAnswerKeyVersion(1);
+    setRemoteVersion(1);
+    setConflictDetected(false);
+    setHasLocalChanges(false);
+    setPendingJumpQuestionNumber(null);
+    setHighlightedQuestionNumber(null);
+    setUnansweredModalVisible(false);
+  };
 
   useEffect(() => {
     return () => {
@@ -105,6 +124,43 @@ export default function EditAnswerKeyScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+      unsubscribeRef.current = null;
+    }
+
+    resetAnswerKeyScreen();
+  }, [examId]);
+
+  useEffect(() => {
+    if (unansweredModalVisible || pendingJumpQuestionNumber === null) return;
+
+    const runJump = () => {
+      const questionNumber = pendingJumpQuestionNumber;
+      setPendingJumpQuestionNumber(null);
+      setHighlightedQuestionNumber(questionNumber);
+
+      const index = answers.findIndex(
+        (item) => item.questionNumber === questionNumber,
+      );
+
+      if (index < 0) return;
+
+      questionListRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.2,
+      });
+    };
+
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      setTimeout(runJump, 120);
+    });
+
+    return () => interactionHandle.cancel();
+  }, [answers, pendingJumpQuestionNumber, unansweredModalVisible]);
+
   useFocusEffect(
     React.useCallback(() => {
       (async () => {
@@ -116,8 +172,13 @@ export default function EditAnswerKeyScreen() {
         } catch (error) {
           console.warn("Failed to load dark mode preference:", error);
         }
+
+        if (examId) {
+          await loadAnswerKey();
+        }
       })();
-    }, []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [examId]),
   );
 
   // Add real-time network listener
@@ -263,7 +324,7 @@ export default function EditAnswerKeyScreen() {
 
   const loadAnswerKey = async () => {
     try {
-      setLoading(true);
+      resetAnswerKeyScreen();
 
       // Get connectivity status for UI only
       const online = await NetworkService.isOnline();
@@ -327,8 +388,31 @@ export default function EditAnswerKeyScreen() {
     );
   };
 
+  const getUnansweredQuestions = () =>
+    answers
+      .filter((item) => !item.answer)
+      .map((item) => item.questionNumber);
+
+  const handleAttemptExit = () => {
+    if (saving || saveLockRef.current) return;
+    const unansweredCount = getUnansweredQuestions().length;
+    if (hasLocalChanges || unansweredCount > 0) {
+      setDiscardConfirmVisible(true);
+      return;
+    }
+    goBack();
+  };
+
+  const handleJumpToQuestion = (questionNumber: number) => {
+    setPendingJumpQuestionNumber(questionNumber);
+    setUnansweredModalVisible(false);
+  };
+
   const handleSave = async () => {
+    if (saveLockRef.current) return;
+
     try {
+      saveLockRef.current = true;
       setSaving(true);
 
       const emptyAnswers = answers.filter((a) => !a.answer);
@@ -502,6 +586,7 @@ export default function EditAnswerKeyScreen() {
       });
     } finally {
       setSaving(false);
+      saveLockRef.current = false;
     }
   };
 
@@ -726,6 +811,8 @@ export default function EditAnswerKeyScreen() {
 
   const renderQuestion = ({ item }: { item: QuestionAnswer }) => {
     const choices = getChoiceOptions();
+    const isUnanswered = !item.answer;
+    const isHighlighted = highlightedQuestionNumber === item.questionNumber;
 
     return (
       <View
@@ -735,16 +822,39 @@ export default function EditAnswerKeyScreen() {
             backgroundColor: darkModeEnabled ? "#1f2b26" : "#F7F7F8",
             borderColor: darkModeEnabled ? "#34483f" : "#E8EBF0",
           },
+          isUnanswered && styles.questionCardUnanswered,
+          isHighlighted && styles.questionCardHighlighted,
         ]}
       >
-        <Text
+        <View
           style={[
-            styles.questionNumber,
-            { color: darkModeEnabled ? "#e7f1eb" : "#98A1B2" },
+            styles.questionNumberWrap,
+            isHighlighted && styles.questionNumberWrapHighlighted,
           ]}
         >
-          {item.questionNumber}.
-        </Text>
+          <Text
+            style={[
+              styles.questionNumber,
+              {
+                color: isHighlighted
+                  ? "#14925F"
+                  : darkModeEnabled
+                    ? "#e7f1eb"
+                    : "#98A1B2",
+              },
+            ]}
+          >
+            {item.questionNumber}.
+          </Text>
+          {isUnanswered ? (
+            <Ionicons
+              name="bookmark"
+              size={14}
+              color="#F59E0B"
+              style={styles.unansweredBookmark}
+            />
+          ) : null}
+        </View>
         <View style={styles.choicesContainer}>
           {choices.map((choice) => (
             <TouchableOpacity
@@ -756,6 +866,10 @@ export default function EditAnswerKeyScreen() {
                   borderColor: "#34483f",
                 },
                 item.answer === choice && styles.choiceButtonSelected,
+                isHighlighted && styles.choiceButtonHighlighted,
+                isHighlighted &&
+                  item.answer === choice &&
+                  styles.choiceButtonSelectedHighlighted,
               ]}
               onPress={() => handleAnswerSelect(item.questionNumber, choice)}
               disabled={loading || saving}
@@ -782,7 +896,7 @@ export default function EditAnswerKeyScreen() {
         <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
           <TouchableOpacity
             style={[styles.backButton, saving && styles.headerActionDisabled]}
-            onPress={goBack}
+            onPress={handleAttemptExit}
             disabled={saving}
           >
             <Ionicons
@@ -809,13 +923,20 @@ export default function EditAnswerKeyScreen() {
     );
   }
 
+  const unansweredQuestions = getUnansweredQuestions();
+  const discardConfirmMessage = hasLocalChanges
+    ? unansweredQuestions.length > 0
+      ? `You have unsaved answer key changes. ${unansweredQuestions.length} item(s) are still unanswered. Leave without saving?`
+      : "You have unsaved answer key changes. Leave without saving?"
+    : `${unansweredQuestions.length} item(s) are still unanswered. Leave this answer key?`;
+
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: colors.headerBg }]}>
         <TouchableOpacity
           style={[styles.backButton, saving && styles.headerActionDisabled]}
-          onPress={goBack}
+          onPress={handleAttemptExit}
           disabled={saving}
         >
           <Ionicons
@@ -856,7 +977,7 @@ export default function EditAnswerKeyScreen() {
         </View>
         <TouchableOpacity
           style={[styles.closeButton, saving && styles.headerActionDisabled]}
-          onPress={goBack}
+          onPress={handleAttemptExit}
           disabled={saving}
         >
           <Ionicons name="close" size={20} color="#A8AFBC" />
@@ -906,11 +1027,28 @@ export default function EditAnswerKeyScreen() {
 
       {/* Questions List */}
       <FlatList
+        ref={questionListRef}
         data={answers}
+        extraData={highlightedQuestionNumber}
         renderItem={renderQuestion}
         keyExtractor={(item) => item.questionNumber.toString()}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        initialNumToRender={answers.length}
+        maxToRenderPerBatch={answers.length}
+        windowSize={Math.max(answers.length, 21)}
+        removeClippedSubviews={false}
+        onScrollBeginDrag={() => {
+          if (highlightedQuestionNumber !== null) {
+            setHighlightedQuestionNumber(null);
+          }
+        }}
+        onScrollToIndexFailed={({ index }) => {
+          questionListRef.current?.scrollToOffset({
+            offset: Math.max(0, index * 110),
+            animated: true,
+          });
+        }}
       />
 
       {/* Save Button */}
@@ -923,6 +1061,36 @@ export default function EditAnswerKeyScreen() {
           },
         ]}
       >
+        <TouchableOpacity
+          style={[
+            styles.unansweredButton,
+            styles.footerUnansweredButton,
+            unansweredQuestions.length === 0 && styles.unansweredButtonComplete,
+          ]}
+          onPress={() => setUnansweredModalVisible(true)}
+        >
+          <Ionicons
+            name={
+              unansweredQuestions.length > 0
+                ? "bookmark-outline"
+                : "checkmark-circle-outline"
+            }
+            size={18}
+            color={unansweredQuestions.length > 0 ? "#A16207" : "#14925F"}
+          />
+          <Text
+            style={[
+              styles.unansweredButtonText,
+              unansweredQuestions.length === 0 &&
+                styles.unansweredButtonTextComplete,
+            ]}
+          >
+            {unansweredQuestions.length > 0
+              ? `${unansweredQuestions.length} Unanswered`
+              : "All Answered"}
+          </Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSave}
@@ -960,6 +1128,78 @@ export default function EditAnswerKeyScreen() {
           pendingSaveResolveRef.current = null;
         }}
       />
+
+      <ConfirmationModal
+        visible={discardConfirmVisible}
+        title="Discard Changes"
+        message={discardConfirmMessage}
+        cancelText="Stay"
+        confirmText="Discard"
+        destructive
+        onCancel={() => setDiscardConfirmVisible(false)}
+        onConfirm={() => {
+          setDiscardConfirmVisible(false);
+          setHasLocalChanges(false);
+          setConflictDetected(false);
+          setUnansweredModalVisible(false);
+          goBack();
+        }}
+      />
+
+      <Modal
+        visible={unansweredModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUnansweredModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.unansweredModalCard}>
+            <View style={styles.unansweredModalHeader}>
+              <Ionicons
+                name={unansweredQuestions.length > 0 ? "bookmark-outline" : "checkmark-circle-outline"}
+                size={22}
+                color={unansweredQuestions.length > 0 ? "#F59E0B" : "#20BE7B"}
+              />
+              <Text style={styles.unansweredModalTitle}>Unanswered Items</Text>
+            </View>
+
+            {unansweredQuestions.length > 0 ? (
+              <>
+                <Text style={styles.unansweredModalText}>
+                  These item numbers do not have answers yet:
+                </Text>
+                <ScrollView
+                  style={styles.unansweredChipsScroll}
+                  contentContainerStyle={styles.unansweredChipsContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {unansweredQuestions.map((questionNumber) => (
+                    <TouchableOpacity
+                      key={questionNumber}
+                      style={styles.unansweredChip}
+                      onPress={() => handleJumpToQuestion(questionNumber)}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.unansweredChipText}>{questionNumber}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : (
+              <Text style={styles.unansweredModalText}>
+                All item numbers already have answers.
+              </Text>
+            )}
+
+            <TouchableOpacity
+              style={styles.unansweredModalClose}
+              onPress={() => setUnansweredModalVisible(false)}
+            >
+              <Text style={styles.unansweredModalCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <StatusModal
         visible={statusModal.visible}
@@ -1045,7 +1285,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 100,
+    paddingBottom: 280,
   },
   actionRow: {
     flexDirection: "row",
@@ -1090,14 +1330,35 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: "#E8EBF0",
   },
-  questionNumber: {
+  questionCardUnanswered: {
+    backgroundColor: "#FFF9EB",
+  },
+  questionCardHighlighted: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#7DD3A8",
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+  },
+  questionNumberWrap: {
     width: 52,
+    alignItems: "center",
+    borderRadius: 16,
+    paddingVertical: 6,
+  },
+  questionNumberWrapHighlighted: {
+    backgroundColor: "#EAF7F0",
+  },
+  questionNumber: {
     fontSize: 24,
     lineHeight: 28,
     fontWeight: "700",
     color: "#98A1B2",
     textAlign: "center",
     fontVariant: ["tabular-nums"],
+  },
+  unansweredBookmark: {
+    marginTop: 4,
   },
   choicesContainer: {
     flexDirection: "row",
@@ -1116,9 +1377,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#D9DEE7",
   },
+  choiceButtonHighlighted: {
+    borderColor: "#7DD3A8",
+    backgroundColor: "#F3FCF7",
+  },
   choiceButtonSelected: {
     backgroundColor: "#20BE7B",
     borderColor: "#20BE7B",
+  },
+  choiceButtonSelectedHighlighted: {
+    borderColor: "#14925F",
   },
   choiceText: {
     fontSize: 13,
@@ -1154,5 +1422,115 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#fff",
+  },
+  unansweredButton: {
+    marginHorizontal: 20,
+    marginBottom: 4,
+    marginTop: 8,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: "#FFF7E6",
+    borderWidth: 1,
+    borderColor: "#F6D38B",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  unansweredButtonComplete: {
+    backgroundColor: "#EAF7F0",
+    borderColor: "#BDE6CF",
+  },
+  unansweredButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#A16207",
+  },
+  footerUnansweredButton: {
+    marginHorizontal: 0,
+    marginTop: 0,
+    marginBottom: 12,
+  },
+  unansweredButtonTextComplete: {
+    color: "#14925F",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  unansweredModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    maxHeight: "68%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 20,
+  },
+  unansweredModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  unansweredModalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1D2433",
+  },
+  unansweredModalText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#5B6474",
+  },
+  unansweredChipsWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  unansweredChipsContent: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 16,
+    paddingBottom: 16,
+  },
+  unansweredChipsScroll: {
+    marginTop: 8,
+    maxHeight: 260,
+    marginBottom: 12,
+    flexGrow: 0,
+  },
+  unansweredChip: {
+    minWidth: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#FFF7E6",
+    borderWidth: 1,
+    borderColor: "#F6D38B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unansweredChipText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#A16207",
+  },
+  unansweredModalClose: {
+    marginTop: 20,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: "#20BE7B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unansweredModalCloseText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
 });

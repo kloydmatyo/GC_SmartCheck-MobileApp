@@ -1,22 +1,31 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import React, { useState } from "react";
 import {
-  Alert,
-  Image,
-  ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+  GoogleAuthProvider,
+  sendEmailVerification,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import React, { useEffect, useState } from "react";
+import {
+    Alert,
+    Image,
+    ImageBackground,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import { auth, db } from "@/config/firebase";
@@ -29,6 +38,123 @@ export default function SignInScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [useFirebase, setUseFirebase] = useState(true);
+
+  useEffect(() => {
+    GoogleSignin.configure({
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    });
+  }, []);
+
+  const GC_DOMAIN = "gordoncollege.edu.ph";
+
+  const isGCDomain = (email: string | null) =>
+    !!email?.toLowerCase().endsWith(`@${GC_DOMAIN}`);
+
+  const handleGoogleSignIn = async () => {
+    setIsLoading(true);
+    try {
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
+      const idToken = userInfo.data?.idToken;
+      const googleEmail = userInfo.data?.user?.email ?? null;
+
+      if (!idToken) throw new Error("No ID token returned from Google.");
+
+      // Domain validation — block non-GC accounts before touching Firebase
+      if (!isGCDomain(googleEmail)) {
+        await GoogleSignin.signOut();
+        Alert.alert(
+          "Access Restricted",
+          `Only @${GC_DOMAIN} accounts are allowed.\n\nPlease sign in with your Gordon College email.`
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      await handleGoogleCredential(idToken, googleEmail!);
+    } catch (error: any) {
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // user cancelled, do nothing
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        // sign-in already in progress
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert("Error", "Google Play Services is not available on this device.");
+      } else {
+        console.error("Google sign-in error:", error);
+        Alert.alert("Google Sign-In Failed", error.message ?? "Please try again.");
+      }
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoogleCredential = async (idToken: string, googleEmail: string) => {
+    try {
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      const { user } = userCredential;
+
+      // Double-check domain on the Firebase user email (token could differ)
+      if (!isGCDomain(user.email)) {
+        await user.delete();
+        await GoogleSignin.signOut();
+        Alert.alert(
+          "Access Restricted",
+          `Only @${GC_DOMAIN} accounts are allowed.`
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Check if user is registered in Firestore
+      const userRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        // Not registered — delete the auth user so it doesn't linger
+        await user.delete();
+        await GoogleSignin.signOut();
+        Alert.alert(
+          "Account Not Found",
+          `No account exists for ${user.email}.\n\nPlease sign up first using your GC email, then verify it before signing in.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Sign Up", onPress: () => router.push("/sign-up") },
+          ]
+        );
+        setIsLoading(false);
+        return;
+      }
+
+      // Preload offline data
+      const netState = await NetInfo.fetch();
+      if (netState.isConnected && netState.isInternetReachable) {
+        try {
+          const { SyncService } = await import("@/services/syncService");
+          await SyncService.syncPendingUpdates();
+        } catch (syncError) {
+          console.warn("[GoogleSignIn] Sync failed:", syncError);
+        }
+      }
+
+      router.replace("/(tabs)");
+    } catch (error: any) {
+      console.error("Google credential error:", error);
+      let message = "Please try again.";
+      if (error.code === "auth/network-request-failed") {
+        message = "Network error. Please check your internet connection.";
+      } else if (
+        error.code === "auth/invalid-credential" ||
+        error.code === "auth/invalid-id-token"
+      ) {
+        message = "Your session has expired. Please sign in again.";
+      } else if (error.message) {
+        message = error.message;
+      }
+      Alert.alert("Google Sign-In Failed", message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -51,7 +177,31 @@ export default function SignInScreen() {
         const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
         const userData = userDoc.exists() ? userDoc.data() : null;
 
-        // 2. Trigger data preload to Realm (Primary Cache)
+        // 2. Block unverified accounts
+        if (!userCredential.user.emailVerified) {
+          await auth.signOut();
+          Alert.alert(
+            "Email Not Verified",
+            "Please verify your email before signing in. Check your inbox for the verification link.",
+            [
+              { text: "OK" },
+              {
+                text: "Resend Email",
+                onPress: async () => {
+                  try {
+                    await sendEmailVerification(userCredential.user);
+                    Alert.alert("Sent", "Verification email resent. Please check your inbox and spam/junk folder.");
+                  } catch {
+                    Alert.alert("Error", "Could not resend verification email. Please try again.");
+                  }
+                },
+              },
+            ]
+          );
+          return;
+        }
+
+        // 3. Trigger data preload to Realm (Primary Cache)
         const netState = await NetInfo.fetch();
         if (netState.isConnected && netState.isInternetReachable) {
           setIsLoading(true); // Ensure loading state is still active
@@ -60,7 +210,10 @@ export default function SignInScreen() {
             console.log("[SignIn] Preloading data for offline use...");
             await SyncService.syncPendingUpdates();
           } catch (syncError) {
-            console.warn("[SignIn] Initial sync failed, proceeding to dashboard:", syncError);
+            console.warn(
+              "[SignIn] Initial sync failed, proceeding to dashboard:",
+              syncError,
+            );
           }
         }
 
@@ -89,6 +242,17 @@ export default function SignInScreen() {
       let errorMessage = "Failed to sign in. Please try again.";
 
       if (error.code === "auth/user-not-found") {
+        if (isGCDomain(email)) {
+          Alert.alert(
+            "No Account Found",
+            `No account exists for ${email}.\n\nWould you like to sign up with your GC email?`,
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Sign Up", onPress: () => router.push("/sign-up") },
+            ]
+          );
+          return;
+        }
         errorMessage = "No account found with this email.";
       } else if (error.code === "auth/wrong-password") {
         errorMessage = "Incorrect password.";
@@ -97,6 +261,17 @@ export default function SignInScreen() {
       } else if (error.code === "auth/user-disabled") {
         errorMessage = "This account has been disabled.";
       } else if (error.code === "auth/invalid-credential") {
+        if (isGCDomain(email)) {
+          Alert.alert(
+            "Sign In Failed",
+            "Invalid credentials. If you don't have an account yet, would you like to sign up?",
+            [
+              { text: "Try Again", style: "cancel" },
+              { text: "Sign Up", onPress: () => router.push("/sign-up") },
+            ]
+          );
+          return;
+        }
         errorMessage = "Invalid email or password.";
       }
 
@@ -232,6 +407,28 @@ export default function SignInScreen() {
               >
                 <Text style={styles.signInButtonText}>
                   {isLoading ? "Signing In..." : "Sign In →"}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Divider */}
+              <View style={styles.dividerContainer}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              {/* Google Sign-In Button */}
+              <TouchableOpacity
+                style={[
+                  styles.googleButton,
+                  isLoading && styles.signInButtonDisabled,
+                ]}
+                onPress={handleGoogleSignIn}
+                disabled={isLoading}
+              >
+                <Text style={styles.googleG}>G</Text>
+                <Text style={styles.googleButtonText}>
+                  Continue with Google
                 </Text>
               </TouchableOpacity>
 
@@ -379,6 +576,41 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  dividerContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+  dividerText: {
+    color: "#d0d0d0",
+    fontSize: 13,
+    marginHorizontal: 10,
+  },
+  googleButton: {
+    flexDirection: "row",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    height: 50,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  googleG: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#4285F4",
+    marginRight: 10,
+  },
+  googleButtonText: {
+    color: "#333",
+    fontSize: 15,
+    fontWeight: "600",
   },
   testAccountsButton: {
     flexDirection: "row",
