@@ -46,6 +46,11 @@ export class ScoreEmailService {
         email: undefined,
       };
 
+      // Auto-generate email from student ID if none is stored
+      if (!resolved.email && resolved.student_id) {
+        resolved.email = `${resolved.student_id}@gordoncollege.edu.ph`;
+      }
+
       entries.push({ student: resolved, result: row });
     }
 
