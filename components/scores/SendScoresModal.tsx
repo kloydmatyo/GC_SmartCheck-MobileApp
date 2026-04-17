@@ -76,22 +76,26 @@ export default function SendScoresModal({
   }, []);
 
   const handleSend = useCallback(async () => {
+    console.log("[SendScores] handleSend triggered, selected:", selected.size);
     const toSend = entries.filter((e) => selected.has(e.student.student_id));
+    console.log("[SendScores] toSend count:", toSend.length);
     setSending(true);
     setConfirming(false);
-    const result = await ScoreEmailService.sendScores(toSend, examLabel);
+    const result = await ScoreEmailService.sendScores(toSend, examLabel, {
+      className: examLabel,
+      passingThreshold: 60,
+    });
+    console.log("[SendScores] result:", JSON.stringify(result));
     setSending(false);
 
-    if (result.status === "sent" || result.status === "saved") {
+    if (result.status === "sent" || result.status === "partial") {
       Toast.show({
         type: "success",
-        text1: result.status === "sent" ? "Scores Sent" : "Draft Saved",
+        text1: "Scores Sent",
         text2: result.message,
         visibilityTime: 3500,
       });
       onClose();
-    } else if (result.status === "cancelled") {
-      // user cancelled — stay open, no toast needed
     } else {
       Toast.show({
         type: "error",
@@ -200,7 +204,7 @@ export default function SendScoresModal({
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.sendBtn}
-                onPress={handleSend}
+                onPress={() => { console.log("[SendScores] Send button pressed"); handleSend(); }}
                 disabled={sending}
               >
                 {sending ? (
