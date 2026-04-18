@@ -32,7 +32,7 @@ import {
   View,
 } from "react-native";
 
-const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
+const NUM_QUESTIONS_OPTIONS = [20, 50, 100, 150];
 const MAX_FIELD_LENGTH = 50;
 
 interface ClassOption {

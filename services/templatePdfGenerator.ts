@@ -428,6 +428,146 @@ function generate100QuestionHTML(template: TemplateData, logoData: string): stri
   `;
 }
 
+// Generate HTML for 150-question template (full page with denser layout)
+function generate150QuestionHTML(template: TemplateData, logoData: string): string {
+  const choices = ['A', 'B', 'C', 'D', 'E'].slice(0, template.choicesPerQuestion);
+  
+  const logoHTML = logoData 
+    ? `<img src="${logoData}" style="height: 10mm; vertical-align: middle; margin-right: 2mm;" />`
+    : '';
+  
+  // Helper to generate a compact question block for 150-item layout
+  const generateCompactQBlock = (startQ: number, endQ: number) => {
+    return `
+      <div>
+        <!-- Header -->
+        <div style="display: flex; align-items: center; gap: 0.3mm; margin-bottom: 1mm;">
+          <div style="width: 2mm; height: 2mm; background: black;"></div>
+          <div style="width: 9mm;"></div>
+          ${choices.map(c => `<div style="width: 4mm; text-align: center; font-size: 6pt; font-weight: bold;">${c}</div>`).join('')}
+        </div>
+        <!-- Rows -->
+        ${Array(endQ - startQ + 1).fill(0).map((_, i) => {
+          const q = startQ + i;
+          const correctLetter = template.answerKey?.[q - 1]?.toUpperCase();
+          return `
+            <div style="display: flex; align-items: center; gap: 0.3mm; margin-bottom: 0.6mm;">
+              <div style="width: 2mm;"></div>
+              <div style="width: 9mm; text-align: right; font-size: 6pt; font-weight: bold; padding-right: 1mm;">${q}</div>
+              ${choices.map(c => `<div class="bubble-compact${correctLetter === c ? ' filled' : ''}"></div>`).join('')}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  };
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page { size: A4; margin: 8mm; }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; position: relative; }
+          .corner-marker { position: absolute; width: 6mm; height: 6mm; background: black; }
+          .id-section { border: 0.4mm solid black; padding: 2mm; display: inline-block; }
+          .id-box { width: 4mm; height: 4.5mm; border: 0.3mm solid black; }
+          .bubble-id { width: 3mm; height: 3mm; border: 0.3mm solid #333; border-radius: 50%; background: white; margin: 0.2mm; }
+          .bubble-compact { width: 3.2mm; height: 3.2mm; border: 0.35mm solid #000; border-radius: 50%; background: white; }
+          .bubble-compact.filled { background: black; }
+        </style>
+      </head>
+      <body>
+        <!-- Corner markers -->
+        <div class="corner-marker" style="top: 2mm; left: 2mm;"></div>
+        <div class="corner-marker" style="top: 2mm; right: 2mm;"></div>
+        <div class="corner-marker" style="bottom: 2mm; left: 2mm;"></div>
+        <div class="corner-marker" style="bottom: 2mm; right: 2mm;"></div>
+        
+        <!-- Header -->
+        <div style="text-align: center; margin-bottom: 3mm;">
+          ${logoHTML}
+          <span style="font-size: 12pt; font-weight: bold;">Gordon College</span>
+        </div>
+        
+        ${template.examCode ? `<div style="text-align: center; font-size: 7pt; color: #666; margin-bottom: 2mm;">Exam Code: ${template.examCode}</div>` : ''}
+        
+        <!-- Name/Date -->
+        <div style="display: flex; gap: 4mm; margin-bottom: 3mm; font-size: 8pt;">
+          <div style="flex: 3;">
+            <span style="font-weight: bold;">Name:</span>
+            <div style="border-bottom: 0.4mm solid black; margin-top: 0.5mm; margin-left: 3mm;"></div>
+          </div>
+          <div style="flex: 2;">
+            <span style="font-weight: bold;">Date:</span>
+            <div style="border-bottom: 0.4mm solid black; margin-top: 0.5mm; margin-left: 3mm;"></div>
+          </div>
+        </div>
+        
+        <!-- Top section: ID + Q41-50 + Q91-100 + Q141-150 -->
+        <div style="display: flex; gap: 3mm; margin-bottom: 3mm; align-items: flex-start;">
+          <!-- Student ID (smaller for 150-item) -->
+          <div class="id-section">
+            <div style="font-size: 7pt; font-weight: bold; margin-bottom: 2mm;">Student ID</div>
+            <div style="display: flex; gap: 0.4mm; margin-bottom: 2mm;">
+              ${Array(10).fill(0).map(() => '<div class="id-box"></div>').join('')}
+            </div>
+            <div style="display: flex; gap: 0.25mm;">
+              <div style="display: flex; flex-direction: column;">
+                ${[0,1,2,3,4,5,6,7,8,9].map(n => `<div style="height: 4mm; font-size: 6pt; font-weight: bold; display: flex; align-items: center; width: 7mm; justify-content: flex-end; padding-right: 0.5mm;">${n}</div>`).join('')}
+              </div>
+              ${Array(10).fill(0).map(() => `
+                <div style="display: flex; flex-direction: column;">
+                  ${[0,1,2,3,4,5,6,7,8,9].map(() => '<div class="bubble-id"></div>').join('')}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <!-- Q41-50, Q91-100, Q141-150 -->
+          <div style="display: flex; gap: 3mm;">
+            ${generateCompactQBlock(41, 50)}
+            ${generateCompactQBlock(91, 100)}
+            ${generateCompactQBlock(141, 150)}
+          </div>
+        </div>
+        
+        <!-- Bottom: 5 columns × 3 rows = 15 blocks for 150 items -->
+        <!-- Row 1: Q1-10, Q21-30, Q51-60, Q71-80, Q111-120 -->
+        <div style="display: flex; gap: 2.5mm; margin-bottom: 2mm;">
+          ${generateCompactQBlock(1, 10)}
+          ${generateCompactQBlock(21, 30)}
+          ${generateCompactQBlock(51, 60)}
+          ${generateCompactQBlock(71, 80)}
+          ${generateCompactQBlock(111, 120)}
+        </div>
+        
+        <!-- Row 2: Q11-20, Q31-40, Q61-70, Q81-90, Q121-130 -->
+        <div style="display: flex; gap: 2.5mm; margin-bottom: 2mm;">
+          ${generateCompactQBlock(11, 20)}
+          ${generateCompactQBlock(31, 40)}
+          ${generateCompactQBlock(61, 70)}
+          ${generateCompactQBlock(81, 90)}
+          ${generateCompactQBlock(121, 130)}
+        </div>
+        
+        <!-- Row 3: Q101-110, Q131-140 (2 blocks) -->
+        <div style="display: flex; gap: 2.5mm;">
+          ${generateCompactQBlock(101, 110)}
+          ${generateCompactQBlock(131, 140)}
+        </div>
+        
+        <!-- Footer -->
+        <div style="text-align: center; font-size: 5pt; font-style: italic; color: #666; margin-top: 3mm;">
+          Do not fold, staple, or tear this answer sheet.
+        </div>
+      </body>
+    </html>
+  `;
+}
+
 // Main function to generate PDF
 export async function generateTemplatePDF(template: TemplateData): Promise<string> {
   console.log('[PDF-GEN] Starting PDF generation...');
@@ -443,6 +583,8 @@ export async function generateTemplatePDF(template: TemplateData): Promise<strin
     html = generate50QuestionHTML(template, logoData);
   } else if (template.numQuestions === 100) {
     html = generate100QuestionHTML(template, logoData);
+  } else if (template.numQuestions === 150) {
+    html = generate150QuestionHTML(template, logoData);
   } else {
     throw new Error(`Unsupported question count: ${template.numQuestions}`);
   }

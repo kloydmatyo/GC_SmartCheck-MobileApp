@@ -197,6 +197,61 @@ function get100ItemTemplateLayout(): TemplateLayout {
   };
 }
 
+// 150-item template layout for brightness scanning
+// Frame dimensions: 194mm × 281mm (usable A4 area)
+// Grid layout: 3 rows × 5 columns (15 blocks of 10 questions each)
+// FIXED: Removed overlapping Y-coordinates, now uses proper 3-row spacing
+function get150ItemTemplateLayout(): TemplateLayout {
+  const fw = 194, fh = 281;
+  
+  // 5-column grid with consistent X spacing
+  const col0X = 20 / fw;   // Column 0
+  const col1X = 60 / fw;   // Column 1
+  const col2X = 100 / fw;  // Column 2
+  const col3X = 140 / fw;  // Column 3
+  const col4X = 180 / fw;  // Column 4
+  
+  // 3 physical rows with proper vertical separation (avoid overlap)
+  // Each block height: 10 questions × 4.6mm spacing = 46mm
+  // Row spacing: ~50mm between row starts (46mm block + ~4mm gap)
+  
+  return {
+    answerBlocks: [
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 1: Y = 18mm (top of page after margin)
+      // Blocks: Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 1, endQ: 10, firstBubbleNX: col0X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 31, endQ: 40, firstBubbleNX: col1X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 61, endQ: 70, firstBubbleNX: col2X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 91, endQ: 100, firstBubbleNX: col3X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 121, endQ: 130, firstBubbleNX: col4X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 2: Y = 68mm (separated by 50mm from Row 1)
+      // Blocks: Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 11, endQ: 20, firstBubbleNX: col0X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 41, endQ: 50, firstBubbleNX: col1X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 71, endQ: 80, firstBubbleNX: col2X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 101, endQ: 110, firstBubbleNX: col3X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 131, endQ: 140, firstBubbleNX: col4X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 3: Y = 118mm (separated by 50mm from Row 2)
+      // Blocks: Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 21, endQ: 30, firstBubbleNX: col0X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 51, endQ: 60, firstBubbleNX: col1X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 81, endQ: 90, firstBubbleNX: col2X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 111, endQ: 120, firstBubbleNX: col3X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 141, endQ: 150, firstBubbleNX: col4X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+    ],
+    bubbleDiameterNX: 3.2 / fw,
+    bubbleDiameterNY: 3.2 / fh,
+  };
+}
+
 // ─── ANSWER DETECTION ───
 // Detects answers using brightness sampling
 function detectAnswersFromImage(
@@ -307,9 +362,11 @@ function detectAnswersFromImage(
 // ─── MAIN EXPORT ───
 export async function scan100ItemWithBrightness(
   imageUri: string,
-  markers: Markers
+  markers: Markers,
+  numQuestions: number = 100
 ): Promise<StudentAnswer[]> {
-  console.log('[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia');
+  const templateType = numQuestions === 150 ? '150Q' : '100Q';
+  console.log(`[${templateType}-BRIGHTNESS] Starting brightness-based scanning with Skia`);
   
   try {
     // Import Skia and FileSystem (using legacy API for compatibility)
@@ -331,7 +388,7 @@ export async function scan100ItemWithBrightness(
     
     const width = image.width();
     const height = image.height();
-    console.log(`[100Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
+    console.log(`[${templateType}-BRIGHTNESS] Image loaded: ${width}x${height}px`);
     
     // Read pixel data (RGBA format)
     const pixels = image.readPixels();
@@ -340,7 +397,7 @@ export async function scan100ItemWithBrightness(
       throw new Error('Failed to read pixels from image');
     }
     
-    console.log(`[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`);
+    console.log(`[${templateType}-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`);
     
     // Convert RGBA to grayscale
     const grayscale = new Uint8Array(width * height);
@@ -353,11 +410,10 @@ export async function scan100ItemWithBrightness(
       grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
     }
     
-    console.log(`[100Q-BRIGHTNESS] Converted to grayscale`);
+    console.log(`[${templateType}-BRIGHTNESS] Converted to grayscale`);
     
     // Detect answers using brightness sampling
-    const layout = get100ItemTemplateLayout();
-    const numQuestions = 100;
+    const layout = numQuestions === 150 ? get150ItemTemplateLayout() : get100ItemTemplateLayout();
     const choicesPerQuestion = 5;
     
     const answers = detectAnswersFromImage(
@@ -371,15 +427,95 @@ export async function scan100ItemWithBrightness(
     );
     
     const detectedCount = answers.filter(a => a.selectedAnswer).length;
-    console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
+    console.log(`[${templateType}-BRIGHTNESS] Detected ${detectedCount}/${numQuestions} answers`);
     
     return answers;
     
   } catch (error) {
-    console.error('[100Q-BRIGHTNESS] Error:', error);
+    console.error(`[${templateType}-BRIGHTNESS] Error:`, error);
     
     // Return empty answers on error
-    return Array.from({ length: 100 }, (_, i) => ({
+    return Array.from({ length: numQuestions }, (_, i) => ({
+      questionNumber: i + 1,
+      selectedAnswer: '',
+    }));
+  }
+}
+
+// ─── DEDICATED 150-ITEM BRIGHTNESS SCANNER ───
+export async function scan150ItemWithBrightness(
+  imageUri: string,
+  markers: Markers
+): Promise<StudentAnswer[]> {
+  console.log('[150Q-BRIGHTNESS] Starting brightness-based scanning for 150-item template');
+  
+  try {
+    // Import Skia and FileSystem
+    const { Skia } = require('@shopify/react-native-skia');
+    const FileSystem = require('expo-file-system/legacy');
+    
+    // Load image with Skia
+    const normalizedUri = imageUri.startsWith('file://') ? imageUri : `file://${imageUri}`;
+    const base64 = await FileSystem.readAsStringAsync(normalizedUri, {
+      encoding: 'base64',
+    });
+    
+    const imageData = Skia.Data.fromBase64(base64);
+    const image = Skia.Image.MakeImageFromEncoded(imageData);
+    
+    if (!image) {
+      throw new Error('Failed to load image with Skia');
+    }
+    
+    const width = image.width();
+    const height = image.height();
+    console.log(`[150Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
+    
+    // Read pixel data (RGBA format)
+    const pixels = image.readPixels();
+    
+    if (!pixels) {
+      throw new Error('Failed to read pixels from image');
+    }
+    
+    console.log(`[150Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes`);
+    
+    // Convert RGBA to grayscale
+    const grayscale = new Uint8Array(width * height);
+    for (let i = 0; i < width * height; i++) {
+      const idx = i * 4;
+      const r = pixels[idx];
+      const g = pixels[idx + 1];
+      const b = pixels[idx + 2];
+      grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    }
+    
+    console.log('[150Q-BRIGHTNESS] Converted to grayscale');
+    
+    // Detect answers using brightness sampling
+    const layout = get150ItemTemplateLayout();
+    const choicesPerQuestion = 5;
+    
+    const answers = detectAnswersFromImage(
+      grayscale,
+      width,
+      height,
+      markers,
+      layout,
+      150,
+      choicesPerQuestion
+    );
+    
+    const detectedCount = answers.filter(a => a.selectedAnswer).length;
+    console.log(`[150Q-BRIGHTNESS] Detected ${detectedCount}/150 answers`);
+    
+    return answers;
+    
+  } catch (error) {
+    console.error('[150Q-BRIGHTNESS] Error:', error);
+    
+    // Return empty answers on error
+    return Array.from({ length: 150 }, (_, i) => ({
       questionNumber: i + 1,
       selectedAnswer: '',
     }));

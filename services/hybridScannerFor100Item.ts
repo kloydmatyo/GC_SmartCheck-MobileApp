@@ -164,8 +164,213 @@ function get100ItemTemplateLayout(): TemplateLayout {
   };
 }
 
+// Gordon College 150-item template coordinates
+// Frame dimensions: 194mm × 281mm (usable A4 area from corner markers)
+// One-stage scanner - precise coordinates critical for accuracy
+// Calculated from render positions: 5-column layout with spacing
+function get150ItemTemplateLayout(): TemplateLayout {
+  const fw = 194, fh = 281;
+  
+  // 5-column grid with consistent X spacing
+  const col0BubbleX = 20 / fw;    // Column 0
+  const col1BubbleX = 60 / fw;    // Column 1
+  const col2BubbleX = 100 / fw;   // Column 2
+  const col3BubbleX = 140 / fw;   // Column 3
+  const col4BubbleX = 180 / fw;   // Column 4
+  
+  // 3 physical rows with proper vertical separation (avoid overlap)
+  // Each block height: 10 questions × 4.6mm spacing = 46mm
+  // Row spacing: ~50mm between row starts (46mm block + ~4mm gap)
+  
+  return {
+    answerBlocks: [
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 1: Y = 18mm (top of page after margin)
+      // Blocks: Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 1, endQ: 10, firstBubbleNX: col0BubbleX, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 31, endQ: 40, firstBubbleNX: col1BubbleX, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 61, endQ: 70, firstBubbleNX: col2BubbleX, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 91, endQ: 100, firstBubbleNX: col3BubbleX, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 121, endQ: 130, firstBubbleNX: col4BubbleX, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 2: Y = 68mm (separated by 50mm from Row 1)
+      // Blocks: Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 11, endQ: 20, firstBubbleNX: col0BubbleX, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 41, endQ: 50, firstBubbleNX: col1BubbleX, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 71, endQ: 80, firstBubbleNX: col2BubbleX, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 101, endQ: 110, firstBubbleNX: col3BubbleX, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 131, endQ: 140, firstBubbleNX: col4BubbleX, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      
+      // ═══════════════════════════════════════════════════════════════
+      // ROW 3: Y = 118mm (separated by 50mm from Row 2)
+      // Blocks: Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
+      // ═══════════════════════════════════════════════════════════════
+      { startQ: 21, endQ: 30, firstBubbleNX: col0BubbleX, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 51, endQ: 60, firstBubbleNX: col1BubbleX, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 81, endQ: 90, firstBubbleNX: col2BubbleX, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 111, endQ: 120, firstBubbleNX: col3BubbleX, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 141, endQ: 150, firstBubbleNX: col4BubbleX, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+    ],
+    bubbleDiameterNX: 3.2 / fw,
+    bubbleDiameterNY: 3.2 / fh,
+  };
+}
+
+// ─── AUTO-CALIBRATION ───
+// Learn template coordinates from detected bubbles instead of hardcoding them
+// This makes it work with ANY paper size and ANY template layout
+interface CalibratedLayout {
+  layout: TemplateLayout;
+  columnPositions: number[]; // Actual measured X positions of columns
+  rowPositions: number[]; // Actual measured Y positions of rows
+  bubbleSpacingX: number; // Measured spacing between columns
+  bubbleSpacingY: number; // Measured spacing between rows
+}
+
+function autoCalibrateTemplate(
+  bubbles: Bubble[],
+  markers: Markers,
+  expectedNumQuestions: number
+): CalibratedLayout {
+  // Analyze detected bubble positions to learn the actual template structure
+  const allX = bubbles.map(b => b.x).sort((a, b) => a - b);
+  const allY = bubbles.map(b => b.y).sort((a, b) => a - b);
+  
+  // Cluster X positions to find columns (5 columns expected)
+  const columnClusters: number[][] = [];
+  const X_CLUSTER_THRESHOLD = 15; // pixels
+  
+  for (const x of allX) {
+    let foundCluster = false;
+    for (const cluster of columnClusters) {
+      const meanX = cluster.reduce((a, b) => a + b, 0) / cluster.length;
+      if (Math.abs(x - meanX) < X_CLUSTER_THRESHOLD) {
+        cluster.push(x);
+        foundCluster = true;
+        break;
+      }
+    }
+    if (!foundCluster) {
+      columnClusters.push([x]);
+    }
+  }
+  
+  // Get mean X for each column
+  const columnPositions = columnClusters
+    .map(cluster => cluster.reduce((a, b) => a + b, 0) / cluster.length)
+    .sort((a, b) => a - b);
+  
+  // Cluster Y positions to find rows (3 rows expected for 150-item)
+  const rowClusters: number[][] = [];
+  const Y_CLUSTER_THRESHOLD = 20; // pixels
+  
+  for (const y of allY) {
+    let foundCluster = false;
+    for (const cluster of rowClusters) {
+      const meanY = cluster.reduce((a, b) => a + b, 0) / cluster.length;
+      if (Math.abs(y - meanY) < Y_CLUSTER_THRESHOLD) {
+        cluster.push(y);
+        foundCluster = true;
+        break;
+      }
+    }
+    if (!foundCluster) {
+      rowClusters.push([y]);
+    }
+  }
+  
+  // Get mean Y for each row
+  const rowPositions = rowClusters
+    .map(cluster => cluster.reduce((a, b) => a + b, 0) / cluster.length)
+    .sort((a, b) => a - b);
+  
+  // Calculate average spacing
+  const bubbleSpacingX = columnPositions.length > 1 
+    ? (columnPositions[columnPositions.length - 1] - columnPositions[0]) / (columnPositions.length - 1)
+    : 40; // fallback
+    
+  const bubbleSpacingY = rowPositions.length > 1
+    ? (rowPositions[rowPositions.length - 1] - rowPositions[0]) / (rowPositions.length - 1)
+    : 50; // fallback
+  
+  // Convert pixel coordinates back to normalized coordinates (0-1)
+  const frameW = markers.topRight.x - markers.topLeft.x;
+  const frameH = markers.bottomLeft.y - markers.topLeft.y;
+  
+  const normalizedColumns = columnPositions.map(x => (x - markers.topLeft.x) / frameW);
+  const normalizedRows = rowPositions.map(y => (y - markers.topLeft.y) / frameH);
+  
+  // Build adjusted layout with learned coordinates
+  const fw = 194; // frame width in mm (approximate, used for normalization)
+  const fh = 281; // frame height in mm (approximate)
+  
+  // Determine which questions go in which blocks based on learned positions
+  const layout = buildDynamicLayout(normalizedRows, normalizedColumns, expectedNumQuestions);
+  
+  console.log(`[AUTO-CAL] Detected ${columnPositions.length} columns at X: ${columnPositions.map(x => x.toFixed(1)).join(', ')}`);
+  console.log(`[AUTO-CAL] Detected ${rowPositions.length} rows at Y: ${rowPositions.map(y => y.toFixed(1)).join(', ')}`);
+  console.log(`[AUTO-CAL] Spacing: X=${bubbleSpacingX.toFixed(1)}px, Y=${bubbleSpacingY.toFixed(1)}px`);
+  
+  return {
+    layout,
+    columnPositions,
+    rowPositions,
+    bubbleSpacingX,
+    bubbleSpacingY,
+  };
+}
+
+// Build template layout dynamically based on detected rows and columns
+function buildDynamicLayout(
+  normalizedRows: number[],
+  normalizedColumns: number[],
+  expectedNumQuestions: number
+): TemplateLayout {
+  const fw = 194; // reference width in mm
+  const fh = 281; // reference height in mm
+  
+  const answerBlocks: AnswerBlock[] = [];
+  const questionsPerBlock = expectedNumQuestions === 150 ? 10 : 10;
+  const totalBlocks = expectedNumQuestions / questionsPerBlock;
+  
+  let questionNumber = 1;
+  
+  // For 150 items: 3 rows × 5 columns = 15 blocks
+  // For 100 items: 2 sections with various arrangements
+  
+  const blocksPerRow = normalizedColumns.length;
+  const numRows = normalizedRows.length;
+  
+  // Iterate through detected rows and columns
+  for (let rowIdx = 0; rowIdx < numRows && questionNumber <= expectedNumQuestions; rowIdx++) {
+    for (let colIdx = 0; colIdx < blocksPerRow && questionNumber <= expectedNumQuestions; colIdx++) {
+      const startQ = questionNumber;
+      const endQ = Math.min(questionNumber + questionsPerBlock - 1, expectedNumQuestions);
+      
+      answerBlocks.push({
+        startQ,
+        endQ,
+        firstBubbleNX: normalizedColumns[colIdx],
+        firstBubbleNY: normalizedRows[rowIdx],
+        bubbleSpacingNX: (colIdx < blocksPerRow - 1 ? normalizedColumns[colIdx + 1] - normalizedColumns[colIdx] : 0.04) / 5, // space between 5 choices
+        rowSpacingNY: 0.016, // ~4.6mm / 281mm
+      });
+      
+      questionNumber += questionsPerBlock;
+    }
+  }
+  
+  return {
+    answerBlocks,
+    bubbleDiameterNX: 3.2 / fw,
+    bubbleDiameterNY: 3.2 / fh,
+  };
+}
+
 // ─── FIND NEAREST BUBBLE ───
-// Find the detected bubble closest to the expected position
 function findNearestBubble(
   bubbles: Bubble[],
   expectedX: number,
@@ -338,10 +543,12 @@ function detectAnswersFromBubbles(
 // ─── MAIN EXPORT ───
 export function scan100ItemWithHybrid(
   bubbles: Bubble[],
-  markers: Markers
+  markers: Markers,
+  numQuestions: number = 100
 ): StudentAnswer[] {
-  console.log('[100Q-HYBRID] Starting ADAPTIVE scanning for 100-item template (ignoring template coordinates)');
-  console.log(`[100Q-HYBRID] Input: ${bubbles.length} detected bubbles`);
+  const templateType = numQuestions === 150 ? '150Q' : '100Q';
+  console.log(`[${templateType}-HYBRID] Starting ADAPTIVE scanning for ${numQuestions}-item template (ignoring template coordinates)`);
+  console.log(`[${templateType}-HYBRID] Input: ${bubbles.length} detected bubbles`);
   
   // ADAPTIVE APPROACH: Ignore template coordinates, use actual bubble positions
   // 1. Cluster all bubbles by Y position to find rows
@@ -373,10 +580,10 @@ export function scan100ItemWithHybrid(
   }
   if (currentRow.length >= 3) rows.push(currentRow);
   
-  console.log(`[100Q-HYBRID] Found ${rows.length} total rows from ${bubbles.length} bubbles`);
+  console.log(`[${templateType}-HYBRID] Found ${rows.length} total rows from ${bubbles.length} bubbles`);
   
   // Process each row as a question
-  for (let rowIdx = 0; rowIdx < Math.min(rows.length, 100); rowIdx++) {
+  for (let rowIdx = 0; rowIdx < Math.min(rows.length, numQuestions); rowIdx++) {
     const q = rowIdx + 1;
     const row = rows[rowIdx];
     
@@ -432,6 +639,133 @@ export function scan100ItemWithHybrid(
 
   const detectedCount = answers.filter(a => a.selectedAnswer).length;
   console.log(`[100Q-HYBRID] Detected ${detectedCount}/100 answers from ${rows.length} rows`);
+  
+  return answers;
+}
+
+// ─── DEDICATED 150-ITEM SCANNER ───
+export function scan150ItemWithHybrid(
+  bubbles: Bubble[],
+  markers: Markers
+): StudentAnswer[] {
+  console.log('[150Q-HYBRID] Starting template-based scanning for 150-item template');
+  console.log(`[150Q-HYBRID] Input: ${bubbles.length} detected bubbles, markers available`);
+  
+  // AUTO-CALIBRATE: Learn template coordinates from detected bubbles
+  // This makes it work with ANY paper size, not just Gordon College
+  const calibrated = autoCalibrateTemplate(bubbles, markers, 150);
+  const layout = calibrated.layout;
+  
+  const answers: StudentAnswer[] = [];
+  const choiceLabels = 'ABCDE'.split('');
+
+  const frameW = markers.topRight.x - markers.topLeft.x;
+  const frameH = markers.bottomLeft.y - markers.topLeft.y;
+  const bubbleRX = (layout.bubbleDiameterNX * frameW) / 2;
+  const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
+  
+  const searchRadius = Math.max(bubbleRX, bubbleRY) * 2.5;
+
+  console.log(`[150Q-HYBRID] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px, SearchRadius: ${searchRadius.toFixed(1)}px`);
+
+  const usedBubbles = new Set<Bubble>();
+
+  // Process each answer block using AUTO-CALIBRATED coordinates
+  for (const block of layout.answerBlocks) {
+    const firstPx = mapToPixel(markers, block.firstBubbleNX, block.firstBubbleNY);
+    const lastRowNY = block.firstBubbleNY + 9 * block.rowSpacingNY;
+    const lastPx = mapToPixel(markers, block.firstBubbleNX, lastRowNY);
+    
+    // Define block region
+    const blockLeft = firstPx.px - searchRadius * 3;
+    const blockRight = firstPx.px + searchRadius * 3 + (5 * block.bubbleSpacingNX * frameW);
+    const blockTop = Math.min(firstPx.py, lastPx.py) - searchRadius;
+    const blockBottom = Math.max(firstPx.py, lastPx.py) + searchRadius;
+    
+    const blockBubbles = bubbles.filter(b => 
+      !usedBubbles.has(b) &&
+      b.x >= blockLeft && b.x <= blockRight &&
+      b.y >= blockTop && b.y <= blockBottom
+    );
+    
+    console.log(`[150Q-HYBRID] Block Q${block.startQ}-${block.endQ}: ${blockBubbles.length} bubbles found`);
+    
+    if (blockBubbles.length < 10) {
+      for (let q = block.startQ; q <= block.endQ && q <= 150; q++) {
+        answers.push({ questionNumber: q, selectedAnswer: '' });
+      }
+      continue;
+    }
+    
+    // Cluster by Y to find rows
+    const sortedByY = [...blockBubbles].sort((a, b) => a.y - b.y);
+    const rows: Bubble[][] = [];
+    let currentRow: Bubble[] = [sortedByY[0]];
+    let rowMeanY = sortedByY[0].y;
+    
+    for (let i = 1; i < sortedByY.length; i++) {
+      if (Math.abs(sortedByY[i].y - rowMeanY) < bubbleRY * 2) {
+        currentRow.push(sortedByY[i]);
+        rowMeanY = currentRow.reduce((s, b) => s + b.y, 0) / currentRow.length;
+      } else {
+        if (currentRow.length >= 3) rows.push(currentRow);
+        currentRow = [sortedByY[i]];
+        rowMeanY = sortedByY[i].y;
+      }
+    }
+    if (currentRow.length >= 3) rows.push(currentRow);
+    
+    // Process each row
+    for (let rowIdx = 0; rowIdx < Math.min(rows.length, 10); rowIdx++) {
+      const q = block.startQ + rowIdx;
+      if (q > 150) break;
+      
+      const row = rows[rowIdx];
+      const sortedByX = [...row].sort((a, b) => a.x - b.x);
+      
+      const choiceBubbles = sortedByX.slice(0, 5).map((bubble, idx) => ({
+        choice: choiceLabels[idx],
+        bubble,
+        fill: bubble.fill,
+      }));
+      
+      choiceBubbles.forEach(cb => usedBubbles.add(cb.bubble));
+      
+      let selectedChoice = '';
+      const sorted = [...choiceBubbles].sort((a, b) => b.fill - a.fill);
+      const highest = sorted[0];
+      const secondHighest = sorted.length >= 2 ? sorted[1] : null;
+
+      if (highest.fill > 0.25) {
+        if (!secondHighest || highest.fill > secondHighest.fill * 1.10) {
+          selectedChoice = highest.choice;
+        }
+      }
+
+      if (q <= 10 || q > 140 || q % 25 === 0) {
+        const bubbleInfo = choiceBubbles
+          .map(cb => `${cb.choice}=${cb.fill.toFixed(2)}`)
+          .join(', ');
+        console.log(`[150Q-HYBRID] Q${q}: ${bubbleInfo} → ${selectedChoice || '?'}`);
+      }
+
+      answers.push({
+        questionNumber: q,
+        selectedAnswer: selectedChoice,
+      });
+    }
+  }
+  
+  // Fill missing answers
+  while (answers.length < 150) {
+    answers.push({
+      questionNumber: answers.length + 1,
+      selectedAnswer: '',
+    });
+  }
+
+  const detectedCount = answers.filter(a => a.selectedAnswer).length;
+  console.log(`[150Q-HYBRID] Detected ${detectedCount}/150 answers`);
   
   return answers;
 }

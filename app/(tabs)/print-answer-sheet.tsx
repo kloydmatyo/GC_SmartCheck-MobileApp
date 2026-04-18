@@ -44,6 +44,7 @@ const TEMPLATES = [
   { key: "standard20", label: "20 Questions", totalQuestions: 20 },
   { key: "standard50", label: "50 Questions", totalQuestions: 50 },
   { key: "standard100", label: "100 Questions", totalQuestions: 100 },
+  { key: "standard150", label: "150 Questions", totalQuestions: 150 },
 ] as const;
 
 type TemplateKey = (typeof TEMPLATES)[number]["key"];

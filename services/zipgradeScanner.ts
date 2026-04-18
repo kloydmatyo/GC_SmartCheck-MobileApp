@@ -582,20 +582,19 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
-      // 50q sheets should be portrait (tall), but camera may capture landscape
-      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
+      // DISABLED for 150Q - image comes in correct orientation from camera
+      // Only for 50q sheets (legacy behavior)
       let workingMat = srcMat;
 
       if (qCount === 50) {
         const imgAspect = srcJs.cols / srcJs.rows;
         const isLandscape = imgAspect > 1.0;
 
-        // 50q sheets are very tall (aspect ~0.43), should be portrait
-        // If we have a 50q exam but image is landscape, rotate 90° clockwise
+        // 50q sheets are tall (portrait), should NOT be landscape
+        // If landscape, rotate 90° clockwise
         if (isLandscape) {
           console.log(
-            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but 50q sheet should be portrait. Rotating 90° clockwise...`,
+            `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) but ${qCount}q sheet should be portrait. Rotating 90° clockwise...`,
           );
           const rotatedMat = OpenCV.createObject(
             ObjectType.Mat,
@@ -613,6 +612,32 @@ export class ZipgradeScanner {
             `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
           );
           workingMat = rotatedMat;
+        }
+      } else if (qCount === 150) {
+        // 150Q: ALWAYS check orientation - papers are portrait, camera may be landscape
+        console.log(`[OMR] 150Q Pre-rotation: ${srcJs.cols}x${srcJs.rows}`);
+        
+        // For 150Q, landscape (w > h) must be rotated to portrait
+        if (srcJs.cols > srcJs.rows) {
+          console.log(
+            `[OMR] 150Q LANDSCAPE DETECTED: ${srcJs.cols}x${srcJs.rows} - ROTATING 90° CW`,
+          );
+          const rotatedMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(rotatedMat);
+          OpenCV.invoke("rotate", srcMat, rotatedMat, 0); // 0 = 90° CW
+          const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+          console.log(
+            `[OMR] 150Q Post-rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+          );
+          workingMat = rotatedMat;
+        } else {
+          console.log(`[OMR] 150Q already PORTRAIT: ${srcJs.cols}x${srcJs.rows}`);
+          workingMat = srcMat;
         }
       }
 
@@ -1224,8 +1249,121 @@ export class ZipgradeScanner {
       // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
 
-      // For 100-item templates, use brightness-based scanning (Skia)
-      if (detectedQ === 100 && regMarks.length >= 3) {
+      // For 150-item templates, use REGION-BASED EXTRACTION (ballot box principle)
+      if (detectedQ === 150 && bubbles.length > 100) {
+        console.log(
+          "[OMR] Using REGION-BASED extraction for 150-item template (ballot box principle)",
+        );
+        console.log(`[OMR] Processing ${bubbles.length} bubbles in ${regions.length} regions`);
+
+        const choiceLabels = "ABCDE".split("");
+        const regionAnswers: StudentAnswer[] = [];
+        const avgBubbleSize =
+          bubbles.reduce((sum, b) => sum + Math.max(b.w, b.h), 0) /
+          bubbles.length;
+
+        // For each region, extract questions within it
+        for (const region of regions) {
+          const regionBubbles = bubbles.filter(
+            (b) =>
+              b.x >= region.x1 &&
+              b.x <= region.x2 &&
+              b.y >= region.y1 &&
+              b.y <= region.y2,
+          );
+
+          console.log(
+            `[OMR] Region Q${region.startQ}-${region.endQ}: ${regionBubbles.length} bubbles`,
+          );
+
+          // Sort by Y (top to bottom = Q order within region)
+          const sortedByY = [...regionBubbles].sort((a, b) => a.y - b.y);
+
+          // Skip empty regions
+          if (sortedByY.length === 0) {
+            console.log(
+              `[OMR] Region Q${region.startQ}-${region.endQ}: Skipping (no bubbles)`
+            );
+            continue;
+          }
+
+          // Cluster into rows (questions within this region)
+          const rows: Bubble[][] = [];
+          let currentRow: Bubble[] = [sortedByY[0]];
+          let rowMeanY = sortedByY[0].y;
+          const rowThreshold = avgBubbleSize * 0.8; // Tighter clustering within region
+
+          for (let i = 1; i < sortedByY.length; i++) {
+            if (Math.abs(sortedByY[i].y - rowMeanY) < rowThreshold) {
+              currentRow.push(sortedByY[i]);
+              rowMeanY =
+                currentRow.reduce((s, b) => s + b.y, 0) / currentRow.length;
+            } else {
+              if (currentRow.length >= 3) rows.push(currentRow);
+              currentRow = [sortedByY[i]];
+              rowMeanY = sortedByY[i].y;
+            }
+          }
+          if (currentRow.length >= 3) rows.push(currentRow);
+
+          // Process rows in this region
+          const questionsInRegion = region.endQ - region.startQ + 1;
+          for (let rowIdx = 0; rowIdx < Math.min(rows.length, questionsInRegion); rowIdx++) {
+            const q = region.startQ + rowIdx;
+            const row = rows[rowIdx];
+
+            // Sort by X (left to right = A to E)
+            const sortedByX = [...row].sort((a, b) => a.x - b.x);
+
+            // Get answer choices
+            const choices = sortedByX.slice(0, 5).map((bubble, idx) => ({
+              choice: choiceLabels[idx],
+              fill: bubble.fill,
+            }));
+
+            // Find highest fill (ballot box: don't guess on ambiguous)
+            let selectedAnswer = "";
+            if (choices.length > 0) {
+              const sorted = [...choices].sort((a, b) => b.fill - a.fill);
+              const highest = sorted[0];
+              const second = sorted.length >= 2 ? sorted[1] : null;
+
+              // Clear answer: >0.20 fill AND >5% margin over second-highest
+              if (highest.fill > 0.20 && (!second || highest.fill > second.fill * 1.05)) {
+                selectedAnswer = highest.choice;
+              }
+            }
+
+            if (q <= 10) {
+              const choiceInfo = choices
+                .map((c) => `${c.choice}=${c.fill.toFixed(2)}`)
+                .join(", ");
+              console.log(
+                `[OMR] Q${q}: ${choiceInfo} → ${selectedAnswer || "?"}`
+              );
+            }
+
+            regionAnswers.push({
+              questionNumber: q,
+              selectedAnswer,
+            });
+          }
+        }
+
+        // Pad to 150 questions
+        while (regionAnswers.length < 150) {
+          regionAnswers.push({
+            questionNumber: regionAnswers.length + 1,
+            selectedAnswer: "",
+          });
+        }
+
+        allAnswers = regionAnswers;
+
+        console.log(
+          `[OMR] Region-based detection: ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`
+        );
+      } else if (detectedQ === 100 && regMarks.length >= 3) {
         console.log(
           "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
         );

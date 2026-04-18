@@ -678,18 +678,29 @@ export default function ScannerScreen({
                 >
                   <Text style={styles.stage1ButtonText}>Retake Page 1</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.stage1Button, styles.stage1SkipButton]}
-                  onPress={handleSkipStage2}
-                >
-                  <Text style={styles.stage1ButtonText}>Save Page 1 Only</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.stage1Button, styles.stage1ConfirmButton]}
-                  onPress={handleConfirmStage1}
-                >
-                  <Text style={styles.stage1ButtonText}>Scan Page 2</Text>
-                </TouchableOpacity>
+                {examQuestionCount === 50 ? (
+                  <>
+                    <TouchableOpacity
+                      style={[styles.stage1Button, styles.stage1SkipButton]}
+                      onPress={handleSkipStage2}
+                    >
+                      <Text style={styles.stage1ButtonText}>Save Page 1 Only</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.stage1Button, styles.stage1ConfirmButton]}
+                      onPress={handleConfirmStage1}
+                    >
+                      <Text style={styles.stage1ConfirmButtonText}>Scan Page 2</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.stage1Button, styles.stage1ConfirmButton]}
+                    onPress={handleSkipStage2}
+                  >
+                    <Text style={styles.stage1ConfirmButtonText}>Save & Continue</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </View>
@@ -1258,11 +1269,13 @@ const styles = StyleSheet.create({
     borderWidth: 2,
   },
   stage1RetryButton: {
-    borderColor: "#ff6b6b",
+    backgroundColor: "#ff6b6b",
+    borderColor: "#ff5252",
     borderWidth: 2,
   },
   stage1SkipButton: {
-    borderColor: "#6c757d",
+    backgroundColor: "#6c757d",
+    borderColor: "#5a6268",
     borderWidth: 2,
   },
   stage1ConfirmButton: {
@@ -1271,6 +1284,11 @@ const styles = StyleSheet.create({
     borderWidth: 0,
   },
   stage1ButtonText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  stage1ConfirmButtonText: {
     fontSize: 16,
     fontWeight: "700",
     color: "#000",

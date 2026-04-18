@@ -136,6 +136,33 @@ export const ANSWER_SHEET_TEMPLATES = {
       options: ["A", "B", "C", "D"],
     })),
   },
+
+  standard150: {
+    name: "Standard 150 Questions",
+    studentIdRegion: { x: 30, y: 50, width: 150, height: 40 },
+    answerRegions: Array.from({ length: 150 }, (_, i) => {
+      // Layout: 5 columns (each for Q[n], Q[n+10], Q[n+20], etc.)
+      // Row-major: items arranged as columns of 10-item blocks
+      const questionIndex = i; // 0-149
+      const blockInColumn = Math.floor(questionIndex / 10); // Which 10-item block (0-14)
+      const indexInBlock = questionIndex % 10; // Position within block (0-9)
+      
+      // 5 columns, 3 rows of blocks (5, 5, 5 blocks arranged left-right, top-bottom)
+      const colIndex = Math.floor(blockInColumn % 5); // 0-4
+      const rowIndex = Math.floor(blockInColumn / 5); // 0-2
+      
+      return {
+        questionNumber: i + 1,
+        region: {
+          x: 60 + colIndex * 100,
+          y: 100 + rowIndex * 60 + indexInBlock * 18,
+          width: 80,
+          height: 16,
+        },
+        options: ["A", "B", "C", "D", "E"],
+      };
+    }),
+  },
 };
 
 /**
