@@ -2,30 +2,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 
 import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
 import SendScoresModal from "@/components/scores/SendScoresModal";
 import {
-    ExportDateFilter,
-    ExportFormat,
-    GradeExportService,
+  ExportDateFilter,
+  ExportFormat,
+  GradeExportService,
 } from "@/services/gradeExportService";
 import { ReportPdfService } from "@/services/reportPdfService";
 
 import {
-    DashboardDateFilter,
-    DashboardService,
-    ExamDashboardStats,
+  DashboardDateFilter,
+  DashboardService,
+  ExamDashboardStats,
 } from "@/services/dashboardService";
 
 // ── Skeleton placeholder block ────────────────────────────────────────────
@@ -365,7 +365,7 @@ export default function ExamStatsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        {/* Right: Report + Export + Send Scores buttons */}
+        {/* Right: Report + Export + Send Score buttons */}
         <View style={styles.headerRight}>
           <TouchableOpacity
             onPress={() => setSendScoresVisible(true)}
