@@ -1,0 +1,8 @@
+name: PR Check
+on:
+  pull_request:
+jobs:
+  required-check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "OK"
