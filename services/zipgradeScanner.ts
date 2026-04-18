@@ -1331,6 +1331,34 @@ export class ZipgradeScanner {
           `[OMR] 200Q Page ${currentPage}: Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
       }
+      // ── 200-item fallback: estimate corners from paper bounds ──────────
+      else if (qCount === 200) {
+        const currentPage = pageNumber || 1;
+        console.warn(
+          `[OMR] Only ${regMarks.length} corner markers found for 200-item template. Using estimated corners from paper bounds.`,
+        );
+
+        const { scan200ItemPage } = require("./brightnessScannerFor200Item");
+        // Estimate corners from the detected paper boundaries
+        const estimatedMarkers = {
+          topLeft: { x: paperLeft, y: paperTop },
+          topRight: { x: paperRight, y: paperTop },
+          bottomLeft: { x: paperLeft, y: paperBottom },
+          bottomRight: { x: paperRight, y: paperBottom },
+        };
+
+        console.log(
+          `[OMR] Estimated markers: TL=(${Math.round(paperLeft)},${Math.round(paperTop)}) BR=(${Math.round(paperRight)},${Math.round(paperBottom)})`,
+        );
+
+        allAnswers = await scan200ItemPage(imageUri, estimatedMarkers, currentPage);
+
+        const rangeStart = currentPage === 1 ? 1 : 101;
+        const rangeEnd = currentPage === 1 ? 100 : 200;
+        console.log(
+          `[OMR] 200Q Page ${currentPage} (fallback): Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+        );
+      }
       // ── 100-item template: brightness scanning ──────────────────────────
       else if (detectedQ === 100 && regMarks.length >= 3) {
         console.log(
