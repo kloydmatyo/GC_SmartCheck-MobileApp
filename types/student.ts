@@ -96,6 +96,10 @@ export interface ImportResult {
   processedRows: ImportRow[];
   sessionId: string;
   timestamp: string;
+  summary?: {
+    duplicatesInFile: string[];
+    duplicatesInDatabase: string[];
+  };
 }
 
 export interface ImportSession {

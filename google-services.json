@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "925813600455",
+    "project_id": "sia-overall-database",
+    "storage_bucket": "sia-overall-database.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:925813600455:android:7de37660ea05dec4930ee2",
+        "android_client_info": {
+          "package_name": "sia.scan.grade"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "925813600455-9ckt7jpng46qoumt7l6qbj5jva3tk57n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "sia.scan.grade",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "925813600455-adgb1r3jl0kmhe42jbvcu9fqthqjekvb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHIqu8V7b-fuKx-sXWYuouqVbxA6tUZ-Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "925813600455-adgb1r3jl0kmhe42jbvcu9fqthqjekvb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

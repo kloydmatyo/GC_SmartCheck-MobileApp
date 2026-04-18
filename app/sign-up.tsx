@@ -1,7 +1,7 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { createUserWithEmailAndPassword } from "firebase/auth";
+import { createUserWithEmailAndPassword, sendEmailVerification, updateProfile } from "firebase/auth";
 import {
     collection,
     doc,
@@ -92,6 +92,13 @@ export default function SignUpScreen() {
         password,
       );
 
+      // Set display name
+      await updateProfile(userCredential.user, { displayName: fullName.trim() });
+
+      // Send email verification
+      await sendEmailVerification(userCredential.user);
+      console.log("[SignUp] Verification email sent to:", email);
+
       // Generate sequential instructor ID
       const instructorsRef = collection(db, "instructors");
       const instructorsQuery = query(
@@ -131,12 +138,11 @@ export default function SignUpScreen() {
         updatedAt: serverTimestamp(),
       });
 
-      Alert.alert("Success", "Account created successfully! Please sign in.", [
-        {
-          text: "OK",
-          onPress: () => router.replace("/sign-in"),
-        },
-      ]);
+      Alert.alert(
+        "Account Created",
+        `A verification email has been sent to ${email}.\n\nPlease check your inbox (and spam/junk folder) and verify your email before signing in.`,
+        [{ text: "OK", onPress: () => router.replace("/sign-in") }]
+      );
     } catch (error: any) {
       console.error("Sign up error:", error);
       console.error("Error code:", error.code);
@@ -149,7 +155,15 @@ export default function SignUpScreen() {
       let errorMessage = "Failed to create account. Please try again.";
 
       if (error.code === "auth/email-already-in-use") {
-        errorMessage = "This email is already registered. Please sign in.";
+        Alert.alert(
+          "Email Already Registered",
+          "This email already has an account. Please sign in instead.",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Sign In", onPress: () => router.replace("/sign-in") },
+          ]
+        );
+        return;
       } else if (error.code === "auth/invalid-email") {
         errorMessage = "Invalid email address.";
       } else if (error.code === "auth/weak-password") {

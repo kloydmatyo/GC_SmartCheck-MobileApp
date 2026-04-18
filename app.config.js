@@ -39,7 +39,7 @@ module.exports = {
       },
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
-      package: "com.anonymous.gcsmartcheckmobileapp",
+      package: "sia.scan.grade",
       navigationBar: {
         visible: "immersive",
         barStyle: "light-content",
@@ -54,6 +54,8 @@ module.exports = {
     },
     plugins: [
       "expo-router",
+      "expo-mail-composer",
+      "@react-native-google-signin/google-signin",
       [
         "expo-splash-screen",
         {

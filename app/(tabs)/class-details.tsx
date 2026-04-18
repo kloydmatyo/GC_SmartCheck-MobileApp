@@ -1,41 +1,140 @@
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import {
-    ActivityIndicator,
-    Animated,
-    DeviceEventEmitter,
-    FlatList,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  DeviceEventEmitter,
+  Dimensions,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from "react-native";
+
 import Toast from "react-native-toast-message";
+import * as XLSX from "xlsx";
+
+import { StudentImportModal } from "@/components/student/StudentImportModal";
+import { auth, db } from "@/config/firebase";
+
+import { DashboardService } from "@/services/dashboardService";
+import { ImportResult } from "@/types/student";
+
+import {
+  deleteDoc,
+  doc,
+  updateDoc
+} from "firebase/firestore";
+
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
-import { Class, Student } from "../../types/class";
+import { StudentImportService } from "../../services/studentImportService";
+import { Class } from "../../types/class";
+
+type DetailTab = "students" | "exams" | "scan" | "stats";
+
+type StudentRow = {
+  id: string;
+  initials: string;
+  name: string;
+  average: number;
+  scans: number;
+  color: string;
+};
+
+type ExamRow = {
+  id: string;
+  title: string;
+  questions: number;
+  scans: number;
+  average: number;
+  subject: string;
+  createdDate?: string;
+  examCode?: string;
+  classId?: string;
+  className?: string;
+};
+
+function scoreColor(value: number) {
+  if (value >= 85) return "#20BE7B";
+  if (value >= 70) return "#F59E0B";
+  return "#EF4444";
+}
+
+function avatarColor(index: number) {
+  const colors = ["#CFF0DD", "#D7E6F8", "#F6DEDD", "#F7E7BE"];
+  return colors[index % colors.length];
+}
+
+function buildStudentAverage(studentId: string, index: number) {
+  const digits = Number(studentId.replace(/\D/g, "").slice(-2) || index + 70);
+  return 60 + (digits % 35);
+}
+
+function AnimatedStatBar({
+  progress,
+  color = "#20BE7B",
+  height = 8,
+}: {
+  progress: number;
+  color?: string;
+  height?: number;
+}) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const animatedWidth = React.useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!trackWidth) return;
+    animatedWidth.setValue(0);
+    Animated.timing(animatedWidth, {
+      toValue: trackWidth * Math.max(0, Math.min(progress, 1)),
+      duration: 700,
+      useNativeDriver: false,
+    }).start();
+  }, [animatedWidth, progress, trackWidth]);
+
+  return (
+    <View
+      style={[styles.animatedBarTrack, { height }]}
+      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+    >
+      <Animated.View
+        style={[
+          styles.animatedBarFill,
+          {
+            width: animatedWidth,
+            backgroundColor: color,
+          },
+        ]}
+      />
+    </View>
+  );
+}
 
 export default function ClassDetailsScreen() {
+  const YEAR_OPTIONS = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
   const router = useRouter();
   const params = useLocalSearchParams();
   const classId = params.classId as string;
-  const mode = params.mode as string | undefined;
-  const showClassDetails = mode !== "list";
+  const requestedTab = params.tab as DetailTab | undefined;
 
   const [classData, setClassData] = useState<Class | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [addStudentModalVisible, setAddStudentModalVisible] = useState(false);
-  const [addingStudent, setAddingStudent] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "quizzes">(
-    "students",
+  const [activeTab, setActiveTab] = useState<DetailTab>(
+    requestedTab && ["students", "exams", "scan", "stats"].includes(requestedTab)
+      ? requestedTab
+      : "students",
   );
   const [studentSearch, setStudentSearch] = useState("");
   const [quizSearch, setQuizSearch] = useState("");
@@ -45,7 +144,21 @@ export default function ClassDetailsScreen() {
     studentId: string;
     studentName: string;
   } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [sortBy, setSortBy] = useState<'id_asc' | 'id_desc' | 'fname_asc' | 'fname_desc'>('id_asc');
+  const [sortModalVisible, setSortModalVisible] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [exporting, setExporting] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    visible: boolean;
+    message: string;
+  }>({ visible: false, message: "" });
+  const [importErrors, setImportErrors] = useState<{
+    visible: boolean;
+    successCount: number;
+    errors: Array<{ student_id: string; error: string }>;
+  }>({ visible: false, successCount: 0, errors: [] });
 
   // Student form state
   const [studentForm, setStudentForm] = useState({
@@ -55,6 +168,30 @@ export default function ClassDetailsScreen() {
     email: "",
   });
   const [listNavWidth, setListNavWidth] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [examRows, setExamRows] = useState<ExamRow[]>([]);
+  const [examRowsLoading, setExamRowsLoading] = useState(false);
+  const examLoadRequestRef = useRef(0);
+  const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] = useState(false);
+  const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
+  const [editClassModalVisible, setEditClassModalVisible] = useState(false);
+  const [yearPickerVisible, setYearPickerVisible] = useState(false);
+  const [discardEditClassConfirmVisible, setDiscardEditClassConfirmVisible] =
+    useState(false);
+  const [examMenuVisible, setExamMenuVisible] = useState(false);
+  const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
+  const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
+  const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [savingClassEdit, setSavingClassEdit] = useState(false);
+  const [classForm, setClassForm] = useState({
+    class_name: "",
+    course_subject: "",
+    room: "",
+    year: "",
+  });
   const studentSearchInputRef = useRef<TextInput>(null);
   const tabSlideAnim = useRef(new Animated.Value(0)).current;
   const listNavPillWidth = listNavWidth > 0 ? (listNavWidth - 6) / 2 : 120;
@@ -88,77 +225,7 @@ export default function ClassDetailsScreen() {
     return () => subscription.remove();
   }, []);
 
-  useEffect(() => {
-    loadClassData();
-  }, [classId]);
-
-  useEffect(() => {
-    Animated.timing(tabSlideAnim, {
-      toValue: activeTab === "students" ? 0 : 1,
-      duration: 220,
-      useNativeDriver: true,
-    }).start();
-  }, [activeTab, tabSlideAnim]);
-
-  const colors = darkModeEnabled
-    ? {
-        screenBg: "#111815",
-        surface: "#1a2520",
-        surfaceSoft: "#1f2b26",
-        surfaceMuted: "#22302a",
-        quizCardBg: "#18211d",
-        quizCardBorder: "#2f4139",
-        quizBadgeBg: "#284136",
-        quizBadgeText: "#d7ebe1",
-        quizActionBg: "#24352d",
-        border: "#34483f",
-        borderSoft: "#2b3b34",
-        text: "#e7f1eb",
-        textSecondary: "#b9c9c0",
-        textMuted: "#8fa39a",
-        inputBg: "#22302a",
-        inputBorder: "#34483f",
-        inputPlaceholder: "#8fa39a",
-        headerIconBg: "#22302a",
-        studentCardBg: "#2a3129",
-        studentCardBorder: "#4c473f",
-        scoreBadgeBg: "#39362f",
-        scoreBadgeBorder: "#6f6758",
-        badgeBg: "#395046",
-        badgeText: "#dcece4",
-        emptyIcon: "#4f655b",
-        modalOverlay: "rgba(5, 10, 8, 0.78)",
-      }
-    : {
-        screenBg: "#edf1ee",
-        surface: COLORS.white,
-        surfaceSoft: "#4f715f",
-        surfaceMuted: "#f4f5f2",
-        quizCardBg: "#3f6b54",
-        quizCardBorder: "#355b49",
-        quizBadgeBg: "#2d4f3e",
-        quizBadgeText: "#d8ebdf",
-        quizActionBg: "#1f3449",
-        border: "#d5dfd9",
-        borderSoft: "#3f5f4f",
-        text: "#24362f",
-        textSecondary: "#6a7b72",
-        textMuted: "#8ea094",
-        inputBg: "#f8fbf9",
-        inputBorder: "#d5dfd9",
-        inputPlaceholder: "#c3dbcf",
-        headerIconBg: "#e2efe8",
-        studentCardBg: "#e0cfb4",
-        studentCardBorder: "#6f6c62",
-        scoreBadgeBg: "#e9d8bf",
-        scoreBadgeBorder: "#d7c8af",
-        badgeBg: "#7da78f",
-        badgeText: "#214132",
-        emptyIcon: "#ccc",
-        modalOverlay: "rgba(15, 25, 20, 0.55)",
-      };
-
-  const loadClassData = async () => {
+  const loadClassData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -174,747 +241,1270 @@ export default function ClassDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [classId]);
 
-  const handleAddStudent = async () => {
-    // Validation
-    if (!studentForm.student_id.trim()) {
-      Toast.show({
-        type: "error",
-        text1: "Validation Error",
-        text2: "Student ID is required",
-      });
+  const classDataRef = useRef<Class | null>(null);
+  useEffect(() => { classDataRef.current = classData; }, [classData]);
+
+  const trimmedClassForm = {
+    class_name: classForm.class_name.trim(),
+    course_subject: classForm.course_subject.trim(),
+    room: classForm.room.trim(),
+  };
+  const canSaveClassEdit =
+    trimmedClassForm.class_name.length >= 4 &&
+    trimmedClassForm.course_subject.length >= 5 &&
+    Boolean(classForm.year) &&
+    (trimmedClassForm.room.length === 0 || /^\d{3}$/.test(trimmedClassForm.room)) &&
+    !savingClassEdit;
+  const hasEditClassChanges = Boolean(
+    classData &&
+      (trimmedClassForm.class_name !== (classData.class_name ?? "") ||
+        trimmedClassForm.course_subject !== (classData.course_subject ?? "") ||
+        trimmedClassForm.room !== (classData.room ?? "") ||
+        classForm.year !== (classData.year ?? "")),
+  );
+
+  const openEditClassModal = useCallback(() => {
+    if (!classData) return;
+    setClassForm({
+      class_name: classData.class_name ?? "",
+      course_subject: classData.course_subject ?? "",
+      room: classData.room ?? "",
+      year: classData.year ?? "",
+    });
+    setSettingsMenuVisible(false);
+    setEditClassModalVisible(true);
+  }, [classData]);
+
+  const closeEditClassModal = useCallback(() => {
+    setEditClassModalVisible(false);
+    setYearPickerVisible(false);
+  }, []);
+
+  const handleAttemptCloseEditClassModal = useCallback(() => {
+    if (savingClassEdit) return;
+    if (hasEditClassChanges) {
+      setDiscardEditClassConfirmVisible(true);
+      return;
+    }
+    closeEditClassModal();
+  }, [closeEditClassModal, hasEditClassChanges, savingClassEdit]);
+
+  const handleSaveClassEdit = async () => {
+    if (!classData) return;
+
+    if (!trimmedClassForm.class_name) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
+      return;
+    }
+    if (trimmedClassForm.class_name.length < 4) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Program must be at least 4 characters" });
+      return;
+    }
+    if (!trimmedClassForm.course_subject) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course is required" });
+      return;
+    }
+    if (trimmedClassForm.course_subject.length < 5) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Course must be at least 5 characters" });
+      return;
+    }
+    if (!classForm.year) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Year is required" });
+      return;
+    }
+    if (trimmedClassForm.room.length > 0 && !/^\d{3}$/.test(trimmedClassForm.room)) {
+      Toast.show({ type: "error", text1: "Validation Error", text2: "Room must be exactly 3 digits" });
       return;
     }
 
-    if (!studentForm.first_name.trim() || !studentForm.last_name.trim()) {
+    try {
+      setSavingClassEdit(true);
+      await ClassService.updateClass(classData.id, {
+        class_name: trimmedClassForm.class_name,
+        course_subject: trimmedClassForm.course_subject,
+        room: trimmedClassForm.room || undefined,
+        year: classForm.year,
+      });
+      Toast.show({
+        type: "success",
+        text1: "Success",
+        text2: "Class updated successfully",
+      });
+      closeEditClassModal();
+      await loadClassData();
+    } catch (error) {
+      console.error("Error updating class:", error);
       Toast.show({
         type: "error",
-        text1: "Validation Error",
-        text2: "First name and last name are required",
+        text1: "Error",
+        text2: "Failed to update class",
+      });
+    } finally {
+      setSavingClassEdit(false);
+    }
+  };
+
+  const loadExams = useCallback(async () => {
+    const requestId = ++examLoadRequestRef.current;
+    try {
+      setExamRowsLoading(true);
+      const currentUser = auth.currentUser;
+      const currentClassData = classDataRef.current;
+      if (!currentUser || !currentClassData) {
+        setExamRows([]);
+        return;
+      }
+
+      const { ExamService } = await import("../../services/examService");
+      const allExams = await ExamService.getExamsByUser();
+
+      if (requestId !== examLoadRequestRef.current) return;
+
+      const linkedExams = allExams
+        .filter((exam) => {
+          if (exam.isArchived) return false;
+          const className = currentClassData.class_name.trim().toLowerCase();
+          const matchesId = exam.classId && exam.classId === currentClassData.id;
+          const matchesName = exam.className && exam.className.trim().toLowerCase() === className;
+          const matchesLegacyClass = exam.class && exam.class.trim().toLowerCase() === className;
+          return matchesId || matchesName || matchesLegacyClass;
+        })
+        .map((exam) => ({
+          id: exam.id,
+          title: exam.title || "Untitled Exam",
+          questions: exam.num_items || exam.totalQuestions || 0,
+          scans: exam.papers || 0,
+          average: 0,
+          subject: exam.class || exam.subject || "General",
+          createdDate: exam.date || "No date",
+          examCode: exam.examCode || "",
+          classId: exam.classId,
+          className: exam.className,
+        } as ExamRow));
+
+      setExamRows(linkedExams);
+
+      // Background update for stats
+      const examsWithStats = await Promise.all(
+        linkedExams.map(async (exam) => {
+          try {
+            const { NetworkService } = await import("@/services/networkService");
+            const isOnline = await NetworkService.isOnline();
+            if (!isOnline) return exam;
+            const stats = await DashboardService.getExamStats(exam.id);
+            return { ...exam, scans: stats.totalGraded, average: stats.classAverage };
+          } catch {
+            return exam;
+          }
+        }),
+      );
+
+      if (requestId !== examLoadRequestRef.current) return;
+      setExamRows(examsWithStats);
+    } catch (error) {
+      console.error("Error loading exams:", error);
+      if (requestId !== examLoadRequestRef.current) return;
+      setExamRows([]);
+    } finally {
+      if (requestId !== examLoadRequestRef.current) return;
+      setExamRowsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setExamRows([]);
+    setExamRowsLoading(true);
+    clearExamSelection();
+  }, [classId]);
+
+  useEffect(() => {
+    if (
+      requestedTab &&
+      ["students", "exams", "scan", "stats"].includes(requestedTab)
+    ) {
+      setActiveTab(requestedTab);
+    }
+  }, [requestedTab]);
+
+  const handleArchiveClass = async () => {
+    if (!classData) return;
+
+    try {
+      await ClassService.updateClass(classData.id, { isArchived: true });
+      setArchiveClassConfirmVisible(false);
+      setSettingsMenuVisible(false);
+      Toast.show({
+        type: "archive_result",
+        text1: "Archived",
+        text2: `${classData.class_name} moved to Archived`,
+      });
+      router.push("/(tabs)/batch-history");
+    } catch (error) {
+      console.error("Error archiving class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to archive class",
+      });
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadClassData();
+    }, [loadClassData]),
+  );
+
+  // Re-run loadExams once classData arrives (it may be null when useFocusEffect first fires)
+  useEffect(() => {
+    if (classData) {
+      loadExams();
+    }
+  }, [classData, loadExams]);
+
+  const students = useMemo<StudentRow[]>(() => {
+    if (!classData) return [];
+    return classData.students.map((student, index) => {
+      const average = buildStudentAverage(student.student_id, index);
+      return {
+        id: student.student_id,
+        initials: `${student.first_name.charAt(0)}${student.last_name.charAt(0)}`.toUpperCase(),
+        name: `${student.first_name} ${student.last_name}`,
+        average,
+        scans: 1,
+        color: avatarColor(index),
+      };
+    });
+  }, [classData]);
+
+  const filteredStudents = useMemo(() => {
+    if (!searchQuery.trim()) return students;
+    const q = searchQuery.toLowerCase();
+    return students.filter((student) => student.name.toLowerCase().includes(q));
+  }, [searchQuery, students]);
+
+  const filteredExams = useMemo(() => {
+    if (!searchQuery.trim()) return examRows;
+    const q = searchQuery.toLowerCase();
+    return examRows.filter(
+      (exam) =>
+        exam.title.toLowerCase().includes(q) ||
+        exam.subject.toLowerCase().includes(q),
+    );
+  }, [examRows, searchQuery]);
+
+  const openExamMenu = useCallback((exam: ExamRow, pageX?: number, pageY?: number) => {
+    const menuWidth = 164;
+    const screenWidth = Dimensions.get("window").width;
+    const fallbackLeft = Math.max(16, screenWidth - menuWidth - 20);
+    const left =
+      typeof pageX === "number"
+        ? Math.min(Math.max(16, pageX - menuWidth + 24), screenWidth - menuWidth - 16)
+        : fallbackLeft;
+    const top = typeof pageY === "number" ? Math.max(96, pageY - 72) : 140;
+
+    setSelectedExam(exam);
+    setExamMenuPosition({ top, left });
+    setExamMenuVisible(true);
+  }, []);
+
+  const closeExamMenu = useCallback(() => {
+    setExamMenuVisible(false);
+  }, []);
+
+  const clearExamSelection = useCallback(() => {
+    setSelectedExam(null);
+    setArchiveExamConfirmVisible(false);
+  }, []);
+
+  const handleImportComplete = async (result: ImportResult) => {
+    if (!classData) {
+      setShowImportModal(false);
+      return;
+    }
+
+    const importedStudents = result.processedRows.map((row) => ({
+      student_id: row.studentId,
+      first_name: row.firstName,
+      last_name: row.lastName,
+      email: row.email,
+    }));
+
+    const merged = [...classData.students];
+    const seen = new Set(merged.map((student) => student.student_id));
+
+    importedStudents.forEach((student) => {
+      if (!seen.has(student.student_id)) {
+        seen.add(student.student_id);
+        merged.push(student);
+      }
+    });
+
+    try {
+      await ClassService.updateClass(classData.id, { students: merged });
+      setShowImportModal(false);
+      Toast.show({
+        type: "success",
+        text1: "Imported",
+        text2: `${importedStudents.length} students added to ${classData.class_name}`,
+      });
+      await loadClassData();
+    } catch (error) {
+      console.error("Error attaching imported students to class:", error);
+      Toast.show({
+        type: "error",
+        text1: "Import Error",
+        text2: "Students were imported but could not be added to this class.",
+      });
+    }
+  };
+
+  const handleArchiveExam = async () => {
+    if (!selectedExam) return;
+    try {
+      const examTitle = selectedExam.title;
+      await updateDoc(doc(db, "exams", selectedExam.id), { isArchived: true });
+      closeExamMenu();
+      clearExamSelection();
+      Toast.show({
+        type: "archive_result",
+        text1: "Archived",
+        text2: `${examTitle} moved to Archived`,
+      });
+      loadExams();
+    } catch (error) {
+      console.error("Error archiving exam:", error);
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to archive exam",
+      });
+    }
+  };
+
+  const handleDeleteExam = async () => {
+    if (!selectedExam) return;
+    try {
+      await deleteDoc(doc(db, "exams", selectedExam.id));
+      closeExamMenu();
+      clearExamSelection();
+      Toast.show({
+        type: "delete_result",
+        text1: "Deleted",
+        text2: "Exam deleted successfully",
+      });
+      loadExams();
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete exam" });
+    }
+  };
+
+  const handleDeleteClass = async () => {
+    if (!classData) return;
+    try {
+      await ClassService.deleteClass(classData.id);
+      setDeleteClassConfirmVisible(false);
+      Toast.show({ type: "delete_result", text1: "Deleted", text2: `${classData.class_name} has been deleted` });
+      router.replace("/(tabs)/classes");
+    } catch (error) {
+      console.error("Error deleting class:", error);
+      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete class" });
+    }
+  };
+
+  const handleExportStudents = async () => {
+    if (!classData || classData.students.length === 0) {
+      Toast.show({
+        type: 'info',
+        text1: 'No Students',
+        text2: 'There are no students to export',
       });
       return;
     }
 
     try {
-      setAddingStudent(true);
-      await ClassService.addStudent(classId, studentForm);
+      setExporting(true);
 
-      Toast.show({
-        type: "success",
-        text1: "Success",
-        text2: "Student added successfully",
-      });
+      // Prepare data for Excel
+      const exportData = classData.students.map((student, index) => ({
+        'No.': index + 1,
+        'Student ID': student.student_id,
+        'First Name': student.first_name,
+        'Last Name': student.last_name,
+        'Email': student.email || '',
+      }));
 
-      // Reset form
-      setStudentForm({
-        student_id: "",
-        first_name: "",
-        last_name: "",
-        email: "",
-      });
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
 
-      setAddStudentModalVisible(false);
-      loadClassData(); // Reload class data
+      // Set column widths
+      ws['!cols'] = [
+        { wch: 5 },  // No.
+        { wch: 15 }, // Student ID
+        { wch: 20 }, // First Name
+        { wch: 20 }, // Last Name
+        { wch: 30 }, // Email
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, 'Students');
+
+      // Generate filename
+      const className = classData.class_name.replace(/[^a-z0-9]/gi, '_');
+      const timestamp = new Date().toISOString().split('T')[0];
+      const filename = `${className}_Students_${timestamp}.xlsx`;
+
+      // Write file
+      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+
+      // Save file
+      if (Platform.OS === 'web') {
+        // Web: trigger download
+        const blob = await (await fetch(`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${wbout}`)).blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Export Successful',
+          text2: `Downloaded ${classData.students.length} students`,
+        });
+      } else {
+        // Native: Let user choose save location
+        try {
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          
+          if (!permissions.granted) {
+            Toast.show({
+              type: 'error',
+              text1: 'Permission Denied',
+              text2: 'Storage access is required to save the file',
+            });
+            return;
+          }
+
+          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            permissions.directoryUri,
+            filename,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          );
+
+          await FileSystem.writeAsStringAsync(fileUri, wbout, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          Toast.show({
+            type: 'success',
+            text1: 'File Downloaded',
+            text2: `${classData.students.length} students saved to ${filename}`,
+            visibilityTime: 4000,
+          });
+        } catch (permError) {
+          // Fallback to app directory if permission issues
+          console.log('Permission error, falling back to app directory:', permError);
+          const fileUri = `${FileSystem.documentDirectory}${filename}`;
+          await FileSystem.writeAsStringAsync(fileUri, wbout, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+          Toast.show({
+            type: 'success',
+            text1: 'File Saved',
+            text2: Platform.OS === 'ios' 
+              ? `Open Files app > On My ${Platform.OS === 'ios' ? 'iPhone/iPad' : 'Device'} > ${filename}`
+              : `File saved to app folder: ${filename}`,
+            visibilityTime: 5000,
+          });
+        }
+      }
     } catch (error) {
-      console.error("Error adding student:", error);
+      console.error('Export error:', error);
       Toast.show({
-        type: "error",
-        text1: "Error",
-        text2: "Failed to add student",
+        type: 'error',
+        text1: 'Export Failed',
+        text2: 'Could not export student list',
       });
     } finally {
-      setAddingStudent(false);
+      setExporting(false);
     }
   };
 
-  const handleRemoveStudent = (studentId: string, studentName: string) => {
-    setStudentToRemove({ studentId, studentName });
-    setRemoveStudentConfirmVisible(true);
-  };
+  const handleBulkImport = async (fileContent: string, isExcel: boolean) => {
+    let successCount = 0;
+    try {
+      const isExcelFile = isExcel;
+      let rows;
 
-  const filteredStudents = (classData?.students ?? []).filter((student) => {
-    if (!studentSearch.trim()) return true;
-    const q = studentSearch.toLowerCase();
-    const fullName = `${student.first_name} ${student.last_name}`.toLowerCase();
-    return (
-      fullName.includes(q) ||
-      student.student_id.toLowerCase().includes(q) ||
-      (student.email ?? "").toLowerCase().includes(q)
-    );
-  });
-  const recentQuizzes = [
-    {
-      id: "q1",
-      title: `Midterm Exam - ${classData?.section_block.toUpperCase() ?? ""}`,
-      subject: classData?.course_subject ?? "N/A",
-      date: "Feb 11, 2026",
-      students: classData?.students.length ?? 0,
-    },
-  ];
-  const filteredQuizzes = recentQuizzes.filter((quiz) =>
-    quiz.title.toLowerCase().includes(quizSearch.toLowerCase()),
-  );
+      const headerErrors = isExcelFile
+        ? StudentImportService.validateXLSXHeaders(fileContent)
+        : StudentImportService.validateCSVHeaders(fileContent);
 
-  const getScore = (studentId: string) => {
-    const numeric = parseInt(studentId.replace(/\D/g, "").slice(-2) || "0", 10);
-    return Math.max(2, Math.min(49, (numeric % 50) || 32));
-  };
+      if (headerErrors.length > 0) {
+        setImportErrors({
+          visible: true,
+          successCount: 0,
+          errors: headerErrors.map((e) => ({
+            student_id: e.field,
+            error: e.error,
+          })),
+        });
+        setImporting(false);
+        return;
+      }
 
-  const getScoreColor = (score: number) => {
-    if (score >= 40) return "#00a550";
-    if (score >= 25) return "#ff9800";
-    return "#e74c3c";
-  };
+      if (isExcelFile) {
+        rows = StudentImportService.parseXLSX(fileContent);
+      } else {
+        rows = StudentImportService.parseCSV(fileContent);
+      }
 
-  const renderStudentItem = ({ item }: { item: Student }) => (
-    <View
-      style={[
-        styles.studentCard,
-        {
-          backgroundColor: colors.studentCardBg,
-          borderColor: colors.studentCardBorder,
-        },
-      ]}
-    >
-      <View style={styles.studentInfo}>
-        <View style={styles.studentAvatar}>
-          <Text style={styles.studentAvatarText}>
-            {item.first_name.charAt(0)}
-            {item.last_name.charAt(0)}
-          </Text>
-        </View>
-        <View style={styles.studentDetails}>
-          <Text
-            style={[
-              styles.studentName,
-              { color: darkModeEnabled ? colors.text : "#2c3d35" },
-            ]}
-          >
-            {item.first_name} {item.last_name}
-          </Text>
-          <Text
-            style={[
-              styles.studentId,
-              { color: darkModeEnabled ? colors.textSecondary : "#6a7b72" },
-            ]}
-          >
-            ID: {item.student_id}
-          </Text>
-          {item.email && (
-            <Text
-              style={[
-                styles.studentEmail,
-                { color: darkModeEnabled ? colors.textMuted : "#85968d" },
-              ]}
-            >
-              {item.email}
-            </Text>
-          )}
-        </View>
-      </View>
-      {showClassDetails ? (
-        <TouchableOpacity
-          onPress={() =>
-            handleRemoveStudent(
-              item.student_id,
-              `${item.first_name} ${item.last_name}`,
-            )
+      setImportProgress(30);
+
+      const validStudents: any[] = [];
+      const errors: any[] = [];
+
+      for (const row of rows) {
+        const rowErrors = StudentImportService.validateRow(row);
+        if (rowErrors.length === 0) {
+          validStudents.push({
+            rowNumber: row.rowNumber,
+            student_id: row.studentId,
+            first_name: row.firstName,
+            last_name: row.lastName,
+            email: row.email || "",
+          });
+        } else {
+          errors.push(...rowErrors);
+        }
+      }
+
+      const existingStudentIds = new Set(
+        (classData?.students ?? []).map((s) => s.student_id)
+      );
+
+      const duplicateInClassErrors = validStudents
+        .filter((student) => existingStudentIds.has(student.student_id))
+        .map((student) => ({
+          rowNumber: student.rowNumber,
+          field: "student_id",
+          value: student.student_id,
+          error: "Student already exists in this class",
+          severity: "warning" as const,
+        }));
+
+      if (duplicateInClassErrors.length > 0) {
+        errors.push(...duplicateInClassErrors);
+      }
+
+      for (const student of validStudents) {
+        try {
+          await ClassService.addStudent(classId, student);
+          existingStudentIds.add(student.student_id);
+          successCount++;
+        } catch (err) {
+          console.error("Error adding student to class:", err);
+          let cleanMessage = "Failed to add student";
+          if (err instanceof Error) {
+            cleanMessage = err.message.replace(/^Error:\s*/i, "").trim();
           }
-        >
-          <Ionicons name="trash-outline" size={20} color={COLORS.error} />
-        </TouchableOpacity>
-      ) : (
-        <View
-          style={[
-            styles.scoreBadge,
-            {
-              backgroundColor: colors.scoreBadgeBg,
-              borderColor: colors.scoreBadgeBorder,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.scoreText,
-              { color: getScoreColor(getScore(item.student_id)) },
-            ]}
+          errors.push({
+            rowNumber: 0,
+            field: "student_id",
+            value: student.student_id,
+            error: cleanMessage,
+            severity: cleanMessage.toLowerCase().includes("already exists") ? "warning" as const : "error" as const,
+          });
+        }
+      }
+
+      setImportProgress(100);
+      if (successCount > 0) await loadClassData();
+
+      if (errors.length > 0) {
+        setImportErrors({
+          visible: true,
+          successCount,
+          errors: errors.map((e) => ({
+            student_id: e.value,
+            error: e.error,
+          })),
+        });
+      } else {
+        Toast.show({
+          type: "success",
+          text1: "Import Successful",
+          text2: `${successCount} students added successfully`,
+        });
+      }
+    } catch (error) {
+      console.error("Error during bulk import:", error);
+      Toast.show({
+        type: "error",
+        text1: "Import Failed",
+        text2: "Could not import students",
+      });
+    } finally {
+      if (successCount > 0) await loadClassData();
+      setImporting(false);
+    }
+  };
+
+  const requestArchiveClass = () => {
+    setSettingsMenuVisible(false);
+    setArchiveClassConfirmVisible(true);
+  };
+
+  const requestArchiveExam = () => {
+    if (!selectedExam) return;
+    setExamMenuVisible(false);
+    setArchiveExamConfirmVisible(true);
+  };
+
+  const stats = useMemo(() => {
+    if (!students.length) {
+      return {
+        average: 0,
+        highest: 0,
+        lowest: 0,
+        totalScanned: 0,
+        passed: 0,
+        failed: 0,
+        distribution: [
+          { label: "90-100", count: 0 },
+          { label: "80-89", count: 0 },
+          { label: "70-79", count: 0 },
+          { label: "60-69", count: 0 },
+          { label: "< 60", count: 0 },
+        ],
+      };
+    }
+
+    const averages = students.map((student) => student.average);
+    const distribution = [
+      { label: "90-100", count: averages.filter((value) => value >= 90).length },
+      { label: "80-89", count: averages.filter((value) => value >= 80 && value < 90).length },
+      { label: "70-79", count: averages.filter((value) => value >= 70 && value < 80).length },
+      { label: "60-69", count: averages.filter((value) => value >= 60 && value < 70).length },
+      { label: "< 60", count: averages.filter((value) => value < 60).length },
+    ];
+
+    const total = averages.length;
+    const sum = averages.reduce((a, b) => a + b, 0);
+    return {
+      average: total ? Math.round(sum / total) : 0,
+      highest: total ? Math.max(...averages) : 0,
+      lowest: total ? Math.min(...averages) : 0,
+      totalScanned: total,
+      passed: averages.filter((v) => v >= 75).length,
+      failed: averages.filter((v) => v < 75).length,
+      distribution,
+    };
+  }, [students]);
+
+  const colors = darkModeEnabled
+    ? {
+        surface: "#1E2A24",
+        border: "#2E3D35",
+        text: "#E8F0EB",
+        textSecondary: "#9DB8A8",
+        textMuted: "#6B8A78",
+        badgeBg: "#2A3D35",
+      }
+    : {
+        surface: "#FFFFFF",
+        border: "#E8EBF0",
+        text: "#111827",
+        textSecondary: "#6B7280",
+        textMuted: "#9CA3AF",
+        badgeBg: "#E9F8F1",
+      };
+
+  const sortedStudents = useMemo(() => {
+    const arr = [...filteredStudents];
+    switch (sortBy) {
+      case 'id_asc': return arr.sort((a, b) => a.id.localeCompare(b.id));
+      case 'id_desc': return arr.sort((a, b) => b.id.localeCompare(a.id));
+      case 'fname_asc': return arr.sort((a, b) => a.name.localeCompare(b.name));
+      case 'fname_desc': return arr.sort((a, b) => b.name.localeCompare(a.name));
+      default: return arr;
+    }
+  }, [filteredStudents, sortBy]);
+
+  const renderTab = () => {
+    if (activeTab === "students") {
+      return (
+        <>
+          <View style={styles.searchRow}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color="#8E97A6" />
+              <TextInput
+                ref={studentSearchInputRef}
+                style={styles.searchInput}
+                placeholder="Search students..."
+                placeholderTextColor="#8E97A6"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)}>
+                <Ionicons name="swap-vertical-outline" size={14} color="#20BE7B" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.exportButtonSmall} onPress={handleExportStudents}>
+                <Ionicons name="download-outline" size={14} color="#20BE7B" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.importButton} onPress={() => setShowImportModal(true)}>
+                <Ionicons name="cloud-upload-outline" size={14} color="#20BE7B" />
+              </TouchableOpacity>
+            </View>
+          </View>
+          {sortedStudents.length === 0 ? (
+            <View style={styles.emptyStateCard}>
+              <View style={styles.emptyStateIconWrap}>
+                <Ionicons name="people-outline" size={26} color="#20BE7B" />
+              </View>
+              <Text style={styles.emptyStateTitle}>No Students Yet</Text>
+              <Text style={styles.emptyStateText}>Add students to get started.</Text>
+            </View>
+          ) : (
+            sortedStudents.map((student) => (
+              <TouchableOpacity
+                key={student.id}
+                style={styles.studentCard}
+                onPress={() => {
+                  setStudentToRemove({ studentId: student.id, studentName: student.name });
+                  setRemoveStudentConfirmVisible(true);
+                }}
+              >
+                <View style={[styles.studentAvatar, { backgroundColor: student.color }]}>
+                  <Text style={styles.studentAvatarText}>{student.initials}</Text>
+                </View>
+                <View style={styles.studentBody}>
+                  <Text style={styles.studentName}>{student.name}</Text>
+                  <Text style={styles.studentSubtext}>ID: {student.id}</Text>
+                </View>
+                <View style={styles.studentScoreWrap}>
+                  <Text style={[styles.studentScore, { color: scoreColor(student.average) }]}>
+                    {student.average}%
+                  </Text>
+                  <Text style={styles.studentAvgLabel}>avg</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+        </>
+      );
+    }
+
+    if (activeTab === "exams") {
+      return (
+        <>
+          <View style={styles.searchRow}>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search-outline" size={16} color="#8E97A6" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search exams..."
+                placeholderTextColor="#8E97A6"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.createExamButton}
+            onPress={() => router.push(`/(tabs)/create-quiz?classId=${classId}`)}
           >
-            {getScore(item.student_id)}/50
+            <Ionicons name="add-circle-outline" size={18} color="#20BE7B" />
+            <Text style={styles.createExamText}>Create New Exam</Text>
+          </TouchableOpacity>
+          {examRowsLoading ? (
+            <ActivityIndicator size="small" color="#20BE7B" style={{ marginTop: 20 }} />
+          ) : filteredExams.length === 0 ? (
+            <View style={styles.emptyStateCard}>
+              <View style={styles.emptyStateIconWrap}>
+                <Ionicons name="document-text-outline" size={26} color="#20BE7B" />
+              </View>
+              <Text style={styles.emptyStateTitle}>No Exams Yet</Text>
+              <Text style={styles.emptyStateText}>Create an exam to get started.</Text>
+            </View>
+          ) : (
+            filteredExams.map((exam) => (
+              <View key={exam.id} style={styles.examCard}>
+                <TouchableOpacity
+                  style={styles.examCardPressable}
+                    onPress={() => router.push(`/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`)}
+                  >
+                    <View style={styles.examBody}>
+                      <Text style={styles.examTitle}>{exam.title}</Text>
+                      <Text style={styles.examMeta}>{exam.questions} items</Text>
+                      {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
+                      {exam.createdDate ? (
+                        <View style={styles.examDateRow}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={12}
+                            color="#7E8798"
+                            style={styles.examDateIcon}
+                          />
+                          <Text style={styles.examMeta}>{exam.createdDate}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.examRight}>
+                      <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
+                      {exam.average > 0 ? `${exam.average}%` : "—"}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.examMenuButton}
+                  onPress={(e) => {
+                    e.currentTarget.measure((_fx, _fy, _w, _h, px, py) => {
+                      openExamMenu(exam, px, py);
+                    });
+                  }}
+                >
+                  <Ionicons name="ellipsis-vertical" size={18} color="#8E97A6" />
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
+        </>
+      );
+    }
+
+    if (activeTab === "scan") {
+      return (
+        <View style={styles.scanPanel}>
+          <View style={styles.scanIconWrap}>
+            <Ionicons name="scan-outline" size={36} color="#20BE7B" />
+          </View>
+          <Text style={styles.scanTitle}>Scan Answer Sheets</Text>
+          <Text style={styles.scanDescription}>
+            Use the camera to scan and grade answer sheets for this class.
           </Text>
+          <TouchableOpacity
+            style={styles.startScanButton}
+            onPress={() => router.push(`/(tabs)/scanner?classId=${classId}`)}
+          >
+            <Text style={styles.startScanText}>Start Scanning</Text>
+          </TouchableOpacity>
         </View>
-      )}
-    </View>
-  );
+      );
+    }
+
+    if (activeTab === "stats") {
+      return (
+        <>
+          <View style={styles.statsHeroCard}>
+            <Text style={styles.statsHeroLabel}>Class Average</Text>
+            <Text style={styles.statsHeroValue}>{stats.average}%</Text>
+            <View style={styles.statsHeroBar}>
+              <AnimatedStatBar progress={stats.average / 100} />
+            </View>
+            <View style={styles.statsHeroFooter}>
+              <Text style={styles.statsPassedText}>Passed: {stats.passed}</Text>
+              <Text style={styles.statsFailedText}>Failed: {stats.failed}</Text>
+            </View>
+          </View>
+          <View style={styles.statsGrid}>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Highest</Text>
+              <Text style={[styles.statsSmallValue, { color: "#20BE7B" }]}>{stats.highest}%</Text>
+            </View>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Lowest</Text>
+              <Text style={[styles.statsSmallValue, { color: "#EF4444" }]}>{stats.lowest}%</Text>
+            </View>
+            <View style={styles.statsSmallCard}>
+              <Text style={styles.statsSmallLabel}>Students</Text>
+              <Text style={styles.statsSmallValue}>{stats.totalScanned}</Text>
+            </View>
+          </View>
+          <View style={styles.distributionCard}>
+            <Text style={styles.distributionTitle}>Score Distribution</Text>
+            {stats.distribution.map((item) => (
+              <View key={item.label} style={styles.distributionRow}>
+                <Text style={styles.distributionLabel}>{item.label}</Text>
+                <View style={styles.distributionTrack}>
+                  <AnimatedStatBar
+                    progress={stats.totalScanned > 0 ? item.count / stats.totalScanned : 0}
+                  />
+                </View>
+                <Text style={styles.distributionCount}>{item.count}</Text>
+              </View>
+            ))}
+          </View>
+        </>
+      );
+    }
+
+    return null;
+  };
 
   if (loading) {
     return (
-      <View style={[styles.centerContainer, { backgroundColor: colors.screenBg }]}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-          Loading class details...
-        </Text>
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#20BE7B" />
+        <Text style={styles.loadingText}>Loading class details...</Text>
       </View>
     );
   }
 
   if (error || !classData) {
     return (
-      <View style={[styles.centerContainer, { backgroundColor: colors.screenBg }]}>
-        <Ionicons name="alert-circle-outline" size={64} color={COLORS.error} />
+      <View style={styles.centerContainer}>
+        <Ionicons name="alert-circle-outline" size={58} color="#EF4444" />
         <Text style={styles.errorText}>{error || "Class not found"}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={loadClassData}>
           <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={goToClasses}
-        >
-          <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.screenBg }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          {
-            backgroundColor: colors.surface,
-            borderBottomColor: colors.border,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={[styles.backIcon, { backgroundColor: colors.headerIconBg }]}
-          onPress={goToClasses}
-        >
-          <Ionicons
-            name="arrow-back"
-            size={22}
-            color={darkModeEnabled ? colors.text : "#2b4337"}
-          />
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.iconButton} onPress={() => router.replace("/(tabs)/classes")}>
+          <Ionicons name="arrow-back" size={22} color="#5C6575" />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>
-          {showClassDetails ? "Class Details" : ""}
-        </Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>{classData.class_name}</Text>
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={() => setSettingsMenuVisible(true)}
+        >
+          <Ionicons name="settings-outline" size={20} color="#111827" />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {showClassDetails && (
-          <>
-            {/* Class Info Section */}
-            <View style={[styles.section, styles.heroSection]}>
-              <Text style={styles.classCode}>
-                {classData.section_block.toUpperCase()}
-              </Text>
-              <Text style={styles.className}>{classData.class_name}</Text>
-              <Text style={styles.courseSubject}>{classData.course_subject}</Text>
-            </View>
-
-            {/* Details Section */}
-            <View style={[styles.section, styles.classInfoSection]}>
-              <Text style={[styles.sectionTitle, styles.sectionTitleOnDark]}>
-                Class Information
-              </Text>
-
-              <View style={styles.infoRow}>
-                <Ionicons name="location-outline" size={20} color="#d2e8dc" />
-                <View style={styles.infoContent}>
-                  <Text style={[styles.infoLabel, styles.infoLabelOnDark]}>
-                    Room
-                  </Text>
-                  <Text style={[styles.infoValue, styles.infoValueOnDark]}>
-                    {classData.room || "N/A"}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </>
-        )}
-
-        {/* Class List Nav */}
-        <View
-          style={[
-            styles.section,
-            showClassDetails ? styles.listSwitchSection : styles.listSwitchSectionLight,
-            showClassDetails
-              ? {
-                  backgroundColor: colors.surfaceSoft,
-                  borderColor: colors.borderSoft,
-                }
-              : {
-                  backgroundColor: darkModeEnabled
-                    ? colors.surface
-                    : colors.surfaceMuted,
-                  borderColor: darkModeEnabled
-                    ? colors.border
-                    : colors.surfaceMuted,
-                },
-          ]}
-        >
-          <View
-            style={[
-              styles.listNav,
-              {
-                backgroundColor: darkModeEnabled ? "#2a3129" : "#e7e2d3",
-                borderColor: darkModeEnabled ? "#4b5b53" : "#d4c5a0",
-              },
-            ]}
-            onLayout={(event) => setListNavWidth(event.nativeEvent.layout.width)}
+      <View style={styles.tabsBar}>
+        {(["students", "exams", "scan", "stats"] as const).map((tab) => (
+          <TouchableOpacity
+            key={tab}
+            style={styles.tabButton}
+            onPress={() => {
+              setActiveTab(tab);
+              setSearchQuery("");
+            }}
           >
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.listNavActivePill,
-                { width: listNavPillWidth },
-                {
-                  backgroundColor: darkModeEnabled ? "#35523f" : "#3f6f52",
-                },
-                {
-                  transform: [
-                    {
-                      translateX: tabSlideAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, listNavPillWidth],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-            <TouchableOpacity
-              style={styles.listNavButton}
-              onPress={() => setActiveTab("students")}
+            <Text
+              style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}
             >
-              <Text
-                style={[
-                  styles.listNavText,
-                  { color: darkModeEnabled ? colors.textSecondary : "#4d5f55" },
-                  activeTab === "students" && styles.listNavTextActive,
-                ]}
-              >
-                Student List
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.listNavButton}
-              onPress={() => setActiveTab("quizzes")}
-            >
-              <Text
-                style={[
-                  styles.listNavText,
-                  { color: darkModeEnabled ? colors.textSecondary : "#4d5f55" },
-                  activeTab === "quizzes" && styles.listNavTextActive,
-                ]}
-              >
-                Recent Quizzes
-              </Text>
-            </TouchableOpacity>
-          </View>
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </Text>
+            {activeTab === tab && <View style={styles.tabIndicator} />}
+          </TouchableOpacity>
+        ))}
+      </View>
 
-          <View
-            style={[
-              styles.studentSearchRow,
-              {
-                backgroundColor: darkModeEnabled ? colors.inputBg : "#3f6b54",
-                borderColor: darkModeEnabled ? colors.inputBorder : "#355b49",
-              },
-            ]}
-          >
-            <Ionicons
-              name="search"
-              size={16}
-              color={darkModeEnabled ? colors.textSecondary : "#d2e8dc"}
-            />
-            <TextInput
-              ref={studentSearchInputRef}
-              style={[
-                styles.studentSearchInput,
-                { color: darkModeEnabled ? colors.text : "#ecf7f1" },
-              ]}
-              placeholder={
-                activeTab === "students" ? "Search student..." : "Search quizzes..."
-              }
-              placeholderTextColor={colors.inputPlaceholder}
-              value={activeTab === "students" ? studentSearch : quizSearch}
-              onChangeText={
-                activeTab === "students" ? setStudentSearch : setQuizSearch
-              }
-              autoCapitalize="none"
-            />
-            <View
-              style={[
-                styles.studentCountBadge,
-                { backgroundColor: colors.badgeBg },
-              ]}
-            >
-              <Ionicons
-                name={activeTab === "students" ? "people-outline" : "document-text-outline"}
-                size={12}
-                color={colors.badgeText}
-              />
-              <Text
-                style={[styles.studentCountText, { color: colors.badgeText }]}
-              >
-                {activeTab === "students"
-                  ? filteredStudents.length
-                  : filteredQuizzes.length}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Students / Quizzes Section */}
-        <View
-          style={[
-            styles.section,
-            showClassDetails ? styles.listContentSection : styles.listContentSectionLight,
-            showClassDetails
-              ? {
-                  backgroundColor: colors.surfaceSoft,
-                  borderColor: colors.borderSoft,
-                }
-              : {
-                  backgroundColor: darkModeEnabled
-                    ? colors.surface
-                    : colors.surfaceMuted,
-                  borderColor: darkModeEnabled
-                    ? colors.border
-                    : colors.surfaceMuted,
-                },
-          ]}
-        >
-          {showClassDetails && (
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, styles.sectionTitleOnDark]}>
-                {activeTab === "students"
-                  ? `Students (${filteredStudents.length})`
-                  : "Recent Quizzes"}
-              </Text>
-              {activeTab === "students" && (
-                <TouchableOpacity
-                  style={styles.addStudentButton}
-                  onPress={() => setAddStudentModalVisible(true)}
-                >
-                  <Ionicons name="add" size={18} color="#fff" />
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {activeTab === "students" && classData.students.length === 0 ? (
-            <View style={styles.emptyStudents}>
-              <Ionicons
-                name="people-outline"
-                size={48}
-                color={colors.emptyIcon}
-              />
-              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-                No students yet
-              </Text>
-              <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>
-                Tap + to add your first student
-              </Text>
-            </View>
-          ) : activeTab === "students" ? (
-            <FlatList
-              data={filteredStudents}
-              renderItem={renderStudentItem}
-              keyExtractor={(item) => item.student_id}
-              scrollEnabled={false}
-            />
-          ) : filteredQuizzes.length === 0 ? (
-            <View
-              style={[
-                styles.quizPlaceholderCard,
-                {
-                  backgroundColor: darkModeEnabled
-                    ? colors.surfaceMuted
-                    : "rgba(233, 245, 238, 0.16)",
-                  borderColor: darkModeEnabled
-                    ? colors.border
-                    : "rgba(221, 239, 230, 0.3)",
-                },
-              ]}
-            >
-              <Text
-                style={[styles.quizPlaceholderTitle, { color: colors.text }]}
-              >
-                No recent quizzes yet
-              </Text>
-              <Text
-                style={[
-                  styles.quizPlaceholderSubtitle,
-                  { color: colors.textSecondary },
-                ]}
-              >
-                Create a quiz to see latest results for this class.
-              </Text>
-            </View>
-          ) : (
-            filteredQuizzes.map((quiz) => (
-              <View
-                key={quiz.id}
-                style={[
-                  styles.quizCard,
-                  {
-                    backgroundColor: colors.quizCardBg,
-                    borderColor: colors.quizCardBorder,
-                  },
-                ]}
-              >
-                <Text style={[styles.quizCardTitle, { color: colors.text }]}>
-                  {quiz.title}
-                </Text>
-                <Text
-                  style={[styles.quizCardSubject, { color: colors.textSecondary }]}
-                >
-                  {quiz.subject}
-                </Text>
-                <View style={styles.quizMetaRow}>
-                  <Ionicons
-                    name="calendar-outline"
-                    size={12}
-                    color={darkModeEnabled ? colors.textSecondary : "#cde2d8"}
-                  />
-                  <Text
-                    style={[
-                      styles.quizMetaText,
-                      {
-                        color: darkModeEnabled
-                          ? colors.textSecondary
-                          : "#d5e9de",
-                      },
-                    ]}
-                  >
-                    {quiz.date}
-                  </Text>
-                </View>
-                <View style={styles.quizActionsRow}>
-                  <View
-                    style={[
-                      styles.quizStudentsBadge,
-                      {
-                        backgroundColor: colors.quizBadgeBg,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.quizStudentsBadgeText,
-                        { color: colors.quizBadgeText },
-                      ]}
-                    >
-                      {quiz.students} STUDENTS
-                    </Text>
-                  </View>
-                  <View style={styles.quizRightActions}>
-                    <TouchableOpacity
-                      style={[
-                        styles.quizActionBtn,
-                        { backgroundColor: colors.quizActionBg },
-                      ]}
-                    >
-                      <Ionicons name="share-social-outline" size={12} color="#fff" />
-                      <Text style={styles.quizActionText}>Share</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.quizActionBtn,
-                        { backgroundColor: colors.quizActionBg },
-                      ]}
-                    >
-                      <Ionicons name="download-outline" size={12} color="#fff" />
-                      <Text style={styles.quizActionText}>Export</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            ))
-          )}
-        </View>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {renderTab()}
       </ScrollView>
 
-      {/* Add Student Modal */}
       <Modal
-        visible={addStudentModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setAddStudentModalVisible(false)}
+        visible={settingsMenuVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSettingsMenuVisible(false)}
       >
-        <View
-          style={[
-            styles.modalOverlay,
-            { backgroundColor: colors.modalOverlay },
-          ]}
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={() => setSettingsMenuVisible(false)}
+        >
+          <View style={styles.menuContent}>
+            <View style={styles.menuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {classData?.class_name || "Class"}
+              </Text>
+              <TouchableOpacity
+                style={styles.menuCloseButton}
+                onPress={() => setSettingsMenuVisible(false)}
+              >
+                <Ionicons name="close" size={18} color="#98A2B3" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                Toast.show({
+                  type: "info",
+                  text1: "Sync to Web",
+                  text2: "Sync to Web is still not available.",
+                });
+              }}
+            >
+              <Text style={styles.menuItemText}>Sync to Web</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                Toast.show({
+                  type: "info",
+                  text1: "Export",
+                  text2: "Export Results is not wired yet.",
+                });
+              }}
+            >
+              <Text style={styles.menuItemText}>Export Results</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                requestArchiveClass();
+              }}
+            >
+              <Text style={[styles.menuItemText, styles.menuArchiveText]}>
+                Archive Class
+              </Text>
+            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => {
+                  openEditClassModal();
+                }}
+              >
+                <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                  Edit Class
+                </Text>
+              </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+
+<ConfirmationModal
+  visible={archiveClassConfirmVisible}
+  title="Archive Item"
+  message={`Are you sure you want to archive ${
+    classData?.class_name ?? "this class"
+  }? You can still view it later in the archived section.`}
+  cancelText="Cancel"
+  confirmText="Archive"
+  destructive
+  onCancel={() => setArchiveClassConfirmVisible(false)}
+  onConfirm={handleArchiveClass}
+/>
+
+<ConfirmationModal
+  visible={deleteClassConfirmVisible}
+  title="Delete Item"
+  message={`Are you sure you want to delete ${
+    classData?.class_name ?? "this class"
+  }? This action cannot be undone.`}
+  cancelText="Cancel"
+  confirmText="Delete"
+  destructive
+  onCancel={() => setDeleteClassConfirmVisible(false)}
+  onConfirm={handleDeleteClass}
+/>
+
+      <Modal
+        visible={examMenuVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={closeExamMenu}
+      >
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          activeOpacity={1}
+          onPress={closeExamMenu}
         >
           <View
             style={[
-              styles.modalContent,
+              styles.examMenuContent,
               {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
+                top: examMenuPosition.top,
+                left: examMenuPosition.left,
               },
             ]}
           >
-            <View
-              style={[styles.modalHeader, { borderBottomColor: colors.border }]}
-            >
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                Add Student
+            <View style={styles.examMenuHeader}>
+              <Text style={styles.menuTitle} numberOfLines={1}>
+                {selectedExam?.title || "Exam"}
               </Text>
               <TouchableOpacity
-                onPress={() => setAddStudentModalVisible(false)}
+                style={styles.menuCloseButton}
+                onPress={closeExamMenu}
               >
-                <Ionicons name="close" size={28} color={colors.text} />
+                <Ionicons name="close" size={18} color="#98A2B3" />
               </TouchableOpacity>
             </View>
-
-            <View style={styles.modalBody}>
-              <Text style={[styles.label, { color: colors.textSecondary }]}>
-                Student ID *
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.inputBorder,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
-                  },
-                ]}
-                placeholder="e.g., 202311070"
-                placeholderTextColor={colors.inputPlaceholder}
-                value={studentForm.student_id}
-                onChangeText={(text) =>
-                  setStudentForm({ ...studentForm, student_id: text })
-                }
-                keyboardType="numeric"
-              />
-
-              <Text style={[styles.label, { color: colors.textSecondary }]}>
-                First Name *
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.inputBorder,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
-                  },
-                ]}
-                placeholder="e.g., John"
-                placeholderTextColor={colors.inputPlaceholder}
-                value={studentForm.first_name}
-                onChangeText={(text) =>
-                  setStudentForm({ ...studentForm, first_name: text })
-                }
-              />
-
-              <Text style={[styles.label, { color: colors.textSecondary }]}>
-                Last Name *
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.inputBorder,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
-                  },
-                ]}
-                placeholder="e.g., Doe"
-                placeholderTextColor={colors.inputPlaceholder}
-                value={studentForm.last_name}
-                onChangeText={(text) =>
-                  setStudentForm({ ...studentForm, last_name: text })
-                }
-              />
-
-              <Text style={[styles.label, { color: colors.textSecondary }]}>
-                Email
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    borderColor: colors.inputBorder,
-                    backgroundColor: colors.inputBg,
-                    color: colors.text,
-                  },
-                ]}
-                placeholder="e.g., student@example.com"
-                placeholderTextColor={colors.inputPlaceholder}
-                value={studentForm.email}
-                onChangeText={(text) =>
-                  setStudentForm({ ...studentForm, email: text })
-                }
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
-
-            <View
-              style={[styles.modalFooter, { borderTopColor: colors.border }]}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                closeExamMenu();
+                router.push(`/(tabs)/scanner?classId=${classId}&examId=${selectedExam?.id}`);
+              }}
             >
+              <Text style={styles.menuItemText}>Scan answer sheet</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
+              <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                closeExamMenu();
+                if (selectedExam) {
+                  router.push(`/(tabs)/edit-exam?examId=${selectedExam.id}&classId=${classId}`);
+                }
+              }}
+            >
+              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>Edit Exam</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Sort Modal */}
+      <Modal
+        visible={sortModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setSortModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.sortModalOverlay}
+          activeOpacity={1}
+          onPress={() => setSortModalVisible(false)}
+        >
+          <View style={[styles.sortModalContent, darkModeEnabled && { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.sortModalTitle, darkModeEnabled && { color: colors.text }]}>Sort Students</Text>
+
+            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY STUDENT ID</Text>
+            {(['id_asc', 'id_desc'] as const).map((option) => (
               <TouchableOpacity
-                style={[
-                  styles.cancelButton,
-                  {
-                    borderColor: colors.inputBorder,
-                    backgroundColor: darkModeEnabled
-                      ? colors.surfaceMuted
-                      : "#f7f9f8",
-                  },
-                ]}
-                onPress={() => setAddStudentModalVisible(false)}
-                disabled={addingStudent}
+                key={option}
+                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
+                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
               >
-                <Text
-                  style={[
-                    styles.cancelButtonText,
-                    { color: colors.textSecondary },
-                  ]}
-                >
-                  Cancel
+                <Ionicons
+                  name={option === 'id_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  size={16}
+                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                />
+                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
+                  {option === 'id_asc' ? 'Ascending (0 → 9)' : 'Descending (9 → 0)'}
                 </Text>
+                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
               </TouchableOpacity>
+            ))}
+
+            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY FIRST NAME</Text>
+            {(['fname_asc', 'fname_desc'] as const).map((option) => (
               <TouchableOpacity
-                style={[
-                  styles.addButton,
-                  addingStudent && styles.addButtonDisabled,
-                ]}
-                onPress={handleAddStudent}
-                disabled={addingStudent}
+                key={option}
+                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
+                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
               >
-                {addingStudent ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.addButtonText}>Add Student</Text>
-                )}
+                <Ionicons
+                  name={option === 'fname_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  size={16}
+                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                />
+                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
+                  {option === 'fname_asc' ? 'A → Z' : 'Z → A'}
+                </Text>
+                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
               </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Duplicate Student Warning Modal */}
+      <ConfirmationModal
+        visible={duplicateWarning.visible}
+        title="Duplicate Student ID"
+        message={duplicateWarning.message}
+        confirmText="OK"
+        onConfirm={() => {
+          setDuplicateWarning({ visible: false, message: "" });
+        }}
+      />
+
+      {/* Import Errors Modal */}
+      <Modal
+        visible={importErrors.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setImportErrors({ visible: false, successCount: 0, errors: [] });
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.importErrorModal, { backgroundColor: colors.surface }]}>
+            <View style={styles.importErrorHeader}>
+              <Ionicons 
+                name={importErrors.successCount > 0 ? "warning" : "close-circle"} 
+                size={48} 
+                color={importErrors.successCount > 0 ? "#ff9800" : "#e74c3c"} 
+              />
+              <Text style={[styles.importErrorTitle, { color: colors.text }]}>
+                {importErrors.successCount > 0 ? "Import Completed with Issues" : "Import Failed"}
+              </Text>
+              <Text style={[styles.importErrorSubtitle, { color: colors.textSecondary }]}>
+                {importErrors.successCount > 0 
+                  ? `${importErrors.successCount} students added, ${importErrors.errors.length} skipped`
+                  : `${importErrors.errors.length} errors found`}
+              </Text>
             </View>
+
+            <ScrollView style={styles.importErrorList}>
+              {importErrors.errors.map((err, index) => (
+                <View key={index} style={[styles.importErrorItem, { borderLeftColor: "#ff9800" }]}>
+                  <Text style={[styles.importErrorId, { color: colors.text }]}>
+                    {err.student_id}
+                  </Text>
+                  <Text style={[styles.importErrorMessage, { color: colors.textSecondary }]}>
+                    {err.error}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.importErrorButton, { backgroundColor: COLORS.primary }]}
+              onPress={() => {
+                setImportErrors({ visible: false, successCount: 0, errors: [] });
+              }}
+            >
+              <Text style={styles.importErrorButtonText}>OK</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
       <ConfirmationModal
+        visible={archiveExamConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${selectedExam?.title ?? "this exam"}? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={clearExamSelection}
+        onConfirm={() => {
+          setArchiveExamConfirmVisible(false);
+          handleArchiveExam();
+        }}
+      />
+
+      <ConfirmationModal
         visible={removeStudentConfirmVisible}
         title="Remove Student"
-        message={
-          studentToRemove
-            ? `Are you sure you want to remove ${studentToRemove.studentName} from this class?`
-            : "Are you sure you want to remove this student from this class?"
-        }
+        message={`Are you sure you want to remove ${studentToRemove?.studentName ?? "this student"} from this class?`}
         cancelText="Cancel"
         confirmText="Remove"
         destructive
@@ -925,20 +1515,29 @@ export default function ClassDetailsScreen() {
         onConfirm={async () => {
           if (!studentToRemove) return;
           setRemoveStudentConfirmVisible(false);
+
           try {
             await ClassService.removeStudent(classId, studentToRemove.studentId);
+
             Toast.show({
               type: "success",
               text1: "Success",
               text2: "Student removed successfully",
             });
+
             loadClassData();
           } catch (error) {
             console.error("Error removing student:", error);
+
+            let cleanMessage = "Failed to remove student";
+            if (error instanceof Error) {
+              cleanMessage = error.message.replace(/^Error:\s*/i, "").trim();
+            }
+
             Toast.show({
               type: "error",
-              text1: "Error",
-              text2: "Failed to remove student",
+              text1: "Cannot Remove Student",
+              text2: cleanMessage,
             });
           } finally {
             setStudentToRemove(null);
@@ -946,7 +1545,191 @@ export default function ClassDetailsScreen() {
         }}
       />
 
-      <Toast />
+      <StudentImportModal
+        visible={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        selectedClassId={classId}
+        onImportComplete={handleImportComplete}
+      />
+
+      <Modal
+        visible={editClassModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={handleAttemptCloseEditClassModal}
+      >
+        <View style={styles.createScreen}>
+          <View style={styles.createScreenHeader}>
+            <View style={styles.createScreenHeaderSpacer} />
+            <Text style={styles.createSheetTitle}>Edit Class</Text>
+            <TouchableOpacity
+              style={styles.createSheetClose}
+              onPress={handleAttemptCloseEditClassModal}
+              disabled={savingClassEdit}
+            >
+              <Ionicons name="close" size={24} color="#A8AFBC" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.createSheetBody}
+            contentContainerStyle={styles.createSheetBodyContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.sheetLabel}>
+              Program <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter program"
+              placeholderTextColor="#B5BCC8"
+              value={classForm.class_name}
+              onChangeText={(text) =>
+                setClassForm((prev) => ({ ...prev, class_name: text }))
+              }
+              maxLength={50}
+            />
+            {trimmedClassForm.class_name.length > 0 &&
+            trimmedClassForm.class_name.length < 4 ? (
+              <Text style={styles.fieldHint}>At least 4 characters required</Text>
+            ) : null}
+
+            <Text style={styles.sheetLabel}>
+              Course <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter course"
+              placeholderTextColor="#B5BCC8"
+              value={classForm.course_subject}
+              onChangeText={(text) =>
+                setClassForm((prev) => ({ ...prev, course_subject: text }))
+              }
+              maxLength={50}
+            />
+            {trimmedClassForm.course_subject.length > 0 &&
+            trimmedClassForm.course_subject.length < 5 ? (
+              <Text style={styles.fieldHint}>At least 5 characters required</Text>
+            ) : null}
+
+            <Text style={styles.sheetLabel}>
+              Year <Text style={styles.requiredStar}>*</Text>
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.sheetInput,
+                classForm.year && styles.sheetInputValid,
+                styles.sheetPicker,
+              ]}
+              onPress={() => setYearPickerVisible(true)}
+            >
+              <Text
+                style={
+                  classForm.year
+                    ? styles.sheetPickerValue
+                    : styles.sheetPickerPlaceholder
+                }
+              >
+                {classForm.year || "Select year level"}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#B5BCC8" />
+            </TouchableOpacity>
+
+            <Text style={styles.sheetLabel}>
+              Room <Text style={styles.optionalLabel}>(Optional)</Text>
+            </Text>
+            <TextInput
+              style={styles.sheetInput}
+              placeholder="Enter room"
+              placeholderTextColor="#B5BCC8"
+              keyboardType="numeric"
+              maxLength={3}
+              value={classForm.room}
+              onChangeText={(text) => {
+                const digits = text.replace(/[^0-9]/g, "").slice(0, 3);
+                setClassForm((prev) => ({ ...prev, room: digits }));
+              }}
+            />
+            {trimmedClassForm.room.length > 0 &&
+            !/^\d{3}$/.test(trimmedClassForm.room) ? (
+              <Text style={styles.fieldHint}>Exactly 3 digits</Text>
+            ) : null}
+          </ScrollView>
+
+          <View style={styles.createScreenFooter}>
+            <TouchableOpacity
+              style={[
+                styles.sheetPrimaryButton,
+                !canSaveClassEdit && styles.createButtonDisabled,
+              ]}
+              onPress={handleSaveClassEdit}
+              disabled={!canSaveClassEdit}
+            >
+              {savingClassEdit ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.sheetPrimaryButtonText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={yearPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setYearPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setYearPickerVisible(false)}
+        >
+          <View style={styles.yearPickerContent}>
+            <Text style={styles.yearPickerTitle}>Select Year Level</Text>
+            {YEAR_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.yearPickerItem,
+                  classForm.year === option && styles.yearPickerItemSelected,
+                ]}
+                onPress={() => {
+                  setClassForm((prev) => ({ ...prev, year: option }));
+                  setYearPickerVisible(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.yearPickerItemText,
+                    classForm.year === option && styles.yearPickerItemTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <ConfirmationModal
+        visible={discardEditClassConfirmVisible}
+        title="Discard Changes"
+        message="You have unsaved class changes. Leave without saving?"
+        cancelText="Stay"
+        confirmText="Discard"
+        destructive
+        onCancel={() => setDiscardEditClassConfirmVisible(false)}
+        onConfirm={() => {
+          setDiscardEditClassConfirmVisible(false);
+          closeEditClassModal();
+        }}
+      />
+
+
     </View>
   );
 }
@@ -954,490 +1737,801 @@ export default function ClassDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#edf1ee",
+    backgroundColor: "#F7F7F8",
   },
   centerContainer: {
     flex: 1,
+    backgroundColor: "#F7F7F8",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#edf1ee",
-    padding: 20,
+    padding: 24,
   },
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 20,
     paddingTop: 56,
     paddingBottom: 14,
-    backgroundColor: COLORS.white,
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#d8dfda",
+    borderBottomColor: "#ECEEF2",
   },
-  backIcon: {
+  iconButton: {
     width: 32,
     height: 32,
-    borderRadius: 16,
-    backgroundColor: "#e2efe8",
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#24362f",
-    minWidth: 120,
+    flex: 1,
     textAlign: "center",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1F2937",
   },
-  placeholder: {
-    width: 32,
+  tabsBar: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#ECEEF2",
   },
-  scrollView: {
+  tabButton: {
     flex: 1,
-  },
-  scrollContent: {
-    padding: 14,
-    paddingBottom: 40,
-  },
-  section: {
-    backgroundColor: COLORS.white,
-    borderRadius: RADIUS.medium,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#d5dfd9",
-  },
-  classInfoSection: {
-    backgroundColor: "#4f715f",
-    borderColor: "#3f5f4f",
-  },
-  listSwitchSection: {
-    backgroundColor: "#4f715f",
-    borderColor: "#3f5f4f",
-  },
-  listSwitchSectionLight: {
-    backgroundColor: "#f4f5f2",
-    borderColor: "#f4f5f2",
-    padding: 0,
-    marginBottom: 8,
-  },
-  listContentSection: {
-    backgroundColor: "#4f715f",
-    borderColor: "#3f5f4f",
+    alignItems: "center",
     paddingTop: 10,
+    paddingBottom: 12,
   },
-  listContentSectionLight: {
-    backgroundColor: "#f4f5f2",
-    borderColor: "#f4f5f2",
-    padding: 0,
-    marginBottom: 0,
-  },
-  heroSection: {
-    backgroundColor: "#4f715f",
-    borderColor: "#3f5f4f",
-  },
-  classCode: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#ecf7f1",
-    marginBottom: 4,
-  },
-  className: {
-    fontSize: 22,
+  tabLabel: {
+    fontSize: 12,
     fontWeight: "700",
-    color: "#ecf7f1",
-    marginBottom: 3,
+    color: "#8E97A6",
   },
-  courseSubject: {
-    fontSize: 14,
-    color: "#cce2d7",
+  tabLabelActive: {
+    color: "#20BE7B",
   },
-  sectionTitle: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#24362f",
-    marginBottom: 14,
+  tabIndicator: {
+    marginTop: 12,
+    width: "90%",
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: "#20BE7B",
   },
-  sectionTitleOnDark: {
-    color: "#e8f3ed",
+  content: {
+    padding: 20,
+    paddingBottom: 120,
+    gap: 14,
   },
-  sectionHeader: {
+  searchRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    gap: 12,
   },
-  listNav: {
-    flexDirection: "row",
-    backgroundColor: "#e7e2d3",
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#d4c5a0",
-    padding: 3,
-    marginBottom: 12,
-    position: "relative",
-  },
-  listNavActivePill: {
-    position: "absolute",
-    left: 3,
-    top: 3,
-    bottom: 3,
-    borderRadius: RADIUS.small,
-    backgroundColor: "#3f6f52",
-  },
-  listNavButton: {
+  searchWrap: {
     flex: 1,
-    borderRadius: RADIUS.small,
-    paddingVertical: 8,
-    alignItems: "center",
-    zIndex: 2,
-  },
-  listNavText: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#4d5f55",
-  },
-  listNavTextActive: {
-    color: COLORS.white,
-  },
-  studentSearchRow: {
+    height: 42,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#3f6b54",
-    borderWidth: 1,
-    borderColor: "#355b49",
-    borderRadius: RADIUS.small,
-    paddingHorizontal: 12,
-    paddingVertical: 1,
     gap: 8,
   },
-  studentSearchInput: {
+  searchInput: {
     flex: 1,
-    height: 40,
-    color: "#ecf7f1",
+    height: 42,
+    paddingHorizontal: 2,
     fontSize: 14,
+    color: "#111827",
+    fontWeight: "600",
   },
-  studentCountBadge: {
-    minWidth: 34,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 6,
-    backgroundColor: "#7da78f",
+  exportButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
     justifyContent: "center",
-    flexDirection: "row",
-    gap: 4,
   },
   studentCountText: {
     fontSize: 11,
     fontWeight: "700",
     color: "#214132",
   },
-  addStudentButton: {
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  sortButton: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: COLORS.primary,
+    backgroundColor: "#E9F8F1",
     alignItems: "center",
     justifyContent: "center",
   },
-  infoRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 14,
-    gap: 12,
-    backgroundColor: "rgba(233, 245, 238, 0.16)",
-    padding: 10,
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "rgba(221, 239, 230, 0.28)",
+  exportButtonSmall: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#E9F8F1",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  infoContent: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  sortModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  sortModalContent: {
+    width: 280,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#d5dfd9",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  sortModalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1f2f2a",
+    marginBottom: 14,
+  },
+  sortModalGroupLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#8ea094",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 6,
+    marginTop: 10,
+  },
+  sortOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  sortOptionActive: {
+    backgroundColor: "#e8f5ee",
+  },
+  sortOptionText: {
+    fontSize: 14,
+    color: "#2a3d37",
     flex: 1,
   },
-  infoLabel: {
-    fontSize: 12,
-    color: "#759084",
-    marginBottom: 4,
+  sortOptionTextActive: {
+    fontWeight: "600",
+    color: COLORS.primary,
   },
-  infoLabelOnDark: {
-    color: "#cce2d7",
+  importButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#E9F8F1",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  infoValue: {
-    fontSize: 18,
-    color: "#2d4439",
-    fontWeight: "700",
+  emptyStateCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+    alignItems: "center",
+    marginTop: 6,
   },
-  infoValueOnDark: {
-    color: "#f2fbf6",
+  emptyStateIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#E9F8F1",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+  emptyStateTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+  emptyStateText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 20,
+    color: "#8E97A6",
+    textAlign: "center",
   },
   studentCard: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    padding: 12,
-    backgroundColor: "#e0cfb4",
-    borderRadius: RADIUS.small,
-    marginBottom: 8,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#6f6c62",
-  },
-  scoreBadge: {
-    minWidth: 64,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: RADIUS.small,
-    borderWidth: 1,
-    borderColor: "#d7c8af",
-    backgroundColor: "#e9d8bf",
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-  },
-  scoreText: {
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  studentInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   studentAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primary,
-    justifyContent: "center",
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
+    justifyContent: "center",
     marginRight: 12,
   },
   studentAvatarText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#2F6B56",
   },
-  studentDetails: {
+  studentBody: {
     flex: 1,
   },
   studentName: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#2c3d35",
-    marginBottom: 2,
+    color: "#1F2937",
   },
-  studentId: {
-    fontSize: 11,
-    color: "#6a7b72",
-  },
-  studentEmail: {
+  studentSubtext: {
     fontSize: 12,
-    color: "#85968d",
+    color: "#9CA3AF",
+    marginTop: 4,
+  },
+  studentScoreWrap: {
+    alignItems: "flex-end",
+    marginRight: 10,
+  },
+  studentScore: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  studentAvgLabel: {
+    fontSize: 11,
+    color: "#A4ACBA",
     marginTop: 2,
   },
-  emptyStudents: {
-    alignItems: "center",
-    paddingVertical: 40,
-  },
-  quizPlaceholderCard: {
-    backgroundColor: "rgba(233, 245, 238, 0.16)",
+  createExamButton: {
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: "#E9F8F1",
     borderWidth: 1,
-    borderColor: "rgba(221, 239, 230, 0.3)",
-    borderRadius: RADIUS.small,
-    padding: 14,
+    borderColor: "#D0F0E0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
-  quizPlaceholderTitle: {
+  createExamText: {
     fontSize: 16,
-    fontWeight: "700",
-    color: "#e8f4ed",
-    marginBottom: 4,
+    fontWeight: "800",
+    color: "#109B67",
   },
-  quizPlaceholderSubtitle: {
-    fontSize: 13,
-    color: "#cce2d7",
-  },
-  quizCard: {
-    backgroundColor: "#3f6b54",
+  examCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#355b49",
-    borderRadius: RADIUS.small,
-    padding: 12,
-    marginBottom: 8,
+    borderColor: "#E8EBF0",
+    paddingHorizontal: 14,
+    paddingVertical: 16,
   },
-  quizCardTitle: {
-    fontSize: 20,
+  examCardPressable: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  examBody: {
+    flex: 1,
+  },
+  examTitle: {
+    fontSize: 15,
     fontWeight: "700",
-    color: "#e8f4ed",
-    marginBottom: 2,
+    color: "#1F2937",
   },
-  quizCardSubject: {
-    fontSize: 13,
-    color: "#cce2d7",
-    marginBottom: 8,
-  },
-  quizMetaRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginBottom: 10,
-  },
-  quizMetaText: {
-    color: "#d5e9de",
+  examMeta: {
+    marginTop: 5,
     fontSize: 12,
+    color: "#9CA3AF",
   },
-  quizActionsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  quizRightActions: {
+  examDateRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-  },
-  quizStudentsBadge: {
-    backgroundColor: "#2d4f3e",
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  quizStudentsBadgeText: {
-    color: "#d8ebdf",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  quizActionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#1f3449",
-    borderRadius: 6,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  quizActionText: {
-    color: "#fff",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  emptyText: {
-    fontSize: 16,
-    color: "#6d8076",
-    marginTop: 12,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: "#8ea094",
     marginTop: 4,
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#5d7267",
+  examDateIcon: {
+    marginTop: 5,
   },
-  errorText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: COLORS.error,
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  retryButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: RADIUS.small,
-    marginBottom: 12,
-  },
-  retryButtonText: {
-    color: "#fff",
-    fontSize: 16,
+  examCodeMeta: {
+    marginTop: 5,
+    fontSize: 12,
+    color: "#6B7280",
     fontWeight: "600",
   },
-  backButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+  examRight: {
+    alignItems: "flex-end",
+    marginRight: 12,
   },
-  backButtonText: {
-    color: "#5d7267",
+  examMenuButton: {
+    width: 28,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  examAverage: {
     fontSize: 16,
+    fontWeight: "800",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15, 25, 20, 0.55)",
-    justifyContent: "flex-end",
+  scanPanel: {
+    alignItems: "center",
+    paddingTop: 74,
   },
-  modalContent: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: RADIUS.xlarge,
-    borderTopRightRadius: RADIUS.xlarge,
-    maxHeight: "70%",
+  scanIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: "#E8F8F1",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 24,
   },
-  modalHeader: {
+  scanTitle: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginBottom: 12,
+  },
+  scanDescription: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: "#8C95A4",
+    textAlign: "center",
+    marginBottom: 32,
+    paddingHorizontal: 16,
+  },
+  startScanButton: {
+    width: "100%",
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: "#20BE7B",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#20BE7B",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 6,
+  },
+  startScanText: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  statsHeroCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    padding: 18,
+  },
+  statsHeroLabel: {
+    fontSize: 15,
+    color: "#8E97A6",
+    textAlign: "center",
+  },
+  statsHeroValue: {
+    marginTop: 8,
+    fontSize: 44,
+    lineHeight: 48,
+    fontWeight: "800",
+    color: "#20BE7B",
+    textAlign: "center",
+  },
+  statsHeroBar: {
+    marginTop: 18,
+  },
+  statsHeroFooter: {
+    marginTop: 12,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: "#dde5e0",
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#1f2f2a",
-  },
-  modalBody: {
-    padding: 20,
-  },
-  label: {
+  statsPassedText: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#34463d",
-    marginBottom: 8,
-    marginTop: 12,
+    color: "#20BE7B",
   },
-  input: {
-    borderWidth: 1,
-    borderColor: "#d5dfd9",
-    borderRadius: RADIUS.small,
-    padding: 12,
-    fontSize: 15,
-    color: COLORS.text,
-    backgroundColor: "#f8fbf9",
+  statsFailedText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#EF4444",
   },
-  modalFooter: {
+  statsGrid: {
     flexDirection: "row",
-    padding: 20,
+    flexWrap: "wrap",
     gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#dde5e0",
   },
-  cancelButton: {
-    flex: 1,
-    padding: 14,
-    borderRadius: RADIUS.small,
+  statsSmallCard: {
+    width: "48%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#d4ddd8",
-    backgroundColor: "#f7f9f8",
-    alignItems: "center",
+    borderColor: "#E8EBF0",
+    padding: 16,
   },
-  cancelButtonText: {
-    fontSize: 15,
-    color: "#5c6d64",
+  statsSmallLabel: {
+    fontSize: 13,
+    color: "#8E97A6",
+    marginBottom: 10,
+  },
+  statsSmallValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1F2937",
+  },
+  distributionCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    padding: 18,
+  },
+  distributionTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginBottom: 18,
+  },
+  distributionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  distributionLabel: {
+    width: 52,
+    fontSize: 13,
+    color: "#8E97A6",
+  },
+  distributionTrack: {
+    flex: 1,
+    marginHorizontal: 12,
+  },
+  animatedBarTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#E8EBF0",
+    overflow: "hidden",
+  },
+  animatedBarFill: {
+    height: "100%",
+    borderRadius: 999,
+  },
+  distributionCount: {
+    width: 16,
+    textAlign: "right",
+    fontSize: 13,
+    color: "#1F2937",
     fontWeight: "700",
   },
-  addButton: {
+  menuOverlay: {
     flex: 1,
+    backgroundColor: "rgba(0,0,0,0.08)",
+    alignItems: "flex-end",
+    paddingTop: 92,
+    paddingRight: 20,
+  },
+  menuContent: {
+    width: 172,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingTop: 8,
+    paddingBottom: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  menuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingBottom: 4,
+  },
+  menuTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#273142",
+    marginRight: 8,
+  },
+  menuCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F7F8FA",
+    zIndex: 2,
+    elevation: 2,
+  },
+  examMenuContent: {
+    position: "absolute",
+    width: 164,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    paddingVertical: 8,
+    shadowColor: "#0F172A",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  examMenuHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingTop: 2,
+    paddingBottom: 6,
+  },
+  menuItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  menuItemText: {
+    fontSize: 14,
+    color: "#273142",
+  },
+  menuArchiveText: {
+    color: "#F59E0B",
+  },
+  menuDeleteText: {
+    color: "#EF4444",
+  },
+  createScreen: {
+    flex: 1,
+    backgroundColor: "#F7F7F8",
+  },
+  createScreenHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    paddingTop: 56,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
+  },
+  createScreenHeaderSpacer: {
+    width: 44,
+    height: 44,
+  },
+  createSheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  createSheetClose: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F5F8",
+  },
+  createSheetBody: {
+    flex: 1,
+  },
+  createSheetBodyContent: {
+    padding: 20,
+    paddingBottom: 120,
+  },
+  sheetLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#374151",
+    marginBottom: 10,
+    marginTop: 14,
+  },
+  requiredStar: {
+    color: "#EF4444",
+  },
+  optionalLabel: {
+    color: "#94A3B8",
+    fontWeight: "700",
+  },
+  sheetInput: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetInputValid: {
+    borderColor: "#1FC27D",
+    backgroundColor: "#F0FDF8",
+  },
+  sheetPicker: {
+    height: 62,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sheetPickerValue: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  sheetPickerPlaceholder: {
+    fontSize: 16,
+    color: "#B5BCC8",
+  },
+  fieldHint: {
+    fontSize: 11,
+    color: "#EF4444",
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  createScreenFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 22,
+    backgroundColor: "#F7F7F8",
+    borderTopWidth: 1,
+    borderTopColor: "#EEF1F5",
+  },
+  sheetPrimaryButton: {
+    height: 58,
+    borderRadius: 16,
+    backgroundColor: "#1FC27D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sheetPrimaryButtonText: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#FFFFFF",
+  },
+  createButtonDisabled: {
+    opacity: 0.45,
+  },
+  yearPickerContent: {
+    width: 260,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 18,
+  },
+  yearPickerTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginBottom: 12,
+  },
+  yearPickerItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  yearPickerItemSelected: {
+    backgroundColor: "#EAF7F0",
+  },
+  yearPickerItemText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#334155",
+  },
+  yearPickerItemTextSelected: {
+    color: "#14925F",
+  },
+  loadingText: {
+    marginTop: 14,
+    fontSize: 15,
+    color: "#6B7280",
+  },
+  errorText: {
+    marginTop: 14,
+    marginBottom: 18,
+    fontSize: 16,
+    color: "#EF4444",
+    textAlign: "center",
+  },
+  retryButton: {
+    backgroundColor: "#20BE7B",
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  retryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
+  importErrorModal: {
+    margin: 20,
+    borderRadius: RADIUS.medium,
+    maxHeight: "80%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  importErrorHeader: {
+    alignItems: "center",
+    padding: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0,0,0,0.1)",
+  },
+  importErrorTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  importErrorSubtitle: {
+    fontSize: 14,
+    textAlign: "center",
+  },
+  importErrorList: {
+    maxHeight: 300,
+    padding: 16,
+  },
+  importErrorItem: {
+    padding: 12,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    backgroundColor: "rgba(255, 152, 0, 0.05)",
+    borderRadius: 4,
+  },
+  importErrorId: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  importErrorMessage: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  importErrorButton: {
+    margin: 16,
     padding: 14,
     borderRadius: RADIUS.small,
-    backgroundColor: COLORS.primary,
     alignItems: "center",
   },
-  addButtonDisabled: {
-    opacity: 0.6,
-  },
-  addButtonText: {
-    fontSize: 15,
+  importErrorButtonText: {
     color: COLORS.white,
+    fontSize: 15,
     fontWeight: "700",
   },
-});
+})
+

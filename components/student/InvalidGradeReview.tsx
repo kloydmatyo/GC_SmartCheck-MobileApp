@@ -219,7 +219,7 @@ export function InvalidGradeReview({
       <FlatList
         data={invalidResults}
         renderItem={renderItem}
-        keyExtractor={(item) => item.studentId}
+        keyExtractor={(item, index) => item.id || `${item.studentId}-${index}`}
         ListEmptyComponent={renderEmpty}
         refreshControl={
           onRefresh ? (

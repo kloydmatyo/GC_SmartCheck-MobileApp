@@ -163,7 +163,6 @@ export class DashboardService {
     const q = query(
       collection(db, SCANNED_RESULTS),
       where("examId", "==", examId),
-      where("scannedBy", "==", uid),
     );
     const snap = await getDocs(q);
     const rows = snap.docs.map(rowFromDoc);
@@ -291,12 +290,10 @@ export class DashboardService {
     examId: string,
     lastDoc: QueryDocumentSnapshot | null = null,
   ): Promise<PagedScanResult> {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return { items: [], hasMore: false, lastDoc: null };
+    if (!auth.currentUser?.uid) return { items: [], hasMore: false, lastDoc: null };
 
     const base = [
       where("examId", "==", examId),
-      where("scannedBy", "==", uid),
       orderBy("scannedAt", "desc"),
     ] as const;
 
@@ -424,8 +421,7 @@ export class DashboardService {
       }
     }
 
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
+    if (!auth.currentUser?.uid) {
       onUpdate({
         examId,
         examTitle: examId,
@@ -447,7 +443,6 @@ export class DashboardService {
     const q = query(
       collection(db, SCANNED_RESULTS),
       where("examId", "==", examId),
-      where("scannedBy", "==", uid),
     );
 
     return onSnapshot(

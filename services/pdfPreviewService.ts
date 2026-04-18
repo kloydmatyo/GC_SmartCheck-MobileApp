@@ -186,11 +186,17 @@ export class PdfPreviewService {
    */
   private static buildOptimizedHtml(options: PdfPreviewOptions): string {
     const template = this.getTemplateConfig(options.templateKey);
-    const examCode =
-      options.examCode ||
-      `${String(options.examName || "GCSC")
-        .replace(/\s+/g, "-")
-        .toUpperCase()}-${options.version}`;
+
+    // Generate exam code with clear, unambiguous characters
+    let examCode = options.examCode;
+    if (!examCode) {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let code = "";
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      examCode = `EX-${code}`;
+    }
 
     return `<!DOCTYPE html>
 <html>

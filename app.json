@@ -23,7 +23,7 @@
         "foregroundImage": "./assets/images/gordon-college-logo.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.gcsmartcheckmobileapp",
+      "package": "sia.scan.grade",
       "navigationBar": {
         "visible": "immersive",
         "barStyle": "light-content",

@@ -1,20 +1,30 @@
 import NetInfo from "@react-native-community/netinfo";
 import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
+    DarkTheme,
+    DefaultTheme,
+    ThemeProvider,
 } from "@react-navigation/native";
+import * as NavigationBar from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
-import * as NavigationBar from "expo-navigation-bar";
+import {
+    ActivityIndicator,
+    AppState,
+    AppStateStatus,
+    Platform,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
+import "react-native-get-random-values";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 
 import { toastConfig } from "@/components/ui/ToastConfig";
+import { auth } from "@/config/firebase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
-import { GradeStorageService } from "@/services/gradeStorageService";
+import { SyncService } from "@/services/syncService";
 
 export const unstable_settings = {
   initialRouteName: "sign-in",
@@ -25,11 +35,17 @@ export default function RootLayout() {
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | null>(
+    null,
+  );
   const isSyncingRef = useRef(false);
+  const syncStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Hide Android navigation bar
   useEffect(() => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       NavigationBar.setVisibilityAsync("hidden");
       NavigationBar.setBehaviorAsync("overlay-swipe");
     }
@@ -41,15 +57,34 @@ export default function RootLayout() {
     try {
       isSyncingRef.current = true;
       const netState = await NetInfo.fetch();
-      if (netState.isConnected && netState.isInternetReachable) {
-        const count = await GradeStorageService.getOfflineItemCount();
-        if (count > 0) {
-          setIsSyncing(true);
-          await GradeStorageService.syncOfflineQueue();
+
+      if (
+        netState.isConnected &&
+        netState.isInternetReachable &&
+        auth.currentUser
+      ) {
+        setIsSyncing(true);
+        setSyncStatus("syncing");
+        console.log("[RootLayout] Triggering background sync...");
+        // Flush any queued offline grades to Firestore before full sync
+        const { GradeStorageService } =
+          await import("@/services/gradeStorageService");
+        await GradeStorageService.syncOfflineQueue().catch((e) =>
+          console.warn("[RootLayout] Offline queue sync failed:", e),
+        );
+        await SyncService.syncPendingUpdates();
+        console.log("[RootLayout] Background sync complete");
+        setSyncStatus("synced");
+        if (syncStatusTimeoutRef.current) {
+          clearTimeout(syncStatusTimeoutRef.current);
         }
+        syncStatusTimeoutRef.current = setTimeout(() => {
+          setSyncStatus(null);
+        }, 1200);
       }
     } catch (err) {
-      console.warn("Sync error:", err);
+      console.warn("Background sync error:", err);
+      setSyncStatus(null);
     } finally {
       setIsSyncing(false);
       isSyncingRef.current = false;
@@ -60,20 +95,26 @@ export default function RootLayout() {
   useEffect(() => {
     const performInitialSync = async () => {
       // Small delay to ensure all services are ready
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       await performSync();
     };
     performInitialSync();
   }, []);
 
-  // Offline sync on app resume 
+  // Offline sync on app resume
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
       const wasBackground =
         appState.current === "background" || appState.current === "inactive";
       const isNowActive = nextAppState === "active";
+      const isNowBackground =
+        nextAppState === "background" || nextAppState === "inactive";
 
       if (wasBackground && isNowActive) {
+        await performSync();
+      }
+
+      if (!wasBackground && isNowBackground) {
         await performSync();
       }
 
@@ -86,6 +127,14 @@ export default function RootLayout() {
     );
 
     return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (syncStatusTimeoutRef.current) {
+        clearTimeout(syncStatusTimeoutRef.current);
+      }
+    };
   }, []);
 
   return (
@@ -101,11 +150,20 @@ export default function RootLayout() {
       </Stack>
       <StatusBar style="auto" />
       <Toast config={toastConfig} />
-      {isSyncing && (
+      {(isSyncing || syncStatus === "synced") && (
         <View style={styles.syncOverlay} pointerEvents="none">
           <View style={styles.syncContainer}>
-            <ActivityIndicator color="white" size="small" />
-            <Text style={styles.syncText}>Syncing Data...</Text>
+            {isSyncing ? (
+              <>
+                <ActivityIndicator color="#6B7280" size="small" />
+                <Text style={styles.syncText}>Syncing Data...</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.syncSuccessDot} />
+                <Text style={styles.syncText}>Synced to Web</Text>
+              </>
+            )}
           </View>
         </View>
       )}
@@ -117,26 +175,34 @@ const styles = StyleSheet.create({
   syncOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: 60, // Place it nicely below standard top safe area
   },
   syncContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#ECEEF2",
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
+    shadowColor: "#0E1628",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   syncText: {
-    color: 'white',
-    fontSize: 15,
-    fontWeight: 'bold',
-  }
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  syncSuccessDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#22C55E",
+  },
 });

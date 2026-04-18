@@ -2,27 +2,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 
+import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
+import SendScoresModal from "@/components/scores/SendScoresModal";
 import {
-  ExportDateFilter,
-  ExportFormat,
-  GradeExportService,
+    ExportDateFilter,
+    ExportFormat,
+    GradeExportService,
 } from "@/services/gradeExportService";
+import { ReportPdfService } from "@/services/reportPdfService";
 
 import {
-  DashboardDateFilter,
-  DashboardService,
-  ExamDashboardStats,
+    DashboardDateFilter,
+    DashboardService,
+    ExamDashboardStats,
 } from "@/services/dashboardService";
 
 // ── Skeleton placeholder block ────────────────────────────────────────────
@@ -125,6 +128,13 @@ export default function ExamStatsScreen() {
   const [exportStage, setExportStage] = useState("");
   const [exportPercent, setExportPercent] = useState(0);
 
+  // ── PDF report viewer state ───────────────────────────────────────────────
+  const [reportGenerating, setReportGenerating] = useState(false);
+  const [reportViewerVisible, setReportViewerVisible] = useState(false);
+  const [reportHtml, setReportHtml] = useState("");
+  const [reportViewerTitle, setReportViewerTitle] = useState("");
+  const [sendScoresVisible, setSendScoresVisible] = useState(false);
+
   const handleExport = useCallback(() => {
     if (!examId || exporting) return;
 
@@ -197,6 +207,38 @@ export default function ExamStatsScreen() {
       setExportPercent(0);
     }
   };
+  const handleGenerateReport = useCallback(async () => {
+    if (!examId || reportGenerating) return;
+    setReportGenerating(true);
+    try {
+      const result = await ReportPdfService.generateClassSummaryReport(
+        examId as string,
+      );
+      if (result.success && result.previewHtml) {
+        const decoded = examTitle ? decodeURIComponent(examTitle) : "Exam";
+        setReportViewerTitle(`${decoded} — Class Summary`);
+        setReportHtml(result.previewHtml);
+        setReportViewerVisible(true);
+      } else {
+        Toast.show({
+          type: "error",
+          text1: "Report Failed",
+          text2: result.message,
+          visibilityTime: 4000,
+        });
+      }
+    } catch (err: any) {
+      Toast.show({
+        type: "error",
+        text1: "Report Error",
+        text2: err.message ?? "Something went wrong.",
+        visibilityTime: 4000,
+      });
+    } finally {
+      setReportGenerating(false);
+    }
+  }, [examId, examTitle, reportGenerating]);
+
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const subscribe = useCallback(
@@ -281,6 +323,23 @@ export default function ExamStatsScreen() {
 
   return (
     <View style={styles.container}>
+      {/* ── PDF Report Viewer Modal ───────────────────────────────────── */}
+      <ReportPdfViewer
+        visible={reportViewerVisible}
+        onClose={() => setReportViewerVisible(false)}
+        html={reportHtml}
+        title={reportViewerTitle}
+        fileName="GC_ClassSummary"
+      />
+
+      {/* ── Send Scores Modal ─────────────────────────────────────────── */}
+      <SendScoresModal
+        visible={sendScoresVisible}
+        onClose={() => setSendScoresVisible(false)}
+        examId={examId as string}
+        examLabel={title}
+      />
+
       {/* ── Export progress overlay (#6) ─────────────────────── */}
       {exporting && (
         <View style={styles.exportOverlay}>
@@ -306,17 +365,46 @@ export default function ExamStatsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        <TouchableOpacity
-          onPress={handleExport}
-          style={styles.backBtn}
-          disabled={exporting || !stats || stats.totalGraded === 0}
-        >
-          <Ionicons
-            name={exporting ? "hourglass-outline" : "download-outline"}
-            size={24}
-            color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
-          />
-        </TouchableOpacity>
+        {/* Right: Report + Export + Send Scores buttons */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => setSendScoresVisible(true)}
+            style={styles.backBtn}
+            disabled={!stats || stats.totalGraded === 0}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={22}
+              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleGenerateReport}
+            style={styles.backBtn}
+            disabled={reportGenerating || !stats || stats.totalGraded === 0}
+          >
+            {reportGenerating ? (
+              <ActivityIndicator size="small" color="#00a550" />
+            ) : (
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleExport}
+            style={styles.backBtn}
+            disabled={exporting || !stats || stats.totalGraded === 0}
+          >
+            <Ionicons
+              name={exporting ? "hourglass-outline" : "download-outline"}
+              size={24}
+              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Date filter chips */}
@@ -523,6 +611,10 @@ const styles = StyleSheet.create({
   backBtn: {
     padding: 4,
     width: 36,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
   },
   headerTitle: {
     flex: 1,

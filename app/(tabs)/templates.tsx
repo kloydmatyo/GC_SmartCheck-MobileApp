@@ -121,45 +121,27 @@ export default function TemplatesScreen() {
   );
 
   const fetchClassesAndExams = async () => {
-    const currentUser = auth.currentUser;
-    if (!currentUser) return;
-
     try {
-      // Get user's instructor ID
-      const { UserService } = await import("@/services/userService");
-      const userProfile = await UserService.getUserProfile();
-      const instructorId = userProfile?.instructorId;
-      
-      if (!instructorId) {
-        console.log("No instructorId found for user");
-        return;
-      }
-      
-      // Fetch classes
-      const classesQuery = query(
-        collection(db, "classes"),
-        where("instructorId", "==", instructorId)
-      );
-      const classesSnapshot = await getDocs(classesQuery);
-      const fetchedClasses = classesSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        class_name: doc.data().class_name || "Unnamed Class",
-      }));
-      setClasses(fetchedClasses);
+      // Use optimized local-first services
+      const { ClassService } = await import("@/services/classService");
+      const { ExamService } = await import("@/services/examService");
 
-      // Fetch exams
-      const examsQuery = query(
-        collection(db, "exams"),
-        where("instructorId", "==", instructorId)
-      );
-      const examsSnapshot = await getDocs(examsQuery);
-      const fetchedExams = examsSnapshot.docs.map((doc) => ({
-        id: doc.id,
-        title: doc.data().title || "Unnamed Exam",
-      }));
-      setExams(fetchedExams);
+      const [fetchedClasses, fetchedExams] = await Promise.all([
+        ClassService.getClassesByUser(),
+        ExamService.getExamsByUser()
+      ]);
+
+      setClasses(fetchedClasses.map(c => ({
+        id: c.id,
+        class_name: c.class_name || "Unnamed Class"
+      })));
+
+      setExams(fetchedExams.map(e => ({
+        id: e.id,
+        title: e.title || "Unnamed Exam"
+      })));
     } catch (error) {
-      console.error("Error fetching classes/exams:", error);
+      console.error("[Templates] Error fetching classes/exams:", error);
     }
   };
 
@@ -271,7 +253,7 @@ export default function TemplatesScreen() {
       await deleteDoc(doc(db, "templates", selectedTemplate.id));
       setTemplates((prev) => prev.filter((t) => t.id !== selectedTemplate.id));
       Toast.show({
-        type: "success",
+        type: "delete_result",
         text1: "Success",
         text2: `"${selectedTemplate.name}" deleted successfully`,
       });
@@ -312,7 +294,7 @@ export default function TemplatesScreen() {
       );
 
       Toast.show({
-        type: "success",
+        type: "archive_result",
         text1: "Success",
         text2: `"${selectedTemplate.name}" archived successfully`,
       });
