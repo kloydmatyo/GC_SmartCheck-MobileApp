@@ -1,15 +1,15 @@
 import { auth, db } from "@/config/firebase";
 import NetInfo from "@react-native-community/netinfo";
 import {
-  collection,
-  doc,
-  FirestoreError,
-  getDoc,
-  getDocs,
-  query,
-  Timestamp,
-  where,
-  writeBatch,
+    collection,
+    doc,
+    FirestoreError,
+    getDoc,
+    getDocs,
+    query,
+    Timestamp,
+    where,
+    writeBatch,
 } from "firebase/firestore";
 import { GradeStorageRecord, GradingResult } from "../types/scanning";
 import { LogService } from "./logService";
@@ -87,13 +87,28 @@ export class GradeStorageService {
 
   static async validateStudentId(studentId: string): Promise<boolean> {
     try {
-      // ── Primary: check top-level `students` collection ──────────────────
-      // 1a. Document ID is the student ID (most common pattern in this app)
-      const directRef = doc(db, "students", studentId);
-      const directSnap = await getDoc(directRef);
-      if (directSnap.exists()) return true;
+      // ── 1. Check StudentCache Realm (fast, no network) ───────────────────
+      const { RealmService } = await import("./realmService");
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm
+        .objects("StudentCache")
+        .filtered("student_id == $0", studentId);
+      if (cached.length > 0) return true;
 
-      // 1b. `student_id` field within the collection
+      // ── 2. Check ClassCache rosters (students embedded as JSON) ──────────
+      const allClasses = cacheRealm.objects("ClassCache");
+      for (const cls of allClasses as any) {
+        try {
+          const students: { student_id: string }[] = JSON.parse(
+            cls.students || "[]",
+          );
+          if (students.some((s) => s.student_id === studentId)) return true;
+        } catch {
+          // malformed JSON — skip
+        }
+      }
+
+      // ── 3. Fallback: single Firestore query by student_id field ──────────
       const studentFieldQ = query(
         collection(db, "students"),
         where("student_id", "==", studentId),
@@ -101,34 +116,14 @@ export class GradeStorageService {
       const studentFieldSnap = await getDocs(studentFieldQ);
       if (!studentFieldSnap.empty) return true;
 
-      // ── Fallback: check class rosters ────────────────────────────────────
-      const q = query(
-        collection(db, "classes"),
-        where("students", "array-contains-any", [{ student_id: studentId }]),
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) return true;
-
-      // Manual fallback for SDKs that don't support partial object matching
-      const allClasses = await getDocs(collection(db, "classes"));
-      for (const classDoc of allClasses.docs) {
-        const students: { student_id: string }[] =
-          classDoc.data().students ?? [];
-        if (students.some((s) => s.student_id === studentId)) return true;
-      }
-
       LogService.warn(
         "STUDENT_ID_INVALID",
-        `Student ID not found in students collection or any class: ${studentId}`,
+        `Student ID not found: ${studentId}`,
         { studentId },
       );
       return false;
     } catch (error) {
-      LogService.error("STUDENT_ID_INVALID", "Failed to validate student ID", {
-        studentId,
-        error,
-      });
-      // Allow if validation fails due to network — don't block save
+      // Allow if validation fails — don't block save
       return true;
     }
   }
@@ -144,7 +139,10 @@ export class GradeStorageService {
       try {
         const stagingRealm = await RealmService.getStagingRealm();
         const hexId = examId.replace("staging_", "");
-        const sQuiz = stagingRealm.objectForPrimaryKey("OfflineQuiz", new Realm.BSON.ObjectId(hexId));
+        const sQuiz = stagingRealm.objectForPrimaryKey(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
         return !!sQuiz;
       } catch (e) {
         console.error("Error validating staging exam:", e);
@@ -155,10 +153,7 @@ export class GradeStorageService {
     try {
       // 1. Try Firestore
       const snap = await getDoc(doc(db, "exams", examId));
-      if (snap.exists()) {
-        const status = snap.data()?.status as string | undefined;
-        return !status || status === "Active";
-      }
+      if (snap.exists()) return true;
 
       // 2. Fallback to local cache if Firestore record not found or offline
       const cacheRealm = await RealmService.getCacheRealm();
@@ -171,10 +166,14 @@ export class GradeStorageService {
         const cached = cacheRealm.objectForPrimaryKey("QuizCache", examId);
         return !!cached;
       } catch (cacheError) {
-        LogService.error("EXAM_ID_INVALID", "Failed to validate exam ID anywhere", {
-          examId,
-          error,
-        });
+        LogService.error(
+          "EXAM_ID_INVALID",
+          "Failed to validate exam ID anywhere",
+          {
+            examId,
+            error,
+          },
+        );
         return true; // Allow as a last resort if everything fails
       }
     }
@@ -185,14 +184,14 @@ export class GradeStorageService {
     uid: string,
   ): Promise<boolean> {
     try {
-      // Query by examId only to avoid needing a composite index in Firestore
+      // Only check Firestore as source of truth — staging records are unconfirmed
+      // and should not permanently block re-scans
       const q = query(
         collection(db, GRADE_RESULTS_COLLECTION),
         where("examId", "==", examId),
       );
       const snap = await getDocs(q);
 
-      // Client-side filter for studentId and user ownership
       return snap.docs.some((docSnap) => {
         const data = docSnap.data();
         return data.studentId === studentId && data.scannedBy === uid;
@@ -223,14 +222,18 @@ export class GradeStorageService {
     }
 
     const resolvedExamId = examId || result.examId;
-    console.log(`[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`);
+    console.log(
+      `[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`,
+    );
 
     // ── Check Connectivity First ──
     const netState = await NetInfo.fetch();
     const isOnline = !!(netState.isConnected && netState.isInternetReachable);
 
     if (!isOnline) {
-      console.log("[GradeStorageService] Offline detected. Bypassing validation and queueing to RealmDB.");
+      console.log(
+        "[GradeStorageService] Offline detected. Bypassing validation and queueing to RealmDB.",
+      );
       const record: GradeStorageRecord = {
         studentId: result.studentId,
         examId: resolvedExamId,
@@ -263,7 +266,7 @@ export class GradeStorageService {
     try {
       const studentValid = await withTimeout(
         GradeStorageService.validateStudentId(result.studentId),
-        2000
+        2000,
       );
       if (!studentValid) {
         return {
@@ -273,14 +276,16 @@ export class GradeStorageService {
         };
       }
     } catch (err) {
-      console.warn("[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.");
+      console.warn(
+        "[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.",
+      );
     }
 
     // ── 2. Exam ID validation (with 2s SLA) ──
     try {
       const examValid = await withTimeout(
         GradeStorageService.validateExamId(resolvedExamId),
-        2000
+        2000,
       );
       if (!examValid) {
         return {
@@ -290,14 +295,16 @@ export class GradeStorageService {
         };
       }
     } catch (err) {
-      console.warn("[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.");
+      console.warn(
+        "[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.",
+      );
     }
 
     // ── 3. Duplicate check (with 2s SLA) ──
     try {
       const duplicate = await withTimeout(
         GradeStorageService.isDuplicate(result.studentId, resolvedExamId, uid),
-        2000
+        2000,
       );
       if (duplicate) {
         await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
@@ -311,10 +318,14 @@ export class GradeStorageService {
         };
       }
     } catch (err) {
-      console.warn("[GradeStorageService] Duplicate check timed out. Proceeding.");
+      console.warn(
+        "[GradeStorageService] Duplicate check timed out. Proceeding.",
+      );
     }
 
-    console.log(`[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`);
+    console.log(
+      `[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`,
+    );
 
     // Build Firestore record
     const record: GradeStorageRecord = {
@@ -346,11 +357,14 @@ export class GradeStorageService {
     const batch = writeBatch(db);
     batch.set(gradeRef, { ...lean, createdAt: Timestamp.now() });
 
-    console.log(`[GradeStorageService] Attempting Firestore write to doc ${gradeRef.id}...`);
+    console.log(
+      `[GradeStorageService] Attempting Firestore write to doc ${gradeRef.id}...`,
+    );
 
     try {
-      // Enforce 2-second SLA for the Firestore commit
-      await withTimeout(batch.commit(), 2000);
+      // Enforce 8-second SLA for the Firestore commit (generous to avoid
+      // routing to offline queue on slow but connected networks)
+      await withTimeout(batch.commit(), 8000);
 
       await LogService.info("SAVE_SUCCESS", "Grade result saved to Firestore", {
         docId: gradeRef.id,
@@ -358,7 +372,43 @@ export class GradeStorageService {
         examId: record.examId,
       });
 
-      console.log(`[GradeStorageService] Successfully saved to Firestore! Doc: ${gradeRef.id}`);
+      console.log(
+        `[GradeStorageService] Successfully saved to Firestore! Doc: ${gradeRef.id}`,
+      );
+
+      // Update GradeCache immediately so exam-preview Results tab reflects the
+      // new score without waiting for the next full sync.
+      try {
+        const { RealmService } = await import("./realmService");
+        const cacheRealm = await RealmService.getCacheRealm();
+        cacheRealm.write(() => {
+          cacheRealm.create(
+            "GradeCache",
+            {
+              id: gradeRef.id,
+              studentId: record.studentId,
+              examId: record.examId,
+              score: record.score,
+              totalPoints: record.totalPoints,
+              percentage: record.percentage,
+              gradeEquivalent: record.gradeEquivalent ?? "",
+              dateScanned: record.dateScanned ?? "",
+              scannedBy: record.scannedBy ?? "",
+              createdAt: new Date(),
+            },
+            true, // UpdateMode.Modified — safe to call even if it already exists
+          );
+        });
+        console.log(
+          `[GradeStorageService] GradeCache updated for doc ${gradeRef.id}`,
+        );
+      } catch (cacheErr) {
+        // Non-fatal — Firestore is the source of truth
+        console.warn(
+          "[GradeStorageService] GradeCache update failed (non-fatal):",
+          cacheErr,
+        );
+      }
 
       return {
         success: true,
@@ -375,7 +425,9 @@ export class GradeStorageService {
 
       if (isOffline) {
         // Rollback is implicit (batch never committed); queue offline
-        console.warn(`[GradeStorageService] Network unavailable (${msg}). Handing off to RealmDB for offline queueing.`);
+        console.warn(
+          `[GradeStorageService] Network unavailable (${msg}). Handing off to RealmDB for offline queueing.`,
+        );
         return GradeStorageService.queueOffline(record);
       }
 
@@ -400,7 +452,9 @@ export class GradeStorageService {
     record: GradeStorageRecord,
   ): Promise<SaveResult> {
     try {
-      console.log(`[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`);
+      console.log(
+        `[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`,
+      );
       const realm = await RealmService.getStagingRealm();
 
       realm.write(() => {
@@ -421,7 +475,9 @@ export class GradeStorageService {
       });
 
       const queueLength = realm.objects("OfflineGrade").length;
-      console.log(`[GradeStorageService] Record successfully queued in RealmDB. Total offline items: ${queueLength}`);
+      console.log(
+        `[GradeStorageService] Record successfully queued in RealmDB. Total offline items: ${queueLength}`,
+      );
 
       await LogService.info(
         "SAVE_OFFLINE_QUEUED",
@@ -433,12 +489,27 @@ export class GradeStorageService {
         },
       );
 
-      return {
+      const result: SaveResult = {
         success: true,
         status: "pending",
         message:
           "No internet connection. Result saved locally to Realm and will sync automatically.",
       };
+
+      // Attempt immediate sync in background — if online, this pushes the
+      // queued grade to Firestore right away without waiting for app resume.
+      NetInfo.fetch().then((state) => {
+        if (state.isConnected && state.isInternetReachable) {
+          GradeStorageService.syncOfflineQueue().catch((err) =>
+            console.warn(
+              "[GradeStorageService] Immediate sync after queue failed:",
+              err,
+            ),
+          );
+        }
+      });
+
+      return result;
     } catch (error) {
       await LogService.error(
         "SAVE_FAILED",
@@ -464,7 +535,10 @@ export class GradeStorageService {
       const realm = await RealmService.getStagingRealm();
       return realm.objects<OfflineGrade>("OfflineGrade").length;
     } catch (error) {
-      console.error("[GradeStorageService] Failed to get offline item count", error);
+      console.error(
+        "[GradeStorageService] Failed to get offline item count",
+        error,
+      );
       return 0;
     }
   }
@@ -482,7 +556,9 @@ export class GradeStorageService {
 
       // If user is still not logged in after restore, we can't sync
       if (!auth.currentUser) {
-        console.log("[GradeStorageService] Cannot sync: User is not logged in.");
+        console.log(
+          "[GradeStorageService] Cannot sync: User is not logged in.",
+        );
         return;
       }
 
@@ -490,11 +566,15 @@ export class GradeStorageService {
       const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade");
 
       if (offlineGrades.length === 0) {
-        console.log("[GradeStorageService] No offline grades found in RealmDB. Skipping sync.");
+        console.log(
+          "[GradeStorageService] No offline grades found in RealmDB. Skipping sync.",
+        );
         return;
       }
 
-      console.log(`[GradeStorageService] Found ${offlineGrades.length} offline grades to sync.`);
+      console.log(
+        `[GradeStorageService] Found ${offlineGrades.length} offline grades to sync.`,
+      );
 
       await LogService.info(
         "OFFLINE_SYNC_STARTED",
@@ -504,23 +584,33 @@ export class GradeStorageService {
       const batch = writeBatch(db);
 
       // Limit to max 400 for safety, as Firestore batch limit is 500 operations
-      const recordsToSync = Array.from(offlineGrades as unknown as OfflineGrade[]).slice(0, 400);
+      const recordsToSync = Array.from(
+        offlineGrades as unknown as OfflineGrade[],
+      ).slice(0, 400);
       let validRecordsToSyncCount = 0;
 
       for (const record of recordsToSync) {
         // ── Re-validate everything before syncing ──
         try {
           // 1. Check if student still exists
-          const studentValid = await GradeStorageService.validateStudentId(record.studentId);
+          const studentValid = await GradeStorageService.validateStudentId(
+            record.studentId,
+          );
           if (!studentValid) {
-            console.warn(`[GradeStorageService] Skipping sync for invalid student: ${record.studentId}`);
+            console.warn(
+              `[GradeStorageService] Skipping sync for invalid student: ${record.studentId}`,
+            );
             continue;
           }
 
           // 2. Check if exam is still active
-          const examValid = await GradeStorageService.validateExamId(record.examId);
+          const examValid = await GradeStorageService.validateExamId(
+            record.examId,
+          );
           if (!examValid) {
-            console.warn(`[GradeStorageService] Skipping sync for invalid/inactive exam: ${record.examId}`);
+            console.warn(
+              `[GradeStorageService] Skipping sync for invalid/inactive exam: ${record.examId}`,
+            );
             continue;
           }
 
@@ -540,12 +630,15 @@ export class GradeStorageService {
                 examId: record.examId,
               },
             );
-            // Duplicate won't be synced but will be deleted from local Realm 
+            // Duplicate won't be synced but will be deleted from local Realm
             continue;
           }
         } catch (err) {
           // If a check fails due to network, we can't sync this record in this batch
-          console.error(`[GradeStorageService] Re-validation failed for ${record.studentId}. Skipping in this batch.`, err);
+          console.error(
+            `[GradeStorageService] Re-validation failed for ${record.studentId}. Skipping in this batch.`,
+            err,
+          );
           continue;
         }
 
@@ -571,23 +664,31 @@ export class GradeStorageService {
 
       // ── Transactionally commit all or nothing ──
       if (validRecordsToSyncCount > 0) {
-        console.log(`[GradeStorageService] Committing atomic batch of ${validRecordsToSyncCount} records to Firestore...`);
+        console.log(
+          `[GradeStorageService] Committing atomic batch of ${validRecordsToSyncCount} records to Firestore...`,
+        );
         await withTimeout(batch.commit(), 5000); // 5 sec SLA for batch
         console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
       }
 
       // If we reach here, batch successfully committed (or there were only duplicates)
       // Now it's safe to clear ONLY the synchronized records from Realm
-      console.log(`[GradeStorageService] Cleaning up ${recordsToSync.length} records from RealmDB...`);
+      console.log(
+        `[GradeStorageService] Cleaning up ${recordsToSync.length} records from RealmDB...`,
+      );
       realm.write(() => {
         realm.delete(recordsToSync);
       });
       console.log("[GradeStorageService] RealmDB cleanup complete.");
 
-      await LogService.info("OFFLINE_SYNC_SUCCESS", "Offline sync batch complete", {
-        synced: validRecordsToSyncCount,
-        clearedFromRealm: recordsToSync.length,
-      });
+      await LogService.info(
+        "OFFLINE_SYNC_SUCCESS",
+        "Offline sync batch complete",
+        {
+          synced: validRecordsToSyncCount,
+          clearedFromRealm: recordsToSync.length,
+        },
+      );
     } catch (error) {
       // Intentionally DO NOT clear Realm on error
       await LogService.error(
@@ -599,4 +700,24 @@ export class GradeStorageService {
       );
     }
   }
-} 
+
+  /**
+   * Purge all pending OfflineGrade records from staging Realm.
+   * Use this to clear stuck/stale records that can no longer be synced.
+   */
+  static async clearStagingQueue(): Promise<number> {
+    try {
+      const realm = await RealmService.getStagingRealm();
+      const all = realm.objects("OfflineGrade");
+      const count = all.length;
+      realm.write(() => realm.delete(all));
+      console.log(
+        `[GradeStorageService] Cleared ${count} stale staging records.`,
+      );
+      return count;
+    } catch (err) {
+      console.warn("[GradeStorageService] Failed to clear staging queue:", err);
+      return 0;
+    }
+  }
+}

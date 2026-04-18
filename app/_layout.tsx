@@ -1,14 +1,22 @@
 import NetInfo from "@react-native-community/netinfo";
 import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
+    DarkTheme,
+    DefaultTheme,
+    ThemeProvider,
 } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, AppStateStatus, Platform, StyleSheet, Text, View } from "react-native";
+import {
+    ActivityIndicator,
+    AppState,
+    AppStateStatus,
+    Platform,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 import "react-native-get-random-values";
 import "react-native-reanimated";
 import Toast from "react-native-toast-message";
@@ -27,13 +35,17 @@ export default function RootLayout() {
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"syncing" | "synced" | null>(
+    null,
+  );
   const isSyncingRef = useRef(false);
-  const syncStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncStatusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Hide Android navigation bar
   useEffect(() => {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === "android") {
       NavigationBar.setVisibilityAsync("hidden");
       NavigationBar.setBehaviorAsync("overlay-swipe");
     }
@@ -46,10 +58,20 @@ export default function RootLayout() {
       isSyncingRef.current = true;
       const netState = await NetInfo.fetch();
 
-      if (netState.isConnected && netState.isInternetReachable && auth.currentUser) {
+      if (
+        netState.isConnected &&
+        netState.isInternetReachable &&
+        auth.currentUser
+      ) {
         setIsSyncing(true);
         setSyncStatus("syncing");
         console.log("[RootLayout] Triggering background sync...");
+        // Flush any queued offline grades to Firestore before full sync
+        const { GradeStorageService } =
+          await import("@/services/gradeStorageService");
+        await GradeStorageService.syncOfflineQueue().catch((e) =>
+          console.warn("[RootLayout] Offline queue sync failed:", e),
+        );
         await SyncService.syncPendingUpdates();
         console.log("[RootLayout] Background sync complete");
         setSyncStatus("synced");
@@ -73,13 +95,13 @@ export default function RootLayout() {
   useEffect(() => {
     const performInitialSync = async () => {
       // Small delay to ensure all services are ready
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       await performSync();
     };
     performInitialSync();
   }, []);
 
-  // Offline sync on app resume 
+  // Offline sync on app resume
   useEffect(() => {
     const handleAppStateChange = async (nextAppState: AppStateStatus) => {
       const wasBackground =
@@ -153,34 +175,34 @@ const styles = StyleSheet.create({
   syncOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
-    alignItems: 'center',
+    alignItems: "center",
     paddingTop: 60, // Place it nicely below standard top safe area
   },
   syncContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#ECEEF2',
+    borderColor: "#ECEEF2",
     gap: 10,
-    shadowColor: '#0E1628',
+    shadowColor: "#0E1628",
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
   },
   syncText: {
-    color: '#6B7280',
+    color: "#6B7280",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   syncSuccessDot: {
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: '#22C55E',
+    backgroundColor: "#22C55E",
   },
 });

@@ -2,10 +2,9 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { ExamService as ExamApi } from "@/services/examService";
 import { NetworkService } from "@/services/networkService";
-import { OfflineStorageService } from "@/services/offlineStorageService";
 import {
-  ResultsService,
-  type UnifiedResultRow,
+    ResultsService,
+    type UnifiedResultRow,
 } from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -13,16 +12,16 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Clipboard,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Clipboard,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { auth, db } from "../../config/firebase";
@@ -171,9 +170,11 @@ export default function ExamPreviewScreen() {
       ]);
 
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      
+
       if (!examData) {
-        setError("Exam not found. It may have been deleted or is not available on this device.");
+        setError(
+          "Exam not found. It may have been deleted or is not available on this device.",
+        );
         return;
       }
 
@@ -589,9 +590,23 @@ export default function ExamPreviewScreen() {
           </View>
         ) : (
           <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.title }]}>
-              Results
-            </Text>
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.title }]}>
+                Results
+              </Text>
+              {examResults.length > 0 && (
+                <TouchableOpacity
+                  style={styles.inlineEditButton}
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/exam-stats?examId=${examId}&examTitle=${encodeURIComponent(exam.metadata.title)}`,
+                    )
+                  }
+                >
+                  <Text style={styles.inlineEditButtonText}>Stats & Send</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             {renderResultsList()}
           </View>
         )}
@@ -639,24 +654,24 @@ export default function ExamPreviewScreen() {
                 Archive Exam
               </Text>
             </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuItem}
-                onPress={() => {
-                  setSettingsMenuVisible(false);
-                  router.push(
-                    `/(tabs)/edit-exam?examId=${examId}${
-                      classId ? `&classId=${classId}` : ""
-                    }&returnTo=exam-preview&tab=${activeTab}`,
-                  );
-                }}
-              >
-                <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
-                  Edit Exam
-                </Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                router.push(
+                  `/(tabs)/edit-exam?examId=${examId}${
+                    classId ? `&classId=${classId}` : ""
+                  }&returnTo=exam-preview&tab=${activeTab}`,
+                );
+              }}
+            >
+              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                Edit Exam
+              </Text>
             </TouchableOpacity>
           </TouchableOpacity>
-        ) : null}
+        </TouchableOpacity>
+      ) : null}
 
       {viewCodeVisible ? (
         <TouchableOpacity
@@ -712,7 +727,7 @@ export default function ExamPreviewScreen() {
         onCancel={() => setArchiveConfirmVisible(false)}
         onConfirm={handleArchiveExam}
       />
-      </SafeAreaView>
+    </SafeAreaView>
   );
 }
 
