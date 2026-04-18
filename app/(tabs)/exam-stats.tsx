@@ -208,16 +208,16 @@ export default function ExamStatsScreen() {
       const dateFrom =
         dateFilter === "today"
           ? (() => {
-            const d = new Date();
-            d.setHours(0, 0, 0, 0);
-            return d;
-          })()
-          : dateFilter === "week"
-            ? (() => {
               const d = new Date();
-              d.setDate(d.getDate() - 7);
+              d.setHours(0, 0, 0, 0);
               return d;
             })()
+          : dateFilter === "week"
+            ? (() => {
+                const d = new Date();
+                d.setDate(d.getDate() - 7);
+                return d;
+              })()
             : undefined;
 
       const unsub = DashboardService.subscribeExamStats(
@@ -265,18 +265,18 @@ export default function ExamStatsScreen() {
     key: keyof NonNullable<typeof stats>["distribution"];
     color: string;
   }[] = [
-      { label: "A  ≥90%", key: "A", color: "#00a550" },
-      { label: "B  80–89%", key: "B", color: "#4a90e2" },
-      { label: "C  70–79%", key: "C", color: "#f5a623" },
-      { label: "D  60–69%", key: "D", color: "#e67e22" },
-      { label: "F  <60%", key: "F", color: "#e74c3c" },
-    ];
+    { label: "A  ≥90%", key: "A", color: "#00a550" },
+    { label: "B  80–89%", key: "B", color: "#4a90e2" },
+    { label: "C  70–79%", key: "C", color: "#f5a623" },
+    { label: "D  60–69%", key: "D", color: "#e67e22" },
+    { label: "F  <60%", key: "F", color: "#e74c3c" },
+  ];
 
   const grades =
     sortByCount && stats
       ? [...BASE_GRADES].sort(
-        (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
-      )
+          (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
+        )
       : BASE_GRADES;
 
   return (
@@ -290,10 +290,7 @@ export default function ExamStatsScreen() {
             {/* Progress bar */}
             <View style={styles.exportBarBg}>
               <View
-                style={[
-                  styles.exportBarFill,
-                  { width: `${exportPercent}%` },
-                ]}
+                style={[styles.exportBarFill, { width: `${exportPercent}%` }]}
               />
             </View>
             <Text style={styles.exportPercentText}>{exportPercent}%</Text>
@@ -361,7 +358,7 @@ export default function ExamStatsScreen() {
       ) : !stats || stats.totalGraded === 0 ? (
         <View style={styles.emptyCenter}>
           <Ionicons name="bar-chart-outline" size={52} color="#ccc" />
-          <Text style={styles.emptyTitle}>No Results Yet</Text>
+          <Text style={styles.emptyTitle}>No Result Yet</Text>
           <Text style={styles.emptySubtitle}>
             {dateFilter !== "all"
               ? "No scans found for this date range."
