@@ -141,6 +141,7 @@ export class QuizCache extends Realm.Object<QuizCache> {
     subject!: string;
     className?: string;
     classId?: string;
+    isArchived?: boolean;
     status!: string;
     structureLocked?: boolean;
     papersCount!: number;
@@ -163,6 +164,7 @@ export class QuizCache extends Realm.Object<QuizCache> {
             subject: "string",
             className: "string?",
             classId: "string?",
+            isArchived: { type: "bool", default: false },
             status: "string",
             structureLocked: { type: "bool", default: false },
             papersCount: { type: "int", default: 0 },

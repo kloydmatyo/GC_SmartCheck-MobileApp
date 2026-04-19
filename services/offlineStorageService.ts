@@ -26,6 +26,7 @@ export interface PendingUpdate {
   id: string;
   examId: string;
   action: "create" | "update" | "delete";
+  collection?: "exams" | "classes";
   data: any;
   timestamp: Date;
   retryCount: number;
@@ -152,6 +153,7 @@ export class OfflineStorageService {
     examId: string,
     action: "create" | "update" | "delete",
     data: any,
+    collection: "exams" | "classes" = "exams",
   ): Promise<void> {
     try {
       const pendingUpdates = await this.getPendingUpdates();
@@ -160,6 +162,7 @@ export class OfflineStorageService {
         id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         examId,
         action,
+        collection,
         data,
         timestamp: new Date(),
         retryCount: 0,

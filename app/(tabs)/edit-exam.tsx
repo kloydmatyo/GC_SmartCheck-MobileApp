@@ -24,7 +24,7 @@ import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
 
 export default function EditExamScreen() {
-  const NUM_QUESTIONS_OPTIONS = [20, 50, 100] as const;
+  const NUM_QUESTIONS_OPTIONS = [20, 50, 100, 150, 200] as const;
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
@@ -1091,14 +1091,14 @@ const styles = StyleSheet.create({
   },
   questionOptionRow: {
     flexDirection: "row",
-    gap: 12,
+    justifyContent: "space-between",
     marginTop: 2,
   },
   questionOption: {
-    flex: 1,
-    height: 78,
+    width: "19%",
+    height: 56,
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E8EBF0",
     alignItems: "center",
@@ -1114,7 +1114,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   questionOptionText: {
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: "700",
     color: "#31394A",
   },
