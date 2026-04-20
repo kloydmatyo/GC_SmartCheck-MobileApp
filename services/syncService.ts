@@ -9,7 +9,8 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
-  where
+  where,
+  limit
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
@@ -95,7 +96,10 @@ export class SyncService {
       // 3. Flush Exams from Staging
       try { await this.syncStagingExams(); syncedCount++; } catch (e) { console.error("Flush Exams Error", e); failedCount++; }
 
-      // 4. Update the Cache Realm from Firestore
+      // 4. Flush Pending Updates (AsyncStorage)
+      try { await this.processAsyncStorageUpdates(); syncedCount++; } catch (e) { console.error("Process Updates Error", e); failedCount++; }
+
+      // 5. Update the Cache Realm from Firestore
       try { await this.syncFirestoreToCache(); syncedCount++; } catch (e) { console.error("Refresh Cache Error", e); failedCount++; }
 
       const result: SyncResult = {
@@ -150,8 +154,8 @@ export class SyncService {
       examsWithAK.push({ id: examDoc.id, data: examDoc.data(), answerKey: answerKeyJson });
     }
 
-    // Sync Grades (limit to 100 recent?)
-    const gradesQuery = query(collection(db, "scannedResults"), where("scannedBy", "==", currentUser.uid));
+    // Sync Grades (limit to 100 recent)
+    const gradesQuery = query(collection(db, "scannedResults"), where("scannedBy", "==", currentUser.uid), limit(100));
     const gradesSnap = await getDocs(gradesQuery);
 
     realm.write(() => {
@@ -242,7 +246,8 @@ export class SyncService {
           updatedAt: Timestamp.now(),
         };
 
-        await setDoc(doc(collection(db, "classes")), classData);
+        const classId = sClass._id.toHexString();
+        await setDoc(doc(db, "classes", classId), classData);
 
         realm.write(() => {
           realm.delete(sClass);
@@ -273,13 +278,15 @@ export class SyncService {
           examCode: sQuiz.examCode || "",
         };
 
-        const examRef = doc(collection(db, "exams"));
+        const examId = sQuiz._id.toHexString();
+        const examRef = doc(db, "exams", examId);
         await setDoc(examRef, quizData);
 
         // Also sync answer key if it exists
         if (sQuiz.answerKey) {
           const akData = JSON.parse(sQuiz.answerKey);
-          await setDoc(doc(db, "answerKeys", `ak_${examRef.id}_${Date.now()}`), {
+          // Use a deterministic ID for the initial answer key to prevent duplicates on retry
+          await setDoc(doc(db, "answerKeys", `ak_${examRef.id}_initial`), {
             examId: examRef.id,
             ...akData,
             createdAt: Timestamp.now(),
@@ -291,6 +298,24 @@ export class SyncService {
         });
       } catch (err) {
         console.error("Failed to sync staging quiz:", err);
+      }
+    }
+  }
+
+  private static async processAsyncStorageUpdates(): Promise<void> {
+    const pendingUpdates = await OfflineStorageService.getPendingUpdates();
+    if (pendingUpdates.length === 0) return;
+
+    for (const update of pendingUpdates) {
+      try {
+        const conflict = await this.syncUpdate(update);
+        if (conflict) {
+          // Resolve by merging or using server data to prevent stalls
+          await this.resolveConflict(conflict, "use-server");
+        }
+        await OfflineStorageService.removePendingUpdate(update.id);
+      } catch (err) {
+        console.error("Failed to process async update:", err);
       }
     }
   }

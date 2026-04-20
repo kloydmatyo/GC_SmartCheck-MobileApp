@@ -9,11 +9,15 @@ export default function OfflineIndicator() {
   const [slideAnim] = useState(new Animated.Value(-50));
 
   useEffect(() => {
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+
     // Initialize network service
     NetworkService.initialize();
 
     // Add listener for network changes
     const unsubscribe = NetworkService.addListener((connected) => {
+      if (!isMounted) return;
       setIsOnline(connected);
 
       if (!connected) {
@@ -26,7 +30,8 @@ export default function OfflineIndicator() {
         }).start();
       } else {
         // Slide up after a delay
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
+          if (!isMounted) return;
           Animated.spring(slideAnim, {
             toValue: -50,
             useNativeDriver: true,
@@ -38,9 +43,13 @@ export default function OfflineIndicator() {
     });
 
     // Check initial status
-    NetworkService.isOnline().then(setIsOnline);
+    NetworkService.isOnline().then((connected) => {
+      if (isMounted) setIsOnline(connected);
+    });
 
     return () => {
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
       unsubscribe();
     };
   }, []);
