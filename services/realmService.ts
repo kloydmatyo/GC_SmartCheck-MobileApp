@@ -71,6 +71,8 @@ export class OfflineQuiz extends Realm.Object<OfflineQuiz> {
   _id!: Realm.BSON.ObjectId;
   title!: string;
   subject!: string;
+  className?: string;
+  classId?: string;
   examId!: string;
   templateId!: string;
   questionCount!: number;
@@ -89,6 +91,8 @@ export class OfflineQuiz extends Realm.Object<OfflineQuiz> {
       _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
       title: "string",
       subject: "string",
+      className: "string?",
+      classId: "string?",
       examId: "string?",
       templateId: "string?",
       questionCount: "int",
@@ -293,11 +297,11 @@ const STAGING_CONFIG: Realm.Configuration = {
     OfflinePendingUpdate,
     SystemKV,
   ],
-  schemaVersion: 10,
-  migration: (oldRealm, newRealm) => {
+  schemaVersion: 11,
+  onMigration: (oldRealm: any, newRealm: any) => {
     if (oldRealm.schemaVersion < 8) {
-      const oldObjects = oldRealm.objects<any>("OfflineClass");
-      const newObjects = newRealm.objects<any>("OfflineClass");
+      const oldObjects = oldRealm.objects("OfflineClass");
+      const newObjects = newRealm.objects("OfflineClass");
       for (let i = 0; i < oldObjects.length; i++) {
         newObjects[i].room = oldObjects[i].room ?? "";
         newObjects[i].section_block = oldObjects[i].section_block ?? "";

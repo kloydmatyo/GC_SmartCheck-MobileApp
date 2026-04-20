@@ -269,6 +269,8 @@ export class SyncService {
         const quizData = {
           title: sQuiz.title,
           subject: sQuiz.subject,
+          className: sQuiz.className || "",
+          classId: sQuiz.classId || "",
           num_items: sQuiz.questionCount,
           status: sQuiz.status,
           createdBy: sQuiz.createdBy,

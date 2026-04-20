@@ -10,7 +10,7 @@ export default function OfflineIndicator() {
 
   useEffect(() => {
     let isMounted = true;
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     // Initialize network service
     NetworkService.initialize();
@@ -52,7 +52,7 @@ export default function OfflineIndicator() {
       if (timeoutId) clearTimeout(timeoutId);
       unsubscribe();
     };
-  }, []);
+  }, [slideAnim]);
 
   if (isOnline) {
     return null;
@@ -68,7 +68,7 @@ export default function OfflineIndicator() {
       ]}
     >
       <Ionicons name="cloud-offline" size={16} color={COLORS.white} />
-      <Text style={styles.text}>You're offline</Text>
+      <Text style={styles.text}>You&apos;re offline</Text>
       <View style={styles.badge}>
         <Text style={styles.badgeText}>Changes will sync when online</Text>
       </View>
