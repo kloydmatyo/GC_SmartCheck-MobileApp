@@ -113,6 +113,14 @@ const SHEET_SPECS = {
     markerBR: { x: 203.5, y: 222 },
     aspectRatio: 197 / 215.5, // ~0.91
   },
+  "200": {
+    // 200-item uses the SAME physical sheet as 100-item (2 pages)
+    frameWidth: 197,
+    frameHeight: 215.5,
+    markerTL: { x: 6.5, y: 6.5 },
+    markerBR: { x: 203.5, y: 222 },
+    aspectRatio: 197 / 215.5, // ~0.91
+  },
 } as const;
 
 // Layout profile: defines how to slice the paper into answer groups
@@ -528,6 +536,7 @@ export class ZipgradeScanner {
     templateName: keyof ReturnType<
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
+    pageNumber?: 1 | 2,
   ): Promise<ScanResult> {
     // Track all Mat objects for cleanup
     const matsToCleanup: any[] = [];
@@ -1224,28 +1233,16 @@ export class ZipgradeScanner {
       // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
 
-      // For 100-item templates, use brightness-based scanning (Skia)
-      if (detectedQ === 100 && regMarks.length >= 3) {
-        console.log(
-          "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
-        );
-
-        // Import the brightness scanner
-        const {
-          scan100ItemWithBrightness,
-        } = require("./brightnessScannerFor100Item");
-
-        // Extract corner markers (sorted by position)
+      // Helper: extract corner markers from regMarks for brightness scanning
+      const extractCornerMarkers = () => {
         const sortedMarks = [...regMarks].sort(
           (a, b) => a.y - b.y || a.x - b.x,
         );
 
         let markers;
         if (regMarks.length >= 4) {
-          // Use all 4 corners
           const topMarks = sortedMarks.slice(0, 2).sort((a, b) => a.x - b.x);
           const bottomMarks = sortedMarks.slice(-2).sort((a, b) => a.x - b.x);
-
           markers = {
             topLeft: { x: topMarks[0].x, y: topMarks[0].y },
             topRight: { x: topMarks[1].x, y: topMarks[1].y },
@@ -1253,40 +1250,27 @@ export class ZipgradeScanner {
             bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
           };
         } else {
-          // Only 3 markers: estimate the missing corner
-          // Identify which corner is missing by analyzing the 3 detected markers
           const marks = [...sortedMarks];
-
-          // Find the two markers with similar Y coordinates (top or bottom edge)
           const yDiffs = [
             { idx: [0, 1], diff: Math.abs(marks[0].y - marks[1].y) },
             { idx: [0, 2], diff: Math.abs(marks[0].y - marks[2].y) },
             { idx: [1, 2], diff: Math.abs(marks[1].y - marks[2].y) },
           ];
           yDiffs.sort((a, b) => a.diff - b.diff);
-
           const edgePair = yDiffs[0].idx;
           const loneIdx = [0, 1, 2].find((i) => !edgePair.includes(i))!;
-
           const edge1 = marks[edgePair[0]];
           const edge2 = marks[edgePair[1]];
           const lone = marks[loneIdx];
-
-          // Sort edge markers by X
           const [edgeLeft, edgeRight] =
             edge1.x < edge2.x ? [edge1, edge2] : [edge2, edge1];
-
-          // Determine if edge is top or bottom based on Y comparison with lone marker
           const edgeIsTop = (edgeLeft.y + edgeRight.y) / 2 < lone.y;
 
           if (edgeIsTop) {
-            // We have TR, TL, and one bottom corner - estimate the other bottom
-            const paperWidth = edgeRight.x - edgeLeft.x;
             const missingX =
               lone.x < (edgeLeft.x + edgeRight.x) / 2
-                ? edgeRight.x // lone is BL, missing BR
-                : edgeLeft.x; // lone is BR, missing BL
-
+                ? edgeRight.x
+                : edgeLeft.x;
             markers = {
               topLeft: { x: edgeLeft.x, y: edgeLeft.y },
               topRight: { x: edgeRight.x, y: edgeRight.y },
@@ -1300,13 +1284,10 @@ export class ZipgradeScanner {
                   : { x: missingX, y: lone.y },
             };
           } else {
-            // We have BL, BR, and one top corner - estimate the other top
-            const paperWidth = edgeRight.x - edgeLeft.x;
             const missingX =
               lone.x < (edgeLeft.x + edgeRight.x) / 2
-                ? edgeRight.x // lone is TL, missing TR
-                : edgeLeft.x; // lone is TR, missing TL
-
+                ? edgeRight.x
+                : edgeLeft.x;
             markers = {
               topLeft:
                 lone.x < (edgeLeft.x + edgeRight.x) / 2
@@ -1320,7 +1301,6 @@ export class ZipgradeScanner {
               bottomRight: { x: edgeRight.x, y: edgeRight.y },
             };
           }
-
           console.log("[OMR] Only 3 markers detected, estimating 4th corner");
         }
 
@@ -1331,8 +1311,64 @@ export class ZipgradeScanner {
           `BL=(${Math.round(markers.bottomLeft.x)},${Math.round(markers.bottomLeft.y)})`,
           `BR=(${Math.round(markers.bottomRight.x)},${Math.round(markers.bottomRight.y)})`,
         );
+        return markers;
+      };
 
-        // Call brightness scanner with image URI and markers
+      // ── 200-item template: brightness scanning with page offset ──────────
+      if (qCount === 200 && regMarks.length >= 3) {
+        const currentPage = pageNumber || 1;
+        console.log(
+          `[OMR] Using BRIGHTNESS scanning for 200-item template Page ${currentPage} (Skia pixel sampling)`,
+        );
+
+        const { scan200ItemPage } = require("./brightnessScannerFor200Item");
+        const markers = extractCornerMarkers();
+        allAnswers = await scan200ItemPage(imageUri, markers, currentPage);
+
+        const rangeStart = currentPage === 1 ? 1 : 101;
+        const rangeEnd = currentPage === 1 ? 100 : 200;
+        console.log(
+          `[OMR] 200Q Page ${currentPage}: Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+        );
+      }
+      // ── 200-item fallback: estimate corners from paper bounds ──────────
+      else if (qCount === 200) {
+        const currentPage = pageNumber || 1;
+        console.warn(
+          `[OMR] Only ${regMarks.length} corner markers found for 200-item template. Using estimated corners from paper bounds.`,
+        );
+
+        const { scan200ItemPage } = require("./brightnessScannerFor200Item");
+        // Estimate corners from the detected paper boundaries
+        const estimatedMarkers = {
+          topLeft: { x: paperLeft, y: paperTop },
+          topRight: { x: paperRight, y: paperTop },
+          bottomLeft: { x: paperLeft, y: paperBottom },
+          bottomRight: { x: paperRight, y: paperBottom },
+        };
+
+        console.log(
+          `[OMR] Estimated markers: TL=(${Math.round(paperLeft)},${Math.round(paperTop)}) BR=(${Math.round(paperRight)},${Math.round(paperBottom)})`,
+        );
+
+        allAnswers = await scan200ItemPage(imageUri, estimatedMarkers, currentPage);
+
+        const rangeStart = currentPage === 1 ? 1 : 101;
+        const rangeEnd = currentPage === 1 ? 100 : 200;
+        console.log(
+          `[OMR] 200Q Page ${currentPage} (fallback): Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+        );
+      }
+      // ── 100-item template: brightness scanning ──────────────────────────
+      else if (detectedQ === 100 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
+        );
+
+        const {
+          scan100ItemWithBrightness,
+        } = require("./brightnessScannerFor100Item");
+        const markers = extractCornerMarkers();
         allAnswers = await scan100ItemWithBrightness(imageUri, markers);
 
         console.log(
@@ -1344,7 +1380,6 @@ export class ZipgradeScanner {
           "[OMR] Not enough corner markers for hybrid scanning, falling back to region-based detection",
         );
 
-        // Use region-based contour detection (existing code)
         for (const region of regions) {
           const regionAnswers = extractAnswersFromRegion(
             bubbles,
@@ -1388,7 +1423,10 @@ export class ZipgradeScanner {
       // Pad any missing questions
       const answerMap = new Map(allAnswers.map((a) => [a.questionNumber, a]));
       const finalAnswers: StudentAnswer[] = [];
-      for (let q = 1; q <= detectedQ; q++) {
+      // For 200-item, pad only the current page's range
+      const padStart = qCount === 200 ? ((pageNumber || 1) === 1 ? 1 : 101) : 1;
+      const padEnd = qCount === 200 ? ((pageNumber || 1) === 1 ? 100 : 200) : detectedQ;
+      for (let q = padStart; q <= padEnd; q++) {
         finalAnswers.push(
           answerMap.get(q) ?? { questionNumber: q, selectedAnswer: "" },
         );

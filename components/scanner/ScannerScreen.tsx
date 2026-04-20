@@ -84,6 +84,10 @@ export default function ScannerScreen({
       setExamQuestionCount(20);
       setSelectedClass(null);
       setSelectedExam(null);
+      // Reset 2-stage state
+      setTwoStageData(null);
+      setTwoStageCurrent(1);
+      setShowPage1Confirmation(false);
       // stay in camera mode but clear selections
     }
   }, [resetFlag]);
@@ -100,6 +104,14 @@ export default function ScannerScreen({
     null,
   );
   const [scanCount, setScanCount] = useState(0);
+
+  // ── 2-Stage scanning state for 200-item exams ───────────────────────────
+  const [twoStageData, setTwoStageData] = useState<{
+    page1Result: ScanResult | null;
+    page1Image: string;
+  } | null>(null);
+  const [twoStageCurrent, setTwoStageCurrent] = useState<1 | 2>(1);
+  const [showPage1Confirmation, setShowPage1Confirmation] = useState(false);
 
   // ── Manual student ID entry (fallback when OMR can't read bubbles) ──────
   const [manualIdModal, setManualIdModal] = useState<{
@@ -349,6 +361,101 @@ export default function ScannerScreen({
     }
   };
 
+  // ── 2-Stage scan handler for 200-item exams ─────────────────────────────
+  const handleTwoStageScanComplete = async (
+    scanResult: ScanResult,
+    imageUri: string,
+  ) => {
+    if (twoStageCurrent === 1) {
+      // Stage 1: Store Page 1 results, ask user to scan Page 2
+      console.log(
+        `[ScannerScreen] 200Q Stage 1 complete: studentId=${scanResult.studentId}, answers=${scanResult.answers.length}`,
+      );
+      setTwoStageData({
+        page1Result: scanResult,
+        page1Image: imageUri,
+      });
+      setShowPage1Confirmation(true);
+    } else {
+      // Stage 2: Merge with Page 1 data
+      if (!twoStageData?.page1Result) {
+        Alert.alert("Error", "Page 1 data is missing. Please restart the scan.");
+        setTwoStageCurrent(1);
+        setTwoStageData(null);
+        return;
+      }
+
+      const page1 = twoStageData.page1Result;
+      const page2 = scanResult;
+
+      // Validate Student ID match
+      const id1 = page1.studentId;
+      const id2 = page2.studentId;
+      const idsMatch =
+        id1 === id2 ||
+        /^0+$/.test(id1) ||
+        /^0+$/.test(id2) ||
+        id1 === "Unknown" ||
+        id2 === "Unknown";
+
+      if (!idsMatch) {
+        Alert.alert(
+          "Student ID Mismatch",
+          `Page 1 ID: ${id1}\nPage 2 ID: ${id2}\n\nThe Student IDs on both pages don't match. Please re-scan Page 2.`,
+          [
+            {
+              text: "Re-scan Page 2",
+              onPress: () => {
+                setScanCount((prev) => prev + 1);
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      // Merge answers: Page 1 (Q1-100) + Page 2 (Q101-200)
+      const mergedAnswers = [...page1.answers, ...page2.answers].sort(
+        (a, b) => a.questionNumber - b.questionNumber,
+      );
+
+      // Use the valid student ID (prefer non-zero)
+      const mergedStudentId =
+        id1 && !/^0+$/.test(id1) && id1 !== "Unknown" ? id1 : id2;
+
+      const mergedResult: ScanResult = {
+        studentId: mergedStudentId,
+        answers: mergedAnswers,
+        confidence: Math.min(page1.confidence, page2.confidence),
+        processedImageUri: page1.processedImageUri || page2.processedImageUri,
+      };
+
+      console.log(
+        `[ScannerScreen] 200Q Merged: ID=${mergedStudentId}, answers=${mergedAnswers.length}`,
+      );
+
+      // Clean up 2-stage state
+      setTwoStageData(null);
+      setTwoStageCurrent(1);
+
+      // Feed merged result into normal scan pipeline
+      handleScanComplete(mergedResult, imageUri);
+    }
+  };
+
+  const handlePage1ConfirmScanPage2 = () => {
+    setShowPage1Confirmation(false);
+    setTwoStageCurrent(2);
+    setScanCount((prev) => prev + 1);
+  };
+
+  const handlePage1Rescan = () => {
+    setShowPage1Confirmation(false);
+    setTwoStageData(null);
+    setTwoStageCurrent(1);
+    setScanCount((prev) => prev + 1);
+  };
+
   const handleRetrySave = () =>
     handleFirestoreRetrySave(gradingResult!, activeExamId);
 
@@ -462,6 +569,10 @@ export default function ScannerScreen({
   };
 
   const handleScanAnother = () => {
+    // Reset 2-stage state for 200-item exams
+    setTwoStageData(null);
+    setTwoStageCurrent(1);
+    setShowPage1Confirmation(false);
     setScanCount((prev) => prev + 1);
     setCurrentState("camera");
   };
@@ -470,6 +581,10 @@ export default function ScannerScreen({
     setGradingResult(null);
     setScannedImage(undefined);
     setCurrentState("camera");
+    // Reset 2-stage state
+    setTwoStageData(null);
+    setTwoStageCurrent(1);
+    setShowPage1Confirmation(false);
     // clear selection so reopening starts fresh
     setSelectedClass(null);
     setSelectedExam(null);
@@ -513,11 +628,20 @@ export default function ScannerScreen({
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
       {/* ── Camera (Always Visible) ── */}
-      {currentState !== "results" && (
+      {currentState !== "results" && !showPage1Confirmation && (
         <CameraScanner
           key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
-          onScanComplete={handleScanComplete}
+          scanStage={
+            examQuestionCount === 200
+              ? { current: twoStageCurrent, total: 2 }
+              : undefined
+          }
+          onScanComplete={
+            examQuestionCount === 200
+              ? handleTwoStageScanComplete
+              : handleScanComplete
+          }
           onCancel={handleClose}
         />
       )}
@@ -730,6 +854,49 @@ export default function ScannerScreen({
                 onPress={handleConfirmManualId}
               >
                 <Text style={styles.modalConfirmText}>Confirm & Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Page 1 Confirmation Modal (200-item 2-stage) ── */}
+      <Modal
+        visible={showPage1Confirmation}
+        transparent
+        animationType="fade"
+        onRequestClose={handlePage1Rescan}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.manualIdModalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="checkmark-circle" size={28} color="#1FC27D" />
+              <Text style={styles.modalTitle}>Page 1 Scanned ✓</Text>
+            </View>
+
+            <Text style={styles.modalMessage}>
+              Page 1 (Q1–100) captured successfully.
+              {twoStageData?.page1Result?.studentId &&
+              !/^0+$/.test(twoStageData.page1Result.studentId)
+                ? `\nStudent ID: ${twoStageData.page1Result.studentId}`
+                : ""}
+              {`\nAnswers detected: ${twoStageData?.page1Result?.answers.filter((a) => a.selectedAnswer).length || 0}/100`}
+              \n\nPlease place Page 2 (Q101–200) on the scanning area.
+            </Text>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSummaryCancel]}
+                onPress={handlePage1Rescan}
+              >
+                <Text style={styles.modalCancelText}>Re-scan Page 1</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalVerifyConfirm]}
+                onPress={handlePage1ConfirmScanPage2}
+              >
+                <Text style={styles.modalConfirmText}>Scan Page 2</Text>
               </TouchableOpacity>
             </View>
           </View>

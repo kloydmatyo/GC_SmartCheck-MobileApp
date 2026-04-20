@@ -545,7 +545,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.95)",
     justifyContent: "center",
     alignItems: "center",
-    justifyContent: "center",
   },
   btnExport: {
     flex: 1.2,
