@@ -2,29 +2,30 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 
 import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
+import SendScoresModal from "@/components/scores/SendScoresModal";
 import {
-  ExportDateFilter,
-  ExportFormat,
-  GradeExportService,
+    ExportDateFilter,
+    ExportFormat,
+    GradeExportService,
 } from "@/services/gradeExportService";
 import { ReportPdfService } from "@/services/reportPdfService";
 
 import {
-  DashboardDateFilter,
-  DashboardService,
-  ExamDashboardStats,
+    DashboardDateFilter,
+    DashboardService,
+    ExamDashboardStats,
 } from "@/services/dashboardService";
 
 // ── Skeleton placeholder block ────────────────────────────────────────────
@@ -132,6 +133,7 @@ export default function ExamStatsScreen() {
   const [reportViewerVisible, setReportViewerVisible] = useState(false);
   const [reportHtml, setReportHtml] = useState("");
   const [reportViewerTitle, setReportViewerTitle] = useState("");
+  const [sendScoresVisible, setSendScoresVisible] = useState(false);
 
   const handleExport = useCallback(() => {
     if (!examId || exporting) return;
@@ -330,6 +332,14 @@ export default function ExamStatsScreen() {
         fileName="GC_ClassSummary"
       />
 
+      {/* ── Send Scores Modal ─────────────────────────────────────────── */}
+      <SendScoresModal
+        visible={sendScoresVisible}
+        onClose={() => setSendScoresVisible(false)}
+        examId={examId as string}
+        examLabel={title}
+      />
+
       {/* ── Export progress overlay (#6) ─────────────────────── */}
       {exporting && (
         <View style={styles.exportOverlay}>
@@ -355,8 +365,19 @@ export default function ExamStatsScreen() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        {/* Right: Report + Export buttons */}
+        {/* Right: Report + Export + Send Scores buttons */}
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => setSendScoresVisible(true)}
+            style={styles.backBtn}
+            disabled={!stats || stats.totalGraded === 0}
+          >
+            <Ionicons
+              name="mail-outline"
+              size={22}
+              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+            />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={handleGenerateReport}
             style={styles.backBtn}

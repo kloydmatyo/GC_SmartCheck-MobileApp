@@ -21,7 +21,7 @@ import {
     where,
     writeBatch,
 } from "firebase/firestore";
-import * as XLSX from 'xlsx';
+import * as XLSX from "xlsx";
 import { StudentValidationService } from "./studentValidationService";
 // Offline cache disabled due to SQLite compatibility issues
 // import { StudentDatabaseService } from "./studentDatabaseService";
@@ -163,28 +163,32 @@ export class StudentImportService {
   static parseXLSX(fileContent: string): ImportRow[] {
     try {
       // Read the workbook from base64 string
-      const workbook = XLSX.read(fileContent, { type: 'base64' });
-      
+      const workbook = XLSX.read(fileContent, { type: "base64" });
+
       // Get the first worksheet
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      
+
       // Convert to JSON
-      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      });
+
       if (jsonData.length === 0) return [];
-      
+
       // Parse headers
-      const headers = (jsonData[0] as string[]).map((h) => this.normalizeHeader(String(h || '')));
-      
+      const headers = (jsonData[0] as string[]).map((h) =>
+        this.normalizeHeader(String(h || "")),
+      );
+
       // Parse rows
       const rows: ImportRow[] = [];
-      
+
       for (let i = 1; i < jsonData.length; i++) {
         const values = jsonData[i] as any[];
-        
+
         if (!values || values.length === 0) continue; // Skip empty rows
-        
+
         const row: ImportRow = {
           rowNumber: i + 1,
           studentId: "",
@@ -193,10 +197,10 @@ export class StudentImportService {
           email: undefined,
           section: undefined,
         };
-        
+
         headers.forEach((header, index) => {
-          const value = String(values[index] || '').trim();
-          
+          const value = String(values[index] || "").trim();
+
           switch (header) {
             case "student_id":
             case "studentid":
@@ -219,17 +223,19 @@ export class StudentImportService {
               break;
           }
         });
-        
-        const hasAnyData = values.some((v) => String(v || '').trim() !== '');
+
+        const hasAnyData = values.some((v) => String(v || "").trim() !== "");
         if (hasAnyData) {
           rows.push(row);
         }
       }
-      
+
       return rows;
     } catch (error) {
-      console.error('[Import] XLSX parsing failed:', error);
-      throw new Error('Failed to parse Excel file. Please ensure it is a valid .xlsx file.');
+      console.error("[Import] XLSX parsing failed:", error);
+      throw new Error(
+        "Failed to parse Excel file. Please ensure it is a valid .xlsx file.",
+      );
     }
   }
 
@@ -364,7 +370,7 @@ export class StudentImportService {
     } catch (error) {
       console.error("[Import] Duplicate check failed:", error);
       throw new Error(
-        "Failed to check for duplicate students. Please ensure you have an active internet connection and try again."
+        "Failed to check for duplicate students. Please ensure you have an active internet connection and try again.",
       );
     }
 
@@ -385,9 +391,13 @@ export class StudentImportService {
         const { ClassService } = await import("@/services/classService");
         const classData = await ClassService.getClassById(classId);
         if (!classData) return [];
-        const classStudentIds = new Set(classData.students.map((s: any) => s.student_id));
+        const classStudentIds = new Set(
+          classData.students.map((s: any) => s.student_id),
+        );
         const existing = studentIds.filter((id) => classStudentIds.has(id));
-        console.log(`[Import] Class check: ${existing.length}/${studentIds.length} IDs already in this class`);
+        console.log(
+          `[Import] Class check: ${existing.length}/${studentIds.length} IDs already in this class`,
+        );
         return existing;
       }
 
@@ -475,10 +485,14 @@ export class StudentImportService {
       const workbook = XLSX.read(fileContent, { type: "base64" });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
-      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, {
+        header: 1,
+      });
 
       const firstRow = (jsonData[0] as any[] | undefined) || [];
-      const headers = firstRow.map((h) => this.normalizeHeader(String(h || "")));
+      const headers = firstRow.map((h) =>
+        this.normalizeHeader(String(h || "")),
+      );
       const headerSet = new Set(headers);
 
       const errors: ImportValidationError[] = [];
@@ -530,7 +544,8 @@ export class StudentImportService {
           rowNumber: 0,
           field: "file",
           value: "xlsx",
-          error: "Failed to validate Excel headers. Please ensure the file is a valid .xlsx file.",
+          error:
+            "Failed to validate Excel headers. Please ensure the file is a valid .xlsx file.",
           severity: "error",
         },
       ];
@@ -579,7 +594,10 @@ export class StudentImportService {
       }
 
       // Determine file type and parse accordingly
-      const isExcel = mimeType.includes('spreadsheet') || mimeType.includes('excel') || fileUri.endsWith('.xlsx');
+      const isExcel =
+        mimeType.includes("spreadsheet") ||
+        mimeType.includes("excel") ||
+        fileUri.endsWith(".xlsx");
       let rows: ImportRow[];
 
       if (isExcel) {
@@ -661,13 +679,13 @@ export class StudentImportService {
       if (duplicateIdsInFile.length > 0) {
         console.warn(
           `[Import] Duplicates within file (${duplicateIdsInFile.length}):`,
-          duplicateIdsInFile.join(", ")
+          duplicateIdsInFile.join(", "),
         );
       }
       if (duplicateIdsInDatabase.length > 0) {
         console.warn(
           `[Import] Already exist in database (${duplicateIdsInDatabase.length}):`,
-          duplicateIdsInDatabase.join(", ")
+          duplicateIdsInDatabase.join(", "),
         );
       }
 
@@ -677,14 +695,14 @@ export class StudentImportService {
       const rowsToInsert = validRows.filter((row) => {
         // Check if this row has any validation errors
         const hasValidationError = allErrors.some(
-          (err) => err.rowNumber === row.rowNumber && err.severity === "error"
+          (err) => err.rowNumber === row.rowNumber && err.severity === "error",
         );
-        
+
         // Check if this row has duplicate student ID
         const hasDuplicate = Array.from(duplicates.values()).some((nums) =>
           nums.includes(row.rowNumber),
         );
-        
+
         // Only insert if no errors and no duplicates
         return !hasValidationError && !hasDuplicate;
       });
@@ -694,13 +712,19 @@ export class StudentImportService {
 
       if (rowsToInsert.length > 0) {
         successCount = await this.insertStudentsBatch(rowsToInsert, onProgress);
-        console.log(`[Import] ✓ Successfully imported ${successCount}/${totalRows} students`);
-        
+        console.log(
+          `[Import] ✓ Successfully imported ${successCount}/${totalRows} students`,
+        );
+
         if (duplicateCount > 0) {
-          console.log(`[Import] ⚠ Skipped ${totalRows - successCount} rows due to errors/duplicates`);
+          console.log(
+            `[Import] ⚠ Skipped ${totalRows - successCount} rows due to errors/duplicates`,
+          );
         }
       } else {
-        console.warn(`[Import] ✗ No students imported - all ${totalRows} rows had errors or were duplicates`);
+        console.warn(
+          `[Import] ✗ No students imported - all ${totalRows} rows had errors or were duplicates`,
+        );
       }
 
       onProgress?.(100);
@@ -723,16 +747,20 @@ export class StudentImportService {
         timestamp,
         // Add summary information for better error reporting
         summary: {
-          duplicatesInFile: Array.from(new Set(
-            Array.from(duplicates.entries())
-              .filter(([key]) => !key.startsWith("existing_"))
-              .map(([key]) => key)
-          )),
-          duplicatesInDatabase: Array.from(new Set(
-            Array.from(duplicates.entries())
-              .filter(([key]) => key.startsWith("existing_"))
-              .map(([key]) => key.replace("existing_", ""))
-          )),
+          duplicatesInFile: Array.from(
+            new Set(
+              Array.from(duplicates.entries())
+                .filter(([key]) => !key.startsWith("existing_"))
+                .map(([key]) => key),
+            ),
+          ),
+          duplicatesInDatabase: Array.from(
+            new Set(
+              Array.from(duplicates.entries())
+                .filter(([key]) => key.startsWith("existing_"))
+                .map(([key]) => key.replace("existing_", "")),
+            ),
+          ),
         },
       };
 
@@ -798,7 +826,7 @@ export class StudentImportService {
 
           const newDocRef = doc(studentsRef); // auto-generate Firestore doc ID
           firestoreBatch.set(newDocRef, studentData);
-          
+
           // Store with generated doc ID for cache
           batchStudents.push({
             ...studentData,
@@ -819,10 +847,12 @@ export class StudentImportService {
       try {
         const { StudentDatabaseService } =
           await import("@/services/studentDatabaseService");
-        
+
         // Add students directly to local cache instead of re-downloading everything
         await StudentDatabaseService.addStudentsToCache(allInsertedStudents);
-        console.log(`[Import] Added ${allInsertedStudents.length} students to local cache`);
+        console.log(
+          `[Import] Added ${allInsertedStudents.length} students to local cache`,
+        );
       } catch (cacheError) {
         console.warn(
           "[Import] Local cache update failed (non-critical):",
@@ -834,7 +864,10 @@ export class StudentImportService {
             await import("@/services/studentDatabaseService");
           await StudentDatabaseService.downloadStudentDatabase();
         } catch (fallbackError) {
-          console.warn("[Import] Fallback cache sync also failed:", fallbackError);
+          console.warn(
+            "[Import] Fallback cache sync also failed:",
+            fallbackError,
+          );
         }
       }
 
@@ -908,7 +941,7 @@ export class StudentImportService {
       student_id: row.studentId,
       first_name: row.firstName,
       last_name: row.lastName,
-      email: row.email,
+      email: row.email || `${row.studentId}@gordoncollege.edu.ph`,
       section: row.section,
       is_active: true,
       created_at: new Date().toISOString(),

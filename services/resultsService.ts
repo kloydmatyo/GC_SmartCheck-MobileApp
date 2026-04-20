@@ -1,10 +1,5 @@
 import { auth, db } from "@/config/firebase";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 type StudentNameMap = Map<string, string>;
 type ExamMeta = {
@@ -73,7 +68,9 @@ async function fetchScannedResults(examIds: string[]) {
 
   const snapshots = await Promise.all(
     chunk(examIds, EXAM_CHUNK_SIZE).map((ids) =>
-      getDocs(query(collection(db, "scannedResults"), where("examId", "in", ids))),
+      getDocs(
+        query(collection(db, "scannedResults"), where("examId", "in", ids)),
+      ),
     ),
   );
 
@@ -90,7 +87,9 @@ async function fetchStudentGrades(classIds: string[]) {
 
   const snapshots = await Promise.all(
     chunk(classIds, CLASS_CHUNK_SIZE).map((ids) =>
-      getDocs(query(collection(db, "studentGrades"), where("class_id", "in", ids))),
+      getDocs(
+        query(collection(db, "studentGrades"), where("class_id", "in", ids)),
+      ),
     ),
   );
 
@@ -108,7 +107,9 @@ export class ResultsService {
     return payload.rows.filter((row) => row.examId === examId);
   }
 
-  static async getUnifiedResults(specificExamId?: string): Promise<UnifiedResultsPayload> {
+  static async getUnifiedResults(
+    specificExamId?: string,
+  ): Promise<UnifiedResultsPayload> {
     const currentUser = auth.currentUser;
     if (!currentUser) {
       return { rows: [], classFilters: ["All Classes"] };
@@ -120,12 +121,14 @@ export class ResultsService {
 
     const [classDocs, examDocs] = await Promise.all([
       ClassService.getClassesByUser(),
-      ExamService.getExamsByUser()
+      ExamService.getExamsByUser(),
     ]);
 
     const studentNames: StudentNameMap = new Map();
     classDocs.forEach((classItem) => {
-      const students = Array.isArray(classItem.students) ? classItem.students : [];
+      const students = Array.isArray(classItem.students)
+        ? classItem.students
+        : [];
       students.forEach((student: any) => {
         const name = formatStudentName(student);
         if (student?.student_id && name) {
@@ -138,7 +141,9 @@ export class ResultsService {
     classDocs.forEach((classItem) => {
       classLabelById.set(
         classItem.id,
-        String(classItem.class_name || classItem.section_block || "Unassigned Class"),
+        String(
+          classItem.class_name || classItem.section_block || "Unassigned Class",
+        ),
       );
     });
 
@@ -149,7 +154,12 @@ export class ResultsService {
       const classLabel =
         classLabelById.get(classId) ||
         className ||
-        String(exam.subject || exam.section_block || exam.class || "Unassigned Class");
+        String(
+          exam.subject ||
+            exam.section_block ||
+            exam.class ||
+            "Unassigned Class",
+        );
 
       examMetaById.set(exam.id, {
         id: exam.id,
@@ -163,19 +173,23 @@ export class ResultsService {
     // 2. Fetch Results - Local-First
     const { NetworkService } = await import("./networkService");
     const { RealmService } = await import("./realmService");
-    
+
     const isOnline = await NetworkService.isOnline();
     const stagingRealm = await RealmService.getStagingRealm();
     const cacheRealm = await RealmService.getCacheRealm();
 
     // Strategy: Always get local results first
-    const offlineGrades = specificExamId 
-      ? stagingRealm.objects("OfflineGrade").filtered("examId == $0", specificExamId)
+    const offlineGrades = specificExamId
+      ? stagingRealm
+          .objects("OfflineGrade")
+          .filtered("examId == $0", specificExamId)
       : stagingRealm.objects("OfflineGrade");
 
     // Load from cache regardless of connection state (Fast path)
-    const cachedGrades = specificExamId 
-      ? cacheRealm.objects("GradeCache").filtered("examId == $0", specificExamId)
+    const cachedGrades = specificExamId
+      ? cacheRealm
+          .objects("GradeCache")
+          .filtered("examId == $0", specificExamId)
       : cacheRealm.objects("GradeCache");
 
     const scanDocs = Array.from(cachedGrades).map((g: any) => ({
@@ -189,29 +203,39 @@ export class ResultsService {
         percentage: g.percentage,
         scannedAt: g.createdAt,
         dateScanned: g.createdAt.toISOString(), // Alias for processing
-      }
+      },
     }));
 
     let gradeDocs: any[] = [];
 
-    // If online, supplement with fresh Firestore results. 
+    // If online, supplement with fresh Firestore results.
     // Optimization: If results exist locally, we can return quickly, but for simplicity here we just make the call efficient.
     if (isOnline && (scanDocs.length === 0 || specificExamId)) {
-      console.log("[ResultsService] Online. Supplementing with fresh Firestore data...");
+      console.log(
+        "[ResultsService] Online. Supplementing with fresh Firestore data...",
+      );
       try {
-        const examIdsToFetch = specificExamId ? [specificExamId] : examDocs.map(e => e.id);
-        const classIdsToFetch = specificExamId 
-          ? Array.from(new Set(examDocs.filter(e => e.id === specificExamId).map(e => e.classId))) 
-          : classDocs.map(c => c.id);
+        const examIdsToFetch = specificExamId
+          ? [specificExamId]
+          : examDocs.map((e) => e.id);
+        const classIdsToFetch = specificExamId
+          ? Array.from(
+              new Set(
+                examDocs
+                  .filter((e) => e.id === specificExamId)
+                  .map((e) => e.classId),
+              ),
+            )
+          : classDocs.map((c) => c.id);
 
         if (examIdsToFetch.length > 0) {
           const fetched = await Promise.all([
             fetchScannedResults(examIdsToFetch),
-            fetchStudentGrades(classIdsToFetch.filter(Boolean))
+            fetchStudentGrades(classIdsToFetch.filter(Boolean)),
           ]);
-          
+
           // Merge Firestore results (avoid duplicates if they are already in scanDocs)
-          const seenDocIds = new Set(scanDocs.map(d => d.id));
+          const seenDocIds = new Set(scanDocs.map((d) => d.id));
           fetched[0].forEach((d: any) => {
             if (!seenDocIds.has(d.id)) {
               scanDocs.push(d);
@@ -220,7 +244,10 @@ export class ResultsService {
           gradeDocs = fetched[1];
         }
       } catch (err) {
-        console.warn("[ResultsService] Firestore fetch failed, relying on cache:", err);
+        console.warn(
+          "[ResultsService] Firestore fetch failed, relying on cache:",
+          err,
+        );
       }
     }
 
@@ -235,7 +262,8 @@ export class ResultsService {
 
       const totalQuestions = og.totalQuestions || og.totalPoints || 1;
       const score = og.score || 0;
-      const percentage = og.percentage || Math.round((score / totalQuestions) * 100);
+      const percentage =
+        og.percentage || Math.round((score / totalQuestions) * 100);
       const dateValue = og.dateScanned || og.createdAt.toISOString();
       const studentId = og.studentId;
 
@@ -243,7 +271,8 @@ export class ResultsService {
         id: `offline_${og._id}`,
         source: "scan",
         studentId,
-        studentName: studentNames.get(studentId) || studentId || "Unknown Student",
+        studentName:
+          studentNames.get(studentId) || studentId || "Unknown Student",
         examId,
         examLabel: examMeta?.title || "Offline Scan",
         classId: examMeta?.classId || "",
@@ -259,6 +288,34 @@ export class ResultsService {
       seenKeys.add(`scan:${studentId}:${examId}`);
       seenKeys.add(`grade:${studentId}:${examId}`);
     });
+
+    // If fetching for a specific exam that isn't in the map yet (e.g. race condition
+    // between ExamService cache and Firestore fetch), build a fallback entry so
+    // scan docs are never silently dropped.
+    if (specificExamId && !examMetaById.has(specificExamId)) {
+      const fallbackExam = examDocs.find((e) => e.id === specificExamId);
+      if (fallbackExam) {
+        const classId = String(fallbackExam.classId || "");
+        examMetaById.set(specificExamId, {
+          id: specificExamId,
+          title: String(fallbackExam.title || "Untitled Exam"),
+          classId,
+          classLabel:
+            classLabelById.get(classId) ||
+            String(fallbackExam.className || "Unassigned Class"),
+          subject: String(fallbackExam.subject || ""),
+        });
+      } else {
+        // Last resort: insert a minimal placeholder so results still show
+        examMetaById.set(specificExamId, {
+          id: specificExamId,
+          title: "Exam",
+          classId: "",
+          classLabel: "Unassigned Class",
+          subject: "",
+        });
+      }
+    }
 
     scanDocs.forEach(({ id, data }) => {
       if (!data || (data as any).isNullId) return;
@@ -283,7 +340,8 @@ export class ResultsService {
         id,
         source: "scan",
         studentId,
-        studentName: studentNames.get(studentId) || studentId || "Unknown Student",
+        studentName:
+          studentNames.get(studentId) || studentId || "Unknown Student",
         examId,
         examLabel: examMeta.title,
         classId: examMeta.classId,
@@ -318,18 +376,23 @@ export class ResultsService {
         typeof data.percentage === "number"
           ? Math.round(data.percentage)
           : Math.round((score / totalQuestions) * 100);
-      const dateValue = toIsoDate(data.graded_at || data.createdAt || data.updatedAt);
+      const dateValue = toIsoDate(
+        data.graded_at || data.createdAt || data.updatedAt,
+      );
 
       rows.push({
         id,
         source: "grade",
         studentId,
-        studentName: studentNames.get(studentId) || studentId || "Unknown Student",
+        studentName:
+          studentNames.get(studentId) || studentId || "Unknown Student",
         examId,
         examLabel: examMeta?.title || "Untitled Exam",
         classId: examMeta?.classId || classId,
         classLabel:
-          examMeta?.classLabel || classLabelById.get(classId) || "Unassigned Class",
+          examMeta?.classLabel ||
+          classLabelById.get(classId) ||
+          "Unassigned Class",
         score,
         totalQuestions,
         percentage,
@@ -345,7 +408,9 @@ export class ResultsService {
       rows,
       classFilters: [
         "All Classes",
-        ...Array.from(new Set(rows.map((row) => row.classLabel).filter(Boolean))),
+        ...Array.from(
+          new Set(rows.map((row) => row.classLabel).filter(Boolean)),
+        ),
       ],
     };
   }
