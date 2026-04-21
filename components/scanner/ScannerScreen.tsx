@@ -104,6 +104,7 @@ export default function ScannerScreen({
     null,
   );
   const [scanCount, setScanCount] = useState(0);
+  const [cachedAnswerKey, setCachedAnswerKey] = useState<string[] | null>(null);
 
   // ── 2-Stage scanning state for 200-item exams ───────────────────────────
   const [twoStageData, setTwoStageData] = useState<{
@@ -189,9 +190,37 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
+      setCachedAnswerKey(
+        Array.isArray(selectedExam.answerKey?.answers)
+          ? selectedExam.answerKey.answers
+          : null,
+      );
       // stay in camera mode with exam selected
     }
   }, [selectedExam]);
+
+  React.useEffect(() => {
+    if (!activeExamId) return;
+
+    let cancelled = false;
+    const prefetchAnswerKey = async () => {
+      try {
+        const { ExamService } = await import("../../services/examService");
+        const examData = await ExamService.getExamById(activeExamId);
+        if (cancelled) return;
+        if (Array.isArray(examData?.answerKey?.answers)) {
+          setCachedAnswerKey(examData.answerKey.answers);
+        }
+      } catch (error) {
+        console.warn("[ScannerScreen] answer key prefetch skipped:", error);
+      }
+    };
+
+    prefetchAnswerKey();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeExamId]);
 
   const handleScanComplete = async (
     scanResult: ScanResult,
@@ -271,26 +300,29 @@ export default function ScannerScreen({
 
       // ── 2. Fetch Answer Key (Fast Timeout) ──
       const rawCount = scanResult.answers?.length || 20;
-      let answerKey: string[] = [];
+      let answerKey: string[] = cachedAnswerKey ?? [];
 
-      try {
-        const { ExamService } = await import("../../services/examService");
-        const examData = await withTimeout(
-          ExamService.getExamById(activeExamId),
-          2500,
-        );
-        if (examData?.answerKey?.answers) {
-          answerKey = examData.answerKey.answers;
-        } else {
-          throw new Error("Missing key");
+      if (answerKey.length === 0) {
+        try {
+          const { ExamService } = await import("../../services/examService");
+          const examData = await withTimeout(
+            ExamService.getExamById(activeExamId),
+            2500,
+          );
+          if (examData?.answerKey?.answers) {
+            answerKey = examData.answerKey.answers;
+            setCachedAnswerKey(answerKey);
+          } else {
+            throw new Error("Missing key");
+          }
+        } catch (error) {
+          console.warn(
+            "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
+          );
+          answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
+            (ak) => ak.correctAnswer,
+          );
         }
-      } catch (error) {
-        console.warn(
-          "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
-        );
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.correctAnswer,
-        );
       }
 
       const answerKeyFormatted = answerKey.map((answer, index) => ({
@@ -585,6 +617,7 @@ export default function ScannerScreen({
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
+    setCachedAnswerKey(null);
     // clear selection so reopening starts fresh
     setSelectedClass(null);
     setSelectedExam(null);
