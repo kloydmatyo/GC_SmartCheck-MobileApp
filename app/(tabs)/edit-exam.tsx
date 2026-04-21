@@ -24,7 +24,7 @@ import { ExamService } from "../../services/examService";
 import { ExamMetadata } from "../../types/exam";
 
 export default function EditExamScreen() {
-  const NUM_QUESTIONS_OPTIONS = [20, 50, 100] as const;
+  const NUM_QUESTIONS_OPTIONS = [20, 50, 100, 200] as const;
   const router = useRouter();
   const params = useLocalSearchParams();
   const examId = params.examId as string;
