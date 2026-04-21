@@ -43,6 +43,9 @@ export default function OfflineIndicator() {
     // Initialize network service
     NetworkService.initialize();
 
+    let isMounted = true;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
     // Add listener for network changes
     const unsubscribe = NetworkService.addListener((connected) => {
       if (!isMounted) return;
