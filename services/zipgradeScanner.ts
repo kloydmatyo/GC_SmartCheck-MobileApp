@@ -154,46 +154,57 @@ function clusterByY<T extends { y: number }>(
 }
 
 function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
-  if (rows.length === 0) return [];
-  
-  // Get full rows (close to targetCols bubbles)
-  const fullRows = rows.filter(
-    (r) => r.length >= targetCols - 1 && r.length <= targetCols + 1,
-  );
-  if (fullRows.length === 0) return [];
+  if (rows.length < 2) return [];
   
   // Sort each row by X position (left to right)
-  const sortedRows = fullRows.map((r) => [...r].sort((a, b) => a.x - b.x));
+  const sortedRows = rows.map((r) => [...r].sort((a, b) => a.x - b.x));
   
   // Calculate span of each row (distance from leftmost to rightmost bubble)
-  const spans = sortedRows.map((r) => r[r.length - 1].x - r[0].x);
-  const medianSpan = [...spans].sort((a, b) => a - b)[
-    Math.floor(spans.length / 2)
-  ];
-  
-  // Filter rows with consistent span (within 20% of median)
-  const cleanRows = sortedRows.filter(
-    (_, i) => spans[i] >= medianSpan * 0.8 && spans[i] <= medianSpan * 1.2,
+  const spans = sortedRows.map((r) => 
+    r.length > 1 ? r[r.length - 1].x - r[0].x : 0
   );
-  if (cleanRows.length === 0) return [];
   
-  // CRITICAL FIX: Map bubbles to column indices by X position, not array index
-  // This handles cases where some rows have fewer bubbles (blank columns)
+  // Get median span (excluding zero spans)
+  const validSpans = spans.filter((s) => s > 0).sort((a, b) => a - b);
+  if (validSpans.length === 0) return [];
+  
+  const medianSpan = validSpans[Math.floor(validSpans.length / 2)];
+  const minValidSpan = medianSpan * 0.6; // At least 60% of median
+  const maxValidSpan = medianSpan * 1.4; // At most 140% of median
+  
+  // Use rows with consistent, reasonable spans
+  const cleanRows = sortedRows.filter(
+    (_, i) => spans[i] >= minValidSpan && spans[i] <= maxValidSpan,
+  );
+  
+  if (cleanRows.length < 2) return [];
+  
+  // POSITION-BASED MAPPING: Map each bubble to column based on X position within row
+  // This works for rows with any number of bubbles (1-5)
   const centroids: number[] = Array(targetCols).fill(0);
   const counts: number[] = Array(targetCols).fill(0);
   
   for (const row of cleanRows) {
-    if (row.length < 2) continue; // Skip rows with <2 bubbles
+    if (row.length === 0) continue;
     
     const minX = row[0].x;
     const maxX = row[row.length - 1].x;
-    const colWidth = (maxX - minX) / (targetCols - 1); // Equal spacing between columns
+    const span = maxX - minX;
+    
+    if (span === 0) {
+      // Single bubble - can't determine column
+      continue;
+    }
+    
+    // Calculate column width assuming equal spacing
+    const colWidth = span / (targetCols - 1);
     
     for (const bubble of row) {
-      // Determine which column this bubble belongs to based on X position
       const relativeX = bubble.x - minX;
       let colIdx = Math.round(relativeX / colWidth);
-      colIdx = Math.max(0, Math.min(targetCols - 1, colIdx)); // Clamp to 0-4
+      
+      // Clamp to valid range
+      colIdx = Math.max(0, Math.min(targetCols - 1, colIdx));
       
       centroids[colIdx] += bubble.x;
       counts[colIdx]++;
@@ -208,13 +219,12 @@ function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
     }
   }
   
-  // Ensure we have exactly targetCols centroids, sorted by X position
-  if (result.length === targetCols) {
-    return result.sort((a, b) => a - b);
+  // Must have all 5 column centroids
+  if (result.length !== targetCols) {
+    return [];
   }
   
-  // Fallback if calculation failed
-  return [];
+  return result.sort((a, b) => a - b);
 }
 
 function findModalClusterMedian(values: number[], windowRatio = 0.4): number {
