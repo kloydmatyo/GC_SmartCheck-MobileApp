@@ -52,6 +52,7 @@ export async function scan200ItemPage(
       imageUri,
       markers,
       choicesPerQuestion,
+      true,
     );
     
     // Apply question-number offset for Page 2

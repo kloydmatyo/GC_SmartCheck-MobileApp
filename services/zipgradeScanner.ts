@@ -2,6 +2,8 @@ import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
+const OMR_DEBUG_LOGS = false;
+
 // ═════════════════════════════════════════════════════════════════════════════
 // ZIPGRADE SCANNER SERVICE
 // ═════════════════════════════════════════════════════════════════════════════
@@ -592,15 +594,11 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
-      // 50q sheets should be portrait (tall), but camera may capture landscape
-      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
       let workingMat = srcMat;
+      const imgAspect = srcJs.cols / srcJs.rows;
+      const isLandscape = imgAspect > 1.0;
 
       if (qCount === 50) {
-        const imgAspect = srcJs.cols / srcJs.rows;
-        const isLandscape = imgAspect > 1.0;
-
         // 50q sheets are very tall (aspect ~0.43), should be portrait
         // If we have a 50q exam but image is landscape, rotate 90° clockwise
         if (isLandscape) {
@@ -624,6 +622,24 @@ export class ZipgradeScanner {
           );
           workingMat = rotatedMat;
         }
+      } else if (qCount >= 100 && isLandscape) {
+        // 100q/200q templates are portrait-oriented A4-like sheets.
+        console.log(
+          `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) for ${qCount}q. Rotating 90° clockwise...`,
+        );
+        const rotatedMat = OpenCV.createObject(
+          ObjectType.Mat,
+          0,
+          0,
+          DataTypes.CV_8U,
+        );
+        matsToCleanup.push(rotatedMat);
+        OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+        const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+        console.log(
+          `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+        );
+        workingMat = rotatedMat;
       }
 
       const IMG_W: number = (OpenCV.toJSValue(workingMat) as any).cols;
@@ -994,7 +1010,7 @@ export class ZipgradeScanner {
         );
 
         // Debug: log timing mark details
-        if (timingMarks.length > 0) {
+        if (OMR_DEBUG_LOGS && timingMarks.length > 0) {
           timingMarks.forEach((m, idx) => {
             console.log(
               `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
@@ -1019,14 +1035,132 @@ export class ZipgradeScanner {
       );
       console.log(`[OMR] regMarks: ${regMarks.length}`);
 
+      const getStrict200CornerMarkers = () => {
+        if (regMarks.length < 4) return null;
+
+        const cornerTargets = [
+          { key: "topLeft", x: 0, y: 0 },
+          { key: "topRight", x: imgWidth, y: 0 },
+          { key: "bottomLeft", x: 0, y: imgHeight },
+          { key: "bottomRight", x: imgWidth, y: imgHeight },
+        ] as const;
+
+        const chosenIndices = new Set<number>();
+        const chosen: Record<string, { x: number; y: number }> = {};
+
+        for (const target of cornerTargets) {
+          let bestIdx = -1;
+          let bestScore = Number.POSITIVE_INFINITY;
+          for (let i = 0; i < regMarks.length; i++) {
+            if (chosenIndices.has(i)) continue;
+            const m = regMarks[i];
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            const score = dx * dx + dy * dy;
+            if (score < bestScore) {
+              bestScore = score;
+              bestIdx = i;
+            }
+          }
+
+          if (bestIdx < 0) return null;
+          chosenIndices.add(bestIdx);
+          chosen[target.key] = { x: regMarks[bestIdx].x, y: regMarks[bestIdx].y };
+        }
+
+        const tl = chosen.topLeft;
+        const tr = chosen.topRight;
+        const bl = chosen.bottomLeft;
+        const br = chosen.bottomRight;
+        const minWidth = imgWidth * 0.45;
+        const minHeight = imgHeight * 0.45;
+        const topWidth = Math.abs(tr.x - tl.x);
+        const bottomWidth = Math.abs(br.x - bl.x);
+        const leftHeight = Math.abs(bl.y - tl.y);
+        const rightHeight = Math.abs(br.y - tr.y);
+        const maxCornerOffsetX = imgWidth * 0.25;
+        const maxCornerOffsetY = imgHeight * 0.25;
+
+        const cornersNearImageEdges =
+          tl.x <= maxCornerOffsetX &&
+          tl.y <= maxCornerOffsetY &&
+          tr.x >= imgWidth - maxCornerOffsetX &&
+          tr.y <= maxCornerOffsetY &&
+          bl.x <= maxCornerOffsetX &&
+          bl.y >= imgHeight - maxCornerOffsetY &&
+          br.x >= imgWidth - maxCornerOffsetX &&
+          br.y >= imgHeight - maxCornerOffsetY;
+
+        const geometryLooksValid =
+          topWidth >= minWidth &&
+          bottomWidth >= minWidth &&
+          leftHeight >= minHeight &&
+          rightHeight >= minHeight;
+
+        if (!cornersNearImageEdges || !geometryLooksValid) {
+          return null;
+        }
+
+        return {
+          topLeft: tl,
+          topRight: tr,
+          bottomLeft: bl,
+          bottomRight: br,
+        };
+      };
+
       let paperLeft = imgWidth * 0.03,
         paperRight = imgWidth * 0.97;
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      // Use registration marks for cropping when available (like Main)
-      if (regMarks.length >= 3) {
+      // Use strict corner markers for 200-item sheets.
+      const strict200Corners = qCount === 200 ? getStrict200CornerMarkers() : null;
+
+      if (qCount === 200 && strict200Corners) {
+        paperLeft = Math.max(
+          0,
+          Math.min(
+            strict200Corners.topLeft.x,
+            strict200Corners.bottomLeft.x,
+            strict200Corners.topRight.x,
+            strict200Corners.bottomRight.x,
+          ) - medianW * 2,
+        );
+        paperRight = Math.min(
+          imgWidth,
+          Math.max(
+            strict200Corners.topLeft.x,
+            strict200Corners.bottomLeft.x,
+            strict200Corners.topRight.x,
+            strict200Corners.bottomRight.x,
+          ) + medianW * 2,
+        );
+        paperTop = Math.max(
+          0,
+          Math.min(
+            strict200Corners.topLeft.y,
+            strict200Corners.topRight.y,
+            strict200Corners.bottomLeft.y,
+            strict200Corners.bottomRight.y,
+          ) - medianH * 2,
+        );
+        paperBottom = Math.min(
+          imgHeight,
+          Math.max(
+            strict200Corners.topLeft.y,
+            strict200Corners.topRight.y,
+            strict200Corners.bottomLeft.y,
+            strict200Corners.bottomRight.y,
+          ) + medianH * 2,
+        );
+        console.log(
+          `[OMR] 200q strict crop from 4 corners: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
+        );
+      }
+      // Use registration marks for cropping when available (legacy path).
+      else if (regMarks.length >= 3) {
         const mxs = regMarks.map((m) => m.x).sort((a, b) => a - b);
         const mys = regMarks.map((m) => m.y).sort((a, b) => a - b);
         paperLeft = Math.max(0, mxs[0] - medianW * 2);
@@ -1068,15 +1202,17 @@ export class ZipgradeScanner {
         const yi = Math.min(Math.floor((b.y / paperH) * yBands), yBands - 1);
         grid[yi][xi]++;
       }
-      console.log(`[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`);
-      grid.forEach((row, yi) => {
-        const label = `y${yi * 10}-${yi * 10 + 10}%`;
-        const cells = row
-          .map((v, xi) => (v > 0 ? `x${xi * 10}:${v}` : ""))
-          .filter(Boolean)
-          .join(" ");
-        if (cells) console.log(`  ${label}: ${cells}`);
-      });
+      if (OMR_DEBUG_LOGS) {
+        console.log(`[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`);
+        grid.forEach((row, yi) => {
+          const label = `y${yi * 10}-${yi * 10 + 10}%`;
+          const cells = row
+            .map((v, xi) => (v > 0 ? `x${xi * 10}:${v}` : ""))
+            .filter(Boolean)
+            .join(" ");
+          if (cells) console.log(`  ${label}: ${cells}`);
+        });
+      }
 
       // ── 8. Auto-detect sheet type if not explicitly set ──────────────────
       // For 20q: use simple bubble count heuristic (like Main)
@@ -1236,6 +1372,17 @@ export class ZipgradeScanner {
 
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
+        if (qCount === 200 && strict200Corners) {
+          console.log(
+            "[OMR] Corner markers:",
+            `TL=(${Math.round(strict200Corners.topLeft.x)},${Math.round(strict200Corners.topLeft.y)})`,
+            `TR=(${Math.round(strict200Corners.topRight.x)},${Math.round(strict200Corners.topRight.y)})`,
+            `BL=(${Math.round(strict200Corners.bottomLeft.x)},${Math.round(strict200Corners.bottomLeft.y)})`,
+            `BR=(${Math.round(strict200Corners.bottomRight.x)},${Math.round(strict200Corners.bottomRight.y)})`,
+          );
+          return strict200Corners;
+        }
+
         const sortedMarks = [...regMarks].sort(
           (a, b) => a.y - b.y || a.x - b.x,
         );
@@ -1316,7 +1463,7 @@ export class ZipgradeScanner {
       };
 
       // ── 200-item template: brightness scanning with page offset ──────────
-      if (qCount === 200 && regMarks.length >= 3) {
+      if (qCount === 200 && strict200Corners) {
         const currentPage = pageNumber || 1;
         console.log(
           `[OMR] Using BRIGHTNESS scanning for 200-item template Page ${currentPage} (Skia pixel sampling)`,
@@ -1337,37 +1484,10 @@ export class ZipgradeScanner {
           `[OMR] 200Q Page ${currentPage}: Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
       }
-      // ── 200-item fallback: estimate corners from paper bounds ──────────
+      // ── 200-item strict guard: require all four edge corner boxes ───────
       else if (qCount === 200) {
-        const currentPage = pageNumber || 1;
-        console.warn(
-          `[OMR] Only ${regMarks.length} corner markers found for 200-item template. Using estimated corners from paper bounds.`,
-        );
-
-        const { scan200ItemPage } = require("./brightnessScannerFor200Item");
-        // Estimate corners from the detected paper boundaries
-        const estimatedMarkers = {
-          topLeft: { x: paperLeft, y: paperTop },
-          topRight: { x: paperRight, y: paperTop },
-          bottomLeft: { x: paperLeft, y: paperBottom },
-          bottomRight: { x: paperRight, y: paperBottom },
-        };
-
-        console.log(
-          `[OMR] Estimated markers: TL=(${Math.round(paperLeft)},${Math.round(paperTop)}) BR=(${Math.round(paperRight)},${Math.round(paperBottom)})`,
-        );
-
-        allAnswers = await scan200ItemPage(
-          imageUri,
-          estimatedMarkers,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        const rangeStart = currentPage === 1 ? 1 : 101;
-        const rangeEnd = currentPage === 1 ? 100 : 200;
-        console.log(
-          `[OMR] 200Q Page ${currentPage} (fallback): Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+        throw new Error(
+          "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
         );
       }
       // ── 100-item template: brightness scanning ──────────────────────────
@@ -1466,8 +1586,14 @@ export class ZipgradeScanner {
         .padStart(8, "0")
         .slice(0, 8);
       console.log(`[OMR] Final studentId: ${numericId}`);
-      console.log("--- OPENCV EXTRACTED ANSWERS ---");
-      console.log(JSON.stringify(finalAnswers, null, 2));
+      if (OMR_DEBUG_LOGS) {
+        console.log("--- OPENCV EXTRACTED ANSWERS ---");
+        console.log(JSON.stringify(finalAnswers, null, 2));
+      } else {
+        console.log(
+          `[OMR] Answers extracted: ${finalAnswers.filter((a) => !!a.selectedAnswer).length}/${finalAnswers.length}`,
+        );
+      }
 
       return {
         studentId: numericId,
@@ -1477,6 +1603,9 @@ export class ZipgradeScanner {
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);
+      if (error instanceof Error && error.message) {
+        throw error;
+      }
       throw new Error("Failed to process Zipgrade answer sheet");
     } finally {
       // Explicitly clear all OpenCV buffers and release memory

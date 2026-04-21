@@ -263,26 +263,8 @@ export default function ScannerScreen({
             collection(db, "students"),
             where("studentId", "==", studentId),
           );
-          const snap = await withTimeout(getDocs(q), 2000);
+          const snap = await withTimeout(getDocs(q), 1200);
           isValidId = !snap.empty;
-
-          if (!isValidId) {
-            // Fallback to class check
-            const classesSnapshot = await withTimeout(
-              getDocs(collection(db, "classes")),
-              2500,
-            );
-            for (const classDoc of classesSnapshot.docs) {
-              if (
-                classDoc
-                  .data()
-                  .students?.some((s: any) => s.student_id === studentId)
-              ) {
-                isValidId = true;
-                break;
-              }
-            }
-          }
         } catch (err) {
           console.warn(
             "[ScannerScreen] Student verification timed out. Assuming valid.",
@@ -348,7 +330,7 @@ export default function ScannerScreen({
             result,
             activeExamId,
           ),
-          2000,
+          900,
         );
       } catch (err) {
         /* proceed if check hangs */
@@ -410,7 +392,10 @@ export default function ScannerScreen({
         page1Result: scanResult,
         page1Image: imageUri,
       });
-      setShowPage1Confirmation(true);
+      // Speed optimization: jump directly to page 2 capture.
+      setShowPage1Confirmation(false);
+      setTwoStageCurrent(2);
+      setScanCount((prev) => prev + 1);
     } else {
       // Stage 2: Merge with Page 1 data
       if (!twoStageData?.page1Result) {
