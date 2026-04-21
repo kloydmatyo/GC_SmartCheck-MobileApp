@@ -23,7 +23,10 @@ export interface AuditLog {
     | "complete"
     | "print"
     | "scan"
-    | "status_change"; // Add status change action
+    | "status_change"
+    | "archive"
+    | "unarchive"
+    | "restore";
   changes?: Record<string, { old: any; new: any }>;
   metadata?: Record<string, any>;
   timestamp: Date;
@@ -33,6 +36,49 @@ export interface AuditLog {
 }
 
 export class AuditLogService {
+  /**
+   * Generic log action (Offline-aware)
+   */
+  static async logAction(
+    type: "exam" | "class" | "result",
+    action: AuditLog["action"],
+    targetId: string,
+    metadata?: Record<string, any>,
+    changes?: Record<string, { old: any; new: any }>,
+  ): Promise<void> {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      const payload = {
+        examId: type === "exam" ? targetId : "",
+        userId: currentUser.uid,
+        action,
+        metadata,
+        changes,
+        timestamp: new Date(),
+        deviceInfo: "Mobile App",
+      };
+
+      if (!isOnline) {
+        const { OfflineStorageService } = await import("./offlineStorageService");
+        await OfflineStorageService.queueUpdate(targetId, "audit_log", payload);
+        return;
+      }
+
+      // Online Path
+      const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+      await addDoc(collection(db, "audit_logs"), {
+        ...payload,
+        timestamp: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error(`Error logging action ${action} for ${type}:`, error);
+    }
+  }
   private static sanitizeForFirestore(value: any): any {
     if (value === undefined) {
       return null;

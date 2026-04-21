@@ -4,13 +4,14 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getDocs, query,
+  getDocs,
+  query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
   where,
-  limit
+  limit,
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
@@ -61,7 +62,7 @@ export class SyncService {
    */
   static async syncPendingUpdates(): Promise<SyncResult> {
     if (this.isSyncing) {
-      console.log("⏳ Sync already in progress");
+      console.log("Sync already in progress");
       return {
         success: false,
         syncedCount: 0,
@@ -72,7 +73,7 @@ export class SyncService {
 
     const isOnline = await NetworkService.isOnline();
     if (!isOnline) {
-      console.log("📡 Device is offline, skipping sync");
+      console.log("Device is offline, skipping sync");
       return {
         success: false,
         syncedCount: 0,
@@ -88,19 +89,49 @@ export class SyncService {
 
     try {
       // 1. Flush Grades from Staging
-      try { await this.syncStagingGrades(); syncedCount++; } catch (e) { console.error("Flush Grades Error", e); failedCount++; }
+      try {
+        await this.syncStagingGrades();
+        syncedCount++;
+      } catch (e) {
+        console.error("Flush Grades Error", e);
+        failedCount++;
+      }
 
       // 2. Flush Classes from Staging
-      try { await this.syncStagingClasses(); syncedCount++; } catch (e) { console.error("Flush Classes Error", e); failedCount++; }
+      try {
+        await this.syncStagingClasses();
+        syncedCount++;
+      } catch (e) {
+        console.error("Flush Classes Error", e);
+        failedCount++;
+      }
 
       // 3. Flush Exams from Staging
-      try { await this.syncStagingExams(); syncedCount++; } catch (e) { console.error("Flush Exams Error", e); failedCount++; }
+      try {
+        await this.syncStagingExams();
+        syncedCount++;
+      } catch (e) {
+        console.error("Flush Exams Error", e);
+        failedCount++;
+      }
 
-      // 4. Flush Pending Updates (AsyncStorage)
-      try { await this.processAsyncStorageUpdates(); syncedCount++; } catch (e) { console.error("Process Updates Error", e); failedCount++; }
+      // 4. Flush Pending Updates (RealmDB)
+      try {
+        await this.processPendingUpdates();
+        syncedCount++;
+      } catch (e) {
+        console.error("Process Updates Error", e);
+        failedCount++;
+      }
 
       // 5. Update the Cache Realm from Firestore
-      try { await this.syncFirestoreToCache(); syncedCount++; } catch (e) { console.error("Refresh Cache Error", e); failedCount++; }
+      try {
+        await this.syncFirestoreToCache();
+        syncedCount++;
+      } catch (e) {
+        console.error("Refresh Cache Error", e);
+        failedCount++;
+      }
 
       const result: SyncResult = {
         success: failedCount === 0,
@@ -109,7 +140,9 @@ export class SyncService {
         conflicts: [],
       };
 
-      console.log(`✅ Full sync complete. Synced: ${syncedCount}, Failed: ${failedCount}`);
+      console.log(
+        `Full sync complete. Synced: ${syncedCount}, Failed: ${failedCount}`,
+      );
       this.notifyListeners(result);
       return result;
     } catch (error) {
@@ -135,27 +168,46 @@ export class SyncService {
     const realm = await RealmService.getCacheRealm();
 
     // Sync Classes
-    const classesQuery = query(collection(db, "classes"), where("createdBy", "==", currentUser.uid));
+    const classesQuery = query(
+      collection(db, "classes"),
+      where("createdBy", "==", currentUser.uid),
+    );
     const classesSnap = await getDocs(classesQuery);
 
     // Sync Exams + their latest answer keys
-    const examsQuery = query(collection(db, "exams"), where("createdBy", "==", currentUser.uid));
+    const examsQuery = query(
+      collection(db, "exams"),
+      where("createdBy", "==", currentUser.uid),
+    );
     const examsSnap = await getDocs(examsQuery);
     const examsWithAK: any[] = [];
 
     for (const examDoc of examsSnap.docs) {
-      const akQuery = query(collection(db, "answerKeys"), where("examId", "==", examDoc.id));
+      const akQuery = query(
+        collection(db, "answerKeys"),
+        where("examId", "==", examDoc.id),
+      );
       const akSnap = await getDocs(akQuery);
       let answerKeyJson = "";
       if (!akSnap.empty) {
-        const latestAk = akSnap.docs.sort((a, b) => (b.data().version || 0) - (a.data().version || 0))[0];
+        const latestAk = akSnap.docs.sort(
+          (a, b) => (b.data().version || 0) - (a.data().version || 0),
+        )[0];
         answerKeyJson = JSON.stringify(latestAk.data());
       }
-      examsWithAK.push({ id: examDoc.id, data: examDoc.data(), answerKey: answerKeyJson });
+      examsWithAK.push({
+        id: examDoc.id,
+        data: examDoc.data(),
+        answerKey: answerKeyJson,
+      });
     }
 
     // Sync Grades (limit to 100 recent)
-    const gradesQuery = query(collection(db, "scannedResults"), where("scannedBy", "==", currentUser.uid), limit(100));
+    const gradesQuery = query(
+      collection(db, "scannedResults"),
+      where("scannedBy", "==", currentUser.uid),
+      limit(100),
+    );
     const gradesSnap = await getDocs(gradesQuery);
 
     realm.write(() => {
@@ -165,7 +217,7 @@ export class SyncService {
       realm.delete(realm.objects("GradeCache"));
 
       // Insert fresh classes
-      classesSnap.docs.forEach(doc => {
+      classesSnap.docs.forEach((doc) => {
         const data = doc.data();
         realm.create("ClassCache", {
           id: doc.id,
@@ -180,7 +232,7 @@ export class SyncService {
       });
 
       // Insert fresh exams
-      examsWithAK.forEach(item => {
+      examsWithAK.forEach((item) => {
         realm.create("QuizCache", {
           id: item.id,
           title: item.data.title,
@@ -199,7 +251,7 @@ export class SyncService {
       });
 
       // Insert fresh grades
-      gradesSnap.docs.forEach(doc => {
+      gradesSnap.docs.forEach((doc) => {
         const data = doc.data();
         realm.create("GradeCache", {
           id: doc.id,
@@ -295,6 +347,22 @@ export class SyncService {
           });
         }
 
+        // Create initial template for consistency with CreateQuizScreen
+        try {
+          await setDoc(doc(db, "templates", `temp_${examRef.id}`), {
+            name: `${sQuiz.title}_Template`,
+            numQuestions: sQuiz.questionCount,
+            choicesPerQuestion: sQuiz.choicesPerItem || 4,
+            createdBy: sQuiz.createdBy,
+            examId: examRef.id,
+            examName: sQuiz.title,
+            examCode: sQuiz.examCode || "",
+            createdAt: Timestamp.now(),
+          });
+        } catch (templateErr) {
+          console.warn("Failed to sync template for staging quiz:", templateErr);
+        }
+
         realm.write(() => {
           realm.delete(sQuiz);
         });
@@ -304,7 +372,7 @@ export class SyncService {
     }
   }
 
-  private static async processAsyncStorageUpdates(): Promise<void> {
+  private static async processPendingUpdates(): Promise<void> {
     const pendingUpdates = await OfflineStorageService.getPendingUpdates();
     if (pendingUpdates.length === 0) return;
 
@@ -374,8 +442,52 @@ export class SyncService {
         return null;
       }
 
+      if (update.action === "update-answer-key") {
+        const { collection, query, where, getDocs } = await import("firebase/firestore");
+        const q = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", update.examId),
+        );
+        const snap = await getDocs(q);
+
+        let akRef;
+        let version = 1;
+
+        if (!snap.empty) {
+          akRef = doc(db, "answerKeys", snap.docs[0].id);
+          version = (snap.docs[0].data().version || 1) + 1;
+        } else {
+          akRef = doc(collection(db, "answerKeys"));
+        }
+
+        const answers = update.data.answers;
+        await setDoc(akRef, {
+          examId: update.examId,
+          answers,
+          version,
+          updatedAt: serverTimestamp(),
+          createdBy: currentUser.uid,
+          locked: false,
+          questionSettings: answers.map((a: string, i: number) => ({
+            questionNumber: i + 1,
+            correctAnswer: a,
+            points: 1,
+          })),
+        }, { merge: true });
+        return null;
+      }
+
       if (update.action === "delete") {
         await deleteDoc(examRef);
+        return null;
+      }
+
+      if (update.action === "audit_log") {
+        const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+        await addDoc(collection(db, "audit_logs"), {
+          ...update.data,
+          timestamp: serverTimestamp(), // Use server time for synced logs
+        });
         return null;
       }
 

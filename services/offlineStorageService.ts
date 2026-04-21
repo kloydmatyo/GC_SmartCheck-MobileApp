@@ -23,7 +23,7 @@ export interface DownloadedExam {
 export interface PendingUpdate {
   id: string;
   examId: string;
-  action: "create" | "update" | "delete";
+  action: "create" | "update" | "delete" | "audit_log" | "update-answer-key";
   data: any;
   timestamp: Date;
   retryCount: number;
@@ -132,7 +132,7 @@ export class OfflineStorageService {
    */
   static async queueUpdate(
     examId: string,
-    action: "create" | "update" | "delete",
+    action: "create" | "update" | "delete" | "audit_log" | "update-answer-key",
     data: any,
   ): Promise<void> {
     try {

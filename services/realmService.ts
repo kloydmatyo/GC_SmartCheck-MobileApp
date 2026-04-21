@@ -131,6 +131,26 @@ export class OfflinePendingUpdate extends Realm.Object<OfflinePendingUpdate> {
   };
 }
 
+export class ScanHistory extends Realm.Object<ScanHistory> {
+  _id!: Realm.BSON.ObjectId;
+  timestamp!: number;
+  data!: string; // JSON string of GradingResult
+  studentId!: string;
+  examId!: string;
+
+  static schema: Realm.ObjectSchema = {
+    name: "ScanHistory",
+    primaryKey: "_id",
+    properties: {
+      _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
+      timestamp: { type: "int", indexed: true },
+      data: "string",
+      studentId: "string",
+      examId: "string",
+    },
+  };
+}
+
 export class SystemKV extends Realm.Object<SystemKV> {
   key!: string;
   value!: string;
@@ -296,8 +316,9 @@ const STAGING_CONFIG: Realm.Configuration = {
     OfflineQuiz,
     OfflinePendingUpdate,
     SystemKV,
+    ScanHistory,
   ],
-  schemaVersion: 11,
+  schemaVersion: 12,
   onMigration: (oldRealm: any, newRealm: any) => {
     if (oldRealm.schemaVersion < 8) {
       const oldObjects = oldRealm.objects("OfflineClass");
