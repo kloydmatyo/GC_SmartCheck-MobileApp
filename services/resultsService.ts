@@ -1,5 +1,11 @@
 import { auth, db } from "@/config/firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  QueryDocumentSnapshot,
+} from "firebase/firestore";
 
 type StudentNameMap = Map<string, string>;
 type ExamMeta = {
@@ -68,14 +74,19 @@ async function fetchScannedResults(examIds: string[]) {
 
   const snapshots = await Promise.all(
     chunk(examIds, EXAM_CHUNK_SIZE).map((ids) =>
-      getDocs(
-        query(collection(db, "scannedResults"), where("examId", "in", ids)),
-      ),
+      Promise.race([
+        getDocs(
+          query(collection(db, "scannedResults"), where("examId", "in", ids)),
+        ),
+        new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout")), 3000),
+        ),
+      ]),
     ),
   );
 
   return snapshots.flatMap((snapshot) =>
-    snapshot.docs.map((docSnap) => ({
+    snapshot.docs.map((docSnap: QueryDocumentSnapshot) => ({
       id: docSnap.id,
       data: docSnap.data(),
     })),
@@ -87,14 +98,19 @@ async function fetchStudentGrades(classIds: string[]) {
 
   const snapshots = await Promise.all(
     chunk(classIds, CLASS_CHUNK_SIZE).map((ids) =>
-      getDocs(
-        query(collection(db, "studentGrades"), where("class_id", "in", ids)),
-      ),
+      Promise.race([
+        getDocs(
+          query(collection(db, "studentGrades"), where("class_id", "in", ids)),
+        ),
+        new Promise<any>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout")), 3000),
+        ),
+      ]),
     ),
   );
 
   return snapshots.flatMap((snapshot) =>
-    snapshot.docs.map((docSnap) => ({
+    snapshot.docs.map((docSnap: QueryDocumentSnapshot) => ({
       id: docSnap.id,
       data: docSnap.data(),
     })),

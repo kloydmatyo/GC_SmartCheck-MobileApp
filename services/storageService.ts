@@ -2,10 +2,45 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as FileSystem from "expo-file-system/legacy";
 import { GradingResult } from "../types/scanning";
+import { RealmService, ScanHistory } from "./realmService";
 
 const STORAGE_KEY = "@scans_history";
+const MIGRATION_KEY = "@scans_history_migrated_to_realm";
 
 export class StorageService {
+  /**
+   * Helper to ensure data is migrated from AsyncStorage to Realm
+   */
+  private static async ensureMigrated(): Promise<void> {
+    try {
+      const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
+      if (migrated === "true") return;
+
+      console.log("[StorageService] Migrating history from AsyncStorage to Realm...");
+      const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
+      if (historyStr) {
+        const history: GradingResult[] = JSON.parse(historyStr);
+        const realm = await RealmService.getStagingRealm();
+        
+        realm.write(() => {
+          for (const item of history) {
+            realm.create("ScanHistory", {
+              timestamp: item.metadata?.timestamp || Date.now(),
+              data: JSON.stringify(item),
+              studentId: item.studentId || "unknown",
+              examId: item.examId || "unknown",
+            });
+          }
+        });
+      }
+
+      await AsyncStorage.setItem(MIGRATION_KEY, "true");
+      console.log("[StorageService] Migration complete.");
+    } catch (err) {
+      console.error("[StorageService] Migration failed:", err);
+    }
+  }
+
   /**
    * Save a grading result to local storage and move the image to the app's document directory
    */
@@ -20,7 +55,6 @@ export class StorageService {
       const newPath = `${FileSystem.documentDirectory}${filename}`;
 
       if (imageUri.startsWith("data:")) {
-        // Extract base64 without the prefix
         const base64Data = imageUri.split(",")[1];
         await FileSystem.writeAsStringAsync(newPath, base64Data, {
           encoding: FileSystem.EncodingType.Base64,
@@ -45,52 +79,19 @@ export class StorageService {
         },
       };
 
-      // 3. Save to AsyncStorage
-      let history: GradingResult[] = [];
-      try {
-        const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
-        history = historyStr ? JSON.parse(historyStr) : [];
-      } catch (readError) {
-        // If storage is corrupted, clear it and start fresh
-        if (
-          readError instanceof Error &&
-          readError.message.includes("CursorWindow")
-        ) {
-          console.warn(
-            "[StorageService] Corrupted storage detected, clearing...",
-          );
-          await AsyncStorage.removeItem(STORAGE_KEY);
-          history = [];
-        } else {
-          throw readError;
-        }
-      }
+      // 3. Save to Realm
+      const realm = await RealmService.getStagingRealm();
+      realm.write(() => {
+        realm.create("ScanHistory", {
+          timestamp: scanWithMeta.metadata?.timestamp || Date.now(),
+          data: JSON.stringify(scanWithMeta),
+          studentId: scanWithMeta.studentId || "unknown",
+          examId: scanWithMeta.examId || "unknown",
+        });
+      });
 
-      history.unshift(scanWithMeta); // Add to the top
-
-      // Limit history to 100 items to prevent CursorWindow overflow
-      const trimmedHistory = history.slice(0, 100);
-
-      // Delete images for removed items
-      if (history.length > 100) {
-        for (let i = 100; i < history.length; i++) {
-          const item = history[i];
-          if (item.metadata?.imageUri) {
-            try {
-              const fileInfo = await FileSystem.getInfoAsync(
-                item.metadata.imageUri,
-              );
-              if (fileInfo.exists) {
-                await FileSystem.deleteAsync(item.metadata.imageUri);
-              }
-            } catch (err) {
-              console.warn("Failed to delete old image:", err);
-            }
-          }
-        }
-      }
-
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedHistory));
+      // 4. Limit history to 100 items (Realm is efficient, but we want to keep it tidy)
+      await this.trimHistory(100);
 
       return scanWithMeta;
     } catch (error) {
@@ -107,25 +108,20 @@ export class StorageService {
     newStudentId: string,
   ): Promise<void> {
     try {
-      const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!historyStr) return;
+      await this.ensureMigrated();
+      const realm = await RealmService.getStagingRealm();
+      const records = realm.objects<ScanHistory>("ScanHistory").filtered("timestamp == $0", timestamp);
 
-      let history: GradingResult[] = JSON.parse(historyStr);
-      let found = false;
-
-      history = history.map((item) => {
-        if (item.metadata?.timestamp === timestamp) {
-          found = true;
-          return { ...item, studentId: newStudentId };
-        }
-        return item;
-      });
-
-      if (found) {
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-        console.log(
-          `[StorageService] Updated student ID to ${newStudentId} for scan at ${timestamp}`,
-        );
+      if (records.length > 0) {
+        realm.write(() => {
+          for (const record of records) {
+            const data = JSON.parse(record.data);
+            data.studentId = newStudentId;
+            record.data = JSON.stringify(data);
+            record.studentId = newStudentId;
+          }
+        });
+        console.log(`[StorageService] Updated student ID to ${newStudentId} in Realm`);
       }
     } catch (error) {
       console.error("Failed to update student ID in history:", error);
@@ -134,37 +130,17 @@ export class StorageService {
   }
 
   /**
-   * Get all scan history (with safety limit to prevent CursorWindow overflow)
+   * Get all scan history
    */
   static async getHistory(): Promise<GradingResult[]> {
     try {
-      const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!historyStr) return [];
+      await this.ensureMigrated();
+      const realm = await RealmService.getStagingRealm();
+      const history = realm.objects<ScanHistory>("ScanHistory").sorted("timestamp", true);
 
-      const history: GradingResult[] = JSON.parse(historyStr);
-
-      // Safety limit: only return most recent 100 scans to prevent CursorWindow overflow
-      // If you need older scans, use pagination methods
-      return history.slice(0, 100);
+      return Array.from(history).map(record => JSON.parse(record.data));
     } catch (error) {
       console.error("Failed to load history:", error);
-
-      // If error is due to data being too large, clear it completely
-      if (error instanceof Error && error.message.includes("CursorWindow")) {
-        console.warn(
-          "[StorageService] History corrupted (too large), clearing storage...",
-        );
-        try {
-          // Nuclear option: clear without reading
-          await AsyncStorage.removeItem(STORAGE_KEY);
-          console.log("[StorageService] Storage cleared successfully");
-          return [];
-        } catch (clearError) {
-          console.error("Failed to clear corrupted storage:", clearError);
-          return [];
-        }
-      }
-
       return [];
     }
   }
@@ -174,8 +150,11 @@ export class StorageService {
    */
   static async getRecentScans(limit: number = 50): Promise<GradingResult[]> {
     try {
-      const history = await this.getHistory();
-      return history.slice(0, limit);
+      await this.ensureMigrated();
+      const realm = await RealmService.getStagingRealm();
+      const history = realm.objects<ScanHistory>("ScanHistory").sorted("timestamp", true).slice(0, limit);
+
+      return Array.from(history).map(record => JSON.parse(record.data));
     } catch (error) {
       console.error("Failed to load recent scans:", error);
       return [];
@@ -192,15 +171,23 @@ export class StorageService {
       // Delete images
       for (const item of history) {
         if (item.metadata?.imageUri) {
-          const fileInfo = await FileSystem.getInfoAsync(
-            item.metadata.imageUri,
-          );
-          if (fileInfo.exists) {
-            await FileSystem.deleteAsync(item.metadata.imageUri);
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(item.metadata.imageUri);
+            if (fileInfo.exists) {
+              await FileSystem.deleteAsync(item.metadata.imageUri);
+            }
+          } catch (e) {
+            console.warn("Failed to delete image:", e);
           }
         }
       }
 
+      const realm = await RealmService.getStagingRealm();
+      realm.write(() => {
+        realm.delete(realm.objects("ScanHistory"));
+      });
+
+      // Also clear legacy storage
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch (error) {
       console.error("Failed to clear history:", error);
@@ -210,44 +197,38 @@ export class StorageService {
 
   /**
    * Trim history to keep only the most recent N items
-   * Used for recovery when storage gets too large
    */
   static async trimHistory(keepCount: number = 50): Promise<void> {
     try {
-      const historyStr = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!historyStr) return;
-
-      const history: GradingResult[] = JSON.parse(historyStr);
+      const realm = await RealmService.getStagingRealm();
+      const history = realm.objects<ScanHistory>("ScanHistory").sorted("timestamp", true);
 
       if (history.length <= keepCount) return;
 
-      // Keep only the most recent items
-      const trimmed = history.slice(0, keepCount);
-      const removed = history.slice(keepCount);
-
+      const toDelete = history.slice(keepCount);
+      
       // Delete images for removed items
-      for (const item of removed) {
-        if (item.metadata?.imageUri) {
-          try {
-            const fileInfo = await FileSystem.getInfoAsync(
-              item.metadata.imageUri,
-            );
+      for (const record of toDelete) {
+        try {
+          const data = JSON.parse(record.data);
+          if (data.metadata?.imageUri) {
+            const fileInfo = await FileSystem.getInfoAsync(data.metadata.imageUri);
             if (fileInfo.exists) {
-              await FileSystem.deleteAsync(item.metadata.imageUri);
+              await FileSystem.deleteAsync(data.metadata.imageUri);
             }
-          } catch (err) {
-            console.warn("Failed to delete old image:", err);
           }
+        } catch (err) {
+          console.warn("Failed to delete old image during trim:", err);
         }
       }
 
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-      console.log(
-        `[StorageService] Trimmed history from ${history.length} to ${keepCount} items`,
-      );
+      realm.write(() => {
+        realm.delete(toDelete);
+      });
+
+      console.log(`[StorageService] Trimmed history to ${keepCount} items in Realm`);
     } catch (error) {
       console.error("Failed to trim history:", error);
-      throw error;
     }
   }
 }

@@ -16,7 +16,6 @@ import {
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   ScrollView,
@@ -91,7 +90,6 @@ const formatDate = (dateValue: any): string => {
 };
 
 export default function TemplatesScreen() {
-  const router = useRouter();
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -792,7 +790,7 @@ export default function TemplatesScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Delete Template</Text>
             <Text style={styles.modalMessage}>
-              Are you sure you want to delete "{selectedTemplate?.name}"? This
+              Are you sure you want to delete &quot;{selectedTemplate?.name}&quot;? This
               action cannot be undone.
             </Text>
             <View style={styles.modalButtons}>
@@ -825,7 +823,7 @@ export default function TemplatesScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Archive Template</Text>
             <Text style={styles.modalMessage}>
-              Are you sure you want to archive "{selectedTemplate?.name}"? You
+              Are you sure you want to archive &quot;{selectedTemplate?.name}&quot;? You
               can restore it later from the archived templates view.
             </Text>
             <View style={styles.modalButtons}>

@@ -126,9 +126,13 @@ export default function EditExamScreen() {
   }, [examId]);
 
   useEffect(() => {
-    checkForChanges();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, totalQuestions, choicesPerItem]);
+    if (!originalMetadata) return;
+    const changed =
+      title !== originalMetadata.title ||
+      totalQuestions !== initialTotalQuestions ||
+      choicesPerItem !== initialChoicesPerItem;
+    setHasChanges(changed);
+  }, [title, totalQuestions, choicesPerItem, originalMetadata, initialTotalQuestions, initialChoicesPerItem]);
 
   const loadExamData = async () => {
     try {
@@ -217,16 +221,6 @@ export default function EditExamScreen() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const checkForChanges = () => {
-    if (!originalMetadata) return;
-
-    const changed =
-      title !== originalMetadata.title ||
-      totalQuestions !== initialTotalQuestions ||
-      choicesPerItem !== initialChoicesPerItem;
-    setHasChanges(changed);
   };
 
   const validateInputs = (): boolean => {
@@ -349,11 +343,10 @@ export default function EditExamScreen() {
         throw new Error("User not authenticated");
       }
 
-      const { doc, getDoc } = await import("firebase/firestore");
-      const latestExamSnap = await getDoc(doc(db, "exams", examId));
-      const latestVersion = latestExamSnap.exists()
-        ? Number(latestExamSnap.data().version ?? version ?? 1)
-        : version;
+      const { NetworkService } = await import("@/services/networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      const latestVersion = version;
 
       const startTime = Date.now();
 
@@ -395,46 +388,48 @@ export default function EditExamScreen() {
       updateApplied = true;
       persistedVersion = updatedVersion;
 
-      // Log audit trail
-      await AuditLogService.logExamEdit(
-        examId,
-        currentUser.uid,
-        changes,
-        updatedVersion,
-        true,
-      );
-
-      // Update template if it exists
-      try {
-        const { collection, query, where, getDocs, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
-        const templatesQuery = query(
-          collection(db, "templates"),
-          where("examId", "==", examId)
+      if (isOnline && !examId.startsWith("staging_")) {
+        // Log audit trail
+        await AuditLogService.logExamEdit(
+          examId,
+          currentUser.uid,
+          changes,
+          updatedVersion,
+          true,
         );
-        const templatesSnapshot = await getDocs(templatesQuery);
-        
-        if (!templatesSnapshot.empty) {
-          const templateDoc = templatesSnapshot.docs[0];
-          const templateUpdateData: any = {
-            examName: updateData.title,
-            questionCount: updateData.num_items,
-            choicesPerItem: updateData.choices_per_item,
-            updatedAt: serverTimestamp(),
-            updatedBy: currentUser.uid,
-          };
+
+        // Update template if it exists
+        try {
+          const { collection, query, where, getDocs, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+          const templatesQuery = query(
+            collection(db, "templates"),
+            where("examId", "==", examId)
+          );
+          const templatesSnapshot = await getDocs(templatesQuery);
           
-          // Update template name if exam title changed
-          if (changes.title) {
-            templateUpdateData.name = `${updateData.title}_Template`;
-            templateUpdateData.description = `Answer sheet template for ${updateData.title}`;
+          if (!templatesSnapshot.empty) {
+            const templateDoc = templatesSnapshot.docs[0];
+            const templateUpdateData: any = {
+              examName: updateData.title,
+              questionCount: updateData.num_items,
+              choicesPerItem: updateData.choices_per_item,
+              updatedAt: serverTimestamp(),
+              updatedBy: currentUser.uid,
+            };
+            
+            // Update template name if exam title changed
+            if (changes.title) {
+              templateUpdateData.name = `${updateData.title}_Template`;
+              templateUpdateData.description = `Answer sheet template for ${updateData.title}`;
+            }
+            
+            await updateDoc(doc(db, "templates", templateDoc.id), templateUpdateData);
+            console.log("Template updated successfully");
           }
-          
-          await updateDoc(doc(db, "templates", templateDoc.id), templateUpdateData);
-          console.log("Template updated successfully");
+        } catch (templateError) {
+          console.error("Error updating template:", templateError);
+          // Don't fail the exam update if template update fails
         }
-      } catch (templateError) {
-        console.error("Error updating template:", templateError);
-        // Don't fail the exam update if template update fails
       }
 
       const endTime = Date.now();
@@ -551,11 +546,17 @@ export default function EditExamScreen() {
     setSaving(true);
 
     try {
-      const { doc, getDoc } = await import("firebase/firestore");
-      const latestExamSnap = await getDoc(doc(db, "exams", examId));
-      const latestVersion = latestExamSnap.exists()
-        ? Number(latestExamSnap.data().version ?? version ?? 1)
-        : version;
+      const { NetworkService } = await import("@/services/networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      let latestVersion = version;
+      if (isOnline && !examId.startsWith("staging_")) {
+        const { doc, getDoc } = await import("firebase/firestore");
+        const latestExamSnap = await getDoc(doc(db, "exams", examId));
+        latestVersion = latestExamSnap.exists()
+          ? Number(latestExamSnap.data().version ?? version ?? 1)
+          : version;
+      }
 
       const updatedVersion = await updateExamWithRetry(
         {

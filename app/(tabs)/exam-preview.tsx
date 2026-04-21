@@ -219,7 +219,7 @@ export default function ExamPreviewScreen() {
 
   const handleArchiveExam = async () => {
     try {
-      await updateDoc(doc(db, "exams", examId), { isArchived: true });
+      await ExamApi.archiveExam(examId);
       setArchiveConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({

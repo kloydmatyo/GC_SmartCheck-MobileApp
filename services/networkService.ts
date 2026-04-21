@@ -21,7 +21,7 @@ export class NetworkService {
       if (connected !== this.isConnected) {
         this.isConnected = connected;
         console.log(
-          `📡 Network status changed: ${connected ? "ONLINE" : "OFFLINE"}`,
+          `Network status changed: ${connected ? "ONLINE" : "OFFLINE"}`,
         );
 
         // Notify all listeners
@@ -33,7 +33,7 @@ export class NetworkService {
     NetInfo.fetch().then((state) => {
       this.isConnected = state.isConnected ?? false;
       console.log(
-        `📡 Initial network status: ${this.isConnected ? "ONLINE" : "OFFLINE"}`,
+        `Initial network status: ${this.isConnected ? "ONLINE" : "OFFLINE"}`,
       );
     });
   }
@@ -47,7 +47,7 @@ export class NetworkService {
       if (this.unsubscribe) {
         return this.isConnected;
       }
-      
+
       const state = await NetInfo.fetch();
       this.isConnected = state.isConnected ?? false;
       return this.isConnected;
