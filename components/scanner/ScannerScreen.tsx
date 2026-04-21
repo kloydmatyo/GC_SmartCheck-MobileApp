@@ -60,6 +60,7 @@ export default function ScannerScreen({
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
+  const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(5);
 
   // class/exam dropdown state
   const [classesList, setClassesList] = useState<
@@ -82,6 +83,7 @@ export default function ScannerScreen({
     if (resetFlag) {
       setActiveExamId("");
       setExamQuestionCount(20);
+      setExamChoicesPerQuestion(5);
       setSelectedClass(null);
       setSelectedExam(null);
       // Reset 2-stage state
@@ -190,6 +192,7 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
+      setExamChoicesPerQuestion(selectedExam.choiceFormat === "A-E" ? 5 : 4);
       setCachedAnswerKey(
         Array.isArray(selectedExam.answerKey?.answers)
           ? selectedExam.answerKey.answers
@@ -526,6 +529,7 @@ export default function ScannerScreen({
 
       let foundExamId: string | null = null;
       let questionCount = 20;
+      let choicesPerQuestion: 4 | 5 = 5;
 
       // 1. Check Staging Realm (Offline creations)
       const { RealmService, OfflineQuiz, QuizCache } =
@@ -538,6 +542,7 @@ export default function ScannerScreen({
         const sQuiz = sQuizzes[0];
         foundExamId = `staging_${sQuiz._id.toHexString()}`;
         questionCount = sQuiz.questionCount || 20;
+        choicesPerQuestion = sQuiz.choiceFormat === "A-E" ? 5 : 4;
       }
 
       // 2. Check Cache Realm (Downloaded/Synced exams)
@@ -550,6 +555,7 @@ export default function ScannerScreen({
           const cQuiz = cQuizzes[0];
           foundExamId = cQuiz.id;
           questionCount = cQuiz.questionCount || 20;
+          choicesPerQuestion = cQuiz.choiceFormat === "A-E" ? 5 : 4;
         }
       }
 
@@ -567,6 +573,7 @@ export default function ScannerScreen({
               const data = snap.docs[0].data();
               foundExamId = snap.docs[0].id;
               questionCount = data.num_items || 20;
+              choicesPerQuestion = data.choiceFormat === "A-E" ? 5 : 4;
             }
           } catch (firestoreErr) {
             console.warn(
@@ -581,6 +588,7 @@ export default function ScannerScreen({
       // Setup scanner or show error
       if (foundExamId) {
         setExamQuestionCount(questionCount);
+        setExamChoicesPerQuestion(choicesPerQuestion);
         setActiveExamId(foundExamId);
         setCurrentState("camera");
       } else {
@@ -617,6 +625,7 @@ export default function ScannerScreen({
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
+    setExamChoicesPerQuestion(5);
     setCachedAnswerKey(null);
     // clear selection so reopening starts fresh
     setSelectedClass(null);
@@ -665,6 +674,7 @@ export default function ScannerScreen({
         <CameraScanner
           key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
+          choicesPerQuestion={examChoicesPerQuestion}
           scanStage={
             examQuestionCount === 200
               ? { current: twoStageCurrent, total: 2 }

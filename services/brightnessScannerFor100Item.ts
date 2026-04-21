@@ -257,32 +257,35 @@ function detectAnswersFromImage(
       const absoluteGap = secondDark - darkest;
       const gapFromThird = thirdDark - darkest;
 
-      // Detection with balanced thresholds:
-      // Primary: darkest must be < 68% of brightest (32%+ drop) - strong fill
-      // Secondary: darkest < 88% of brightest AND strong gap from 2nd (12%+) - clear fill
-      // Tertiary: darkest < 93% of brightest AND moderate gap (7%+) AND absolute gap >= 12 - light fill
-      // Quaternary: absolute gap >= 18 AND darkest clearly darker than 3rd (gap >= 8) - handles noise
-      // Quinary: very light fills - absolute gap >= 3 AND darkest is clearly below median
-      // Final: extremely light fills - any detectable difference (catches 1-unit differences)
+      // Detection thresholds tuned for accuracy (reduce false positives on blank/light noise):
+      // - Reject near-uniform bubbles quickly (low spread)
+      // - Require meaningful separation between darkest and runner-up
+      // - Keep multiple paths to catch both strong and lighter real fills
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
+      const spread = brightest - darkest;
       
-      if (darkRatio < 0.68) {
-        // Strong fill: darkest is 32%+ darker than brightest
+      if (spread < 8) {
+        // Too little contrast across options, treat as unfilled.
+        selectedChoice = '';
+      } else if (darkRatio < 0.72 && absoluteGap >= 3) {
+        // Strong fill: darkest clearly darker than background and runner-up.
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.88 && gapRatio > 0.12) {
-        // Clear fill: darkest is 12%+ darker AND has strong separation from 2nd
+      } else if (darkRatio < 0.86 && gapRatio > 0.10 && absoluteGap >= 6) {
+        // Medium fill: ratio + gap both indicate a single marked bubble.
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 12) {
-        // Light fill: darkest is 7%+ darker AND has absolute gap of 12+ units
+      } else if (
+        darkRatio < 0.92 &&
+        gapRatio > 0.06 &&
+        absoluteGap >= 10 &&
+        darkest < median - 1
+      ) {
+        // Light but valid fill with consistent separation.
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 18 && gapFromThird >= 8) {
-        // Noise handling: clear separation from both 2nd and 3rd darkest
+      } else if (absoluteGap >= 18 && gapFromThird >= 8 && spread >= 14) {
+        // Noisy lighting fallback when one option still stands out strongly.
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 3 && darkest < median - 2) {
-        // Very light fill: at least 3 units darker AND clearly below median
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 1 && darkest < brightest) {
-        // Extremely light fill: any detectable 1+ unit difference (catches very light pencil marks)
+      } else if (absoluteGap >= 4 && darkest < median - 2 && spread >= 12) {
+        // Very light fill guard-railed by local contrast.
         selectedChoice = sorted[0].choice;
       }
 
@@ -307,7 +310,8 @@ function detectAnswersFromImage(
 // ─── MAIN EXPORT ───
 export async function scan100ItemWithBrightness(
   imageUri: string,
-  markers: Markers
+  markers: Markers,
+  choicesPerQuestion: 4 | 5 = 5,
 ): Promise<StudentAnswer[]> {
   console.log('[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia');
   
@@ -358,7 +362,7 @@ export async function scan100ItemWithBrightness(
     // Detect answers using brightness sampling
     const layout = get100ItemTemplateLayout();
     const numQuestions = 100;
-    const choicesPerQuestion = 5;
+    const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
     
     const answers = detectAnswersFromImage(
       grayscale,
@@ -367,7 +371,7 @@ export async function scan100ItemWithBrightness(
       markers,
       layout,
       numQuestions,
-      choicesPerQuestion
+      effectiveChoices
     );
     
     const detectedCount = answers.filter(a => a.selectedAnswer).length;

@@ -14,6 +14,7 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
+  choicesPerQuestion?: 4 | 5; // Expected answer choices for this exam
   scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
@@ -21,6 +22,7 @@ interface CameraScannerProps {
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
+  choicesPerQuestion = 5,
   scanStage,
   onScanComplete,
   onCancel,
@@ -160,6 +162,7 @@ export default function CameraScanner({
         questionCount,
         templateName,
         scanStage?.current as 1 | 2 | undefined,
+        choicesPerQuestion,
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");

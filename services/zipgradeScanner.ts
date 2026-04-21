@@ -537,6 +537,7 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
     pageNumber?: 1 | 2,
+    choicesPerQuestion: 4 | 5 = 5,
   ): Promise<ScanResult> {
     // Track all Mat objects for cleanup
     const matsToCleanup: any[] = [];
@@ -1323,7 +1324,12 @@ export class ZipgradeScanner {
 
         const { scan200ItemPage } = require("./brightnessScannerFor200Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan200ItemPage(imageUri, markers, currentPage);
+        allAnswers = await scan200ItemPage(
+          imageUri,
+          markers,
+          currentPage,
+          choicesPerQuestion,
+        );
 
         const rangeStart = currentPage === 1 ? 1 : 101;
         const rangeEnd = currentPage === 1 ? 100 : 200;
@@ -1351,7 +1357,12 @@ export class ZipgradeScanner {
           `[OMR] Estimated markers: TL=(${Math.round(paperLeft)},${Math.round(paperTop)}) BR=(${Math.round(paperRight)},${Math.round(paperBottom)})`,
         );
 
-        allAnswers = await scan200ItemPage(imageUri, estimatedMarkers, currentPage);
+        allAnswers = await scan200ItemPage(
+          imageUri,
+          estimatedMarkers,
+          currentPage,
+          choicesPerQuestion,
+        );
 
         const rangeStart = currentPage === 1 ? 1 : 101;
         const rangeEnd = currentPage === 1 ? 100 : 200;
@@ -1369,7 +1380,11 @@ export class ZipgradeScanner {
           scan100ItemWithBrightness,
         } = require("./brightnessScannerFor100Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan100ItemWithBrightness(imageUri, markers);
+        allAnswers = await scan100ItemWithBrightness(
+          imageUri,
+          markers,
+          choicesPerQuestion,
+        );
 
         console.log(
           `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,

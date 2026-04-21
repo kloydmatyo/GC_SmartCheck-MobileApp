@@ -40,14 +40,19 @@ interface Markers {
 export async function scan200ItemPage(
   imageUri: string,
   markers: Markers,
-  pageNumber: 1 | 2
+  pageNumber: 1 | 2,
+  choicesPerQuestion: 4 | 5 = 5,
 ): Promise<StudentAnswer[]> {
   const questionOffset = pageNumber === 1 ? 0 : 100;
   console.log(`[200Q-BRIGHTNESS] Starting brightness scan for Page ${pageNumber} (offset=${questionOffset})`);
   
   try {
     // Delegate to the proven 100-item scanner
-    const answers = await scan100ItemWithBrightness(imageUri, markers);
+    const answers = await scan100ItemWithBrightness(
+      imageUri,
+      markers,
+      choicesPerQuestion,
+    );
     
     // Apply question-number offset for Page 2
     if (questionOffset > 0) {
