@@ -5,17 +5,17 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   query,
   serverTimestamp,
   setDoc,
   Timestamp,
   updateDoc,
   where,
-  limit,
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
-import { OfflineClass, OfflineQuiz, RealmService } from "./realmService";
+import { OfflineClass, OfflinePendingUpdate, OfflineQuiz, RealmService } from "./realmService";
 
 export interface SyncResult {
   success: boolean;
@@ -37,7 +37,7 @@ export type ConflictResolution = "use-local" | "use-server" | "merge";
 export class SyncService {
   private static isSyncing: boolean = false;
   private static initialized: boolean = false;
-  private static syncListeners: Array<(result: SyncResult) => void> = [];
+  private static syncListeners: ((result: SyncResult) => void)[] = [];
 
   /**
    * Initialize sync service
@@ -51,7 +51,7 @@ export class SyncService {
     // Listen for network changes
     NetworkService.addListener((isConnected) => {
       if (isConnected) {
-        console.log("📡 Network restored, triggering auto-sync...");
+        console.log("Network restored, triggering auto-sync...");
         this.syncPendingUpdates();
       }
     });
@@ -210,6 +210,16 @@ export class SyncService {
     );
     const gradesSnap = await getDocs(gradesQuery);
 
+    // 4. Fetch pending updates to ensure we don't overwrite local work
+    const stagingRealm = await RealmService.getStagingRealm();
+    const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
+    const updateMap = new Map<string, any>();
+    pendingUpdates.forEach(u => {
+      if (u.action === "update" || u.action === "update-answer-key") {
+        updateMap.set(u.examId, JSON.parse(u.data));
+      }
+    });
+
     realm.write(() => {
       // Clear existing cache for these types
       realm.delete(realm.objects("ClassCache"));
@@ -233,20 +243,27 @@ export class SyncService {
 
       // Insert fresh exams
       examsWithAK.forEach((item) => {
+        const pendingData = updateMap.get(item.id);
+        
         realm.create("QuizCache", {
           id: item.id,
-          title: item.data.title,
-          subject: item.data.subject || item.data.className || "",
-          status: item.data.status || "Draft",
+          title: pendingData?.title || item.data.title,
+          subject: pendingData?.subject || item.data.subject || item.data.className || "",
+          status: pendingData?.isArchived !== undefined 
+            ? (pendingData.isArchived ? "Archived" : "Draft") 
+            : (item.data.status || "Draft"),
           papersCount: item.data.scanned_papers || 0,
-          questionCount: item.data.num_items || 0,
-          answerKey: item.answerKey,
+          questionCount: pendingData?.num_items || item.data.num_items || 0,
+          answerKey: pendingData?.answers 
+            ? JSON.stringify({ ...JSON.parse(item.answerKey || '{}'), answers: pendingData.answers })
+            : (pendingData?.answerKey ? JSON.stringify(pendingData.answerKey) : item.answerKey),
           createdBy: item.data.createdBy,
           createdAt: item.data.createdAt?.toDate?.() || new Date(),
           updatedAt: item.data.updatedAt?.toDate?.() || new Date(),
           instructorId: item.data.instructorId || "",
           examCode: item.data.examCode || item.data.room || "",
-          choicesPerItem: item.data.choices_per_item || 4,
+          choicesPerItem: pendingData?.choices_per_item || item.data.choices_per_item || 4,
+          version: pendingData?.version || item.data.version || 1,
         });
       });
 
@@ -268,13 +285,13 @@ export class SyncService {
       });
     });
 
-    console.log("✅ Primary Cache Realm updated from Firestore");
+    console.log("Primary Cache Realm updated from Firestore");
   }
 
   private static async syncStagingGrades(): Promise<void> {
     // This is handled by GradeStorageService.syncOfflineQueue()
     // We can call it here for centralization
-    console.log("🔄 Syncing staging grades...");
+    console.log("Syncing staging grades...");
     const { GradeStorageService } = await import("./gradeStorageService");
     await GradeStorageService.syncOfflineQueue();
   }
@@ -360,7 +377,10 @@ export class SyncService {
             createdAt: Timestamp.now(),
           });
         } catch (templateErr) {
-          console.warn("Failed to sync template for staging quiz:", templateErr);
+          console.warn(
+            "Failed to sync template for staging quiz:",
+            templateErr,
+          );
         }
 
         realm.write(() => {
@@ -437,13 +457,14 @@ export class SyncService {
         await updateDoc(examRef, {
           ...update.data,
           updatedAt: serverTimestamp(),
-          version: (update.data.version || 1) + 1,
+          version: update.data.version || 1,
         });
         return null;
       }
 
       if (update.action === "update-answer-key") {
-        const { collection, query, where, getDocs } = await import("firebase/firestore");
+        const { collection, query, where, getDocs } =
+          await import("firebase/firestore");
         const q = query(
           collection(db, "answerKeys"),
           where("examId", "==", update.examId),
@@ -461,19 +482,23 @@ export class SyncService {
         }
 
         const answers = update.data.answers;
-        await setDoc(akRef, {
-          examId: update.examId,
-          answers,
-          version,
-          updatedAt: serverTimestamp(),
-          createdBy: currentUser.uid,
-          locked: false,
-          questionSettings: answers.map((a: string, i: number) => ({
-            questionNumber: i + 1,
-            correctAnswer: a,
-            points: 1,
-          })),
-        }, { merge: true });
+        await setDoc(
+          akRef,
+          {
+            examId: update.examId,
+            answers,
+            version,
+            updatedAt: serverTimestamp(),
+            createdBy: currentUser.uid,
+            locked: false,
+            questionSettings: answers.map((a: string, i: number) => ({
+              questionNumber: i + 1,
+              correctAnswer: a,
+              points: 1,
+            })),
+          },
+          { merge: true },
+        );
         return null;
       }
 
@@ -483,7 +508,8 @@ export class SyncService {
       }
 
       if (update.action === "audit_log") {
-        const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+        const { addDoc, collection, serverTimestamp } =
+          await import("firebase/firestore");
         await addDoc(collection(db, "audit_logs"), {
           ...update.data,
           timestamp: serverTimestamp(), // Use server time for synced logs
@@ -540,7 +566,7 @@ export class SyncService {
       }
 
       console.log(
-        `✅ Conflict resolved for exam ${conflict.examId} using ${resolution}`,
+        `Conflict resolved for exam ${conflict.examId} using ${resolution}`,
       );
     } catch (error) {
       console.error("Error resolving conflict:", error);

@@ -1,12 +1,12 @@
 import { auth, db } from "@/config/firebase";
 import { UserService } from "@/services/userService";
 import {
-    addDoc,
-    collection,
-    getDocs,
-    query,
-    serverTimestamp,
-    where,
+  addDoc,
+  collection,
+  getDocs,
+  query,
+  serverTimestamp,
+  where,
 } from "firebase/firestore";
 
 export interface AuditLog {
@@ -64,13 +64,15 @@ export class AuditLogService {
       };
 
       if (!isOnline) {
-        const { OfflineStorageService } = await import("./offlineStorageService");
+        const { OfflineStorageService } =
+          await import("./offlineStorageService");
         await OfflineStorageService.queueUpdate(targetId, "audit_log", payload);
         return;
       }
 
       // Online Path
-      const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+      const { addDoc, collection, serverTimestamp } =
+        await import("firebase/firestore");
       await addDoc(collection(db, "audit_logs"), {
         ...payload,
         timestamp: serverTimestamp(),
@@ -161,9 +163,9 @@ export class AuditLogService {
       // Create audit log entry
       await addDoc(collection(db, "audit_logs"), auditPayload);
 
-      console.log("✅ Audit log created for exam edit:", examId);
+      console.log("Audit log created for exam edit:", examId);
     } catch (error) {
-      console.error("❌ Error creating audit log:", error);
+      console.error("Error creating audit log:", error);
       if (throwOnError) {
         throw error;
       }
@@ -228,20 +230,20 @@ export class AuditLogService {
         try {
           await addDoc(collection(db, "audit_logs"), auditData);
           console.log(
-            `✅ Audit log created for status change: ${oldStatus} → ${newStatus}`,
+            `Audit log created for status change: ${oldStatus} → ${newStatus}`,
           );
           return; // Success, exit
         } catch (error: any) {
           retries--;
           console.warn(
-            `⚠️ Audit log attempt failed (${3 - retries}/3):`,
+            `Audit log attempt failed (${3 - retries}/3):`,
             error.message,
           );
 
           if (retries === 0) {
             // Last attempt failed, log error but don't throw
             console.error(
-              "❌ Failed to create audit log after 3 attempts:",
+              "Failed to create audit log after 3 attempts:",
               error,
             );
             return; // Don't throw error
@@ -252,7 +254,7 @@ export class AuditLogService {
         }
       }
     } catch (error) {
-      console.error("❌ Error in audit logging system:", error);
+      console.error("Error in audit logging system:", error);
       // Don't throw error - audit logging should not block the main operation
     }
   }
@@ -452,9 +454,9 @@ export class AuditLogService {
         deviceInfo: this.getDeviceInfo(),
       });
 
-      console.log("✅ Audit log created for batch creation:", batchId);
+      console.log("Audit log created for batch creation:", batchId);
     } catch (error) {
-      console.error("❌ Error creating batch audit log:", error);
+      console.error("Error creating batch audit log:", error);
     }
   }
 
@@ -510,10 +512,11 @@ export class AuditLogService {
       });
 
       console.log(
-        `✅ Audit log created for batch status change: ${oldStatus} → ${newStatus}`,
+        `Audit log created for batch status change: ${oldStatus} → ${newStatus}`,
       );
+      0;
     } catch (error) {
-      console.error("❌ Error creating batch status audit log:", error);
+      console.error("Error creating batch status audit log:", error);
     }
   }
 

@@ -1359,12 +1359,19 @@ export class ExamService {
       // Offline Support
       if (!isOnline) {
         console.log("[ExamService] Offline. Queueing exam update...");
-        const { OfflineStorageService } = await import("./offlineStorageService");
-        await OfflineStorageService.queueUpdate(examId, "update", updateData);
-
-        // Update local cache
+        
         const cacheRealm = await RealmService.getCacheRealm();
         const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+        const currentVersion = cachedExam?.version || 1;
+        const newVersion = currentVersion + 1;
+
+        const { OfflineStorageService } = await import("./offlineStorageService");
+        await OfflineStorageService.queueUpdate(examId, "update", {
+          ...updateData,
+          version: newVersion,
+        });
+
+        // Update local cache
         if (cachedExam) {
           cacheRealm.write(() => {
             if (updateData.title) cachedExam.title = updateData.title;
@@ -1372,6 +1379,7 @@ export class ExamService {
             if (updateData.num_items) cachedExam.questionCount = updateData.num_items;
             if (updateData.choices_per_item) cachedExam.choicesPerItem = updateData.choices_per_item;
             if (updateData.isArchived !== undefined) cachedExam.status = updateData.isArchived ? "Archived" : "Draft";
+            cachedExam.version = newVersion;
             cachedExam.updatedAt = new Date();
           });
         }
