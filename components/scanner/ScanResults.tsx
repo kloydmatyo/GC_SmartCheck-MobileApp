@@ -1,8 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   Alert,
   Image,
@@ -42,6 +41,7 @@ export default function ScanResults({
   const [editedStudentId, setEditedStudentId] = useState(
     result.studentId || "",
   );
+  const [isExporting, setIsExporting] = useState(false);
 
   const details = result?.details || result?.answers || [];
   const totalQuestions =
@@ -67,6 +67,107 @@ export default function ScanResults({
     setEditedStudentId(result.studentId || "");
     setIsEditingId(false);
   };
+
+  const handleExportPdf = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const percentage = totalQuestions > 0
+        ? Math.round((result.score / totalQuestions) * 100)
+        : 0;
+
+      const detailRows = details.length > 0
+        ? details.map((item, i) => {
+            const studentAns = item.studentAnswer || (item as any).selectedAnswer || "—";
+            const correctAns = item.correctAnswer || "—";
+            const isCorrect = item.isCorrect ?? false;
+            return `<tr style="background:${i % 2 === 0 ? '#fafafa' : '#fff'}">
+              <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;">${item.questionNumber}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;">${studentAns}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;">${correctAns}</td>
+              <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center;">
+                <span style="display:inline-block;padding:2px 10px;border-radius:4px;font-weight:700;font-size:10px;
+                  background:${isCorrect ? '#e8f5ee' : '#fdf0f0'};color:${isCorrect ? '#00a550' : '#e74c3c'};">
+                  ${isCorrect ? '✓' : '✗'}
+                </span>
+              </td>
+            </tr>`;
+          }).join('')
+        : '<tr><td colspan="4" style="text-align:center;padding:20px;color:#999;">No detail data available</td></tr>';
+
+      const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:Arial,Helvetica,sans-serif; font-size:11px; color:#333; padding:24px; background:#fff; }
+  .header { display:flex; align-items:center; border-bottom:3px solid #1FC27D; padding-bottom:12px; margin-bottom:20px; }
+  .header-text h1 { font-size:18px; color:#1FC27D; margin-bottom:2px; }
+  .header-text h2 { font-size:13px; color:#444; font-weight:500; }
+  .header-text p { font-size:9px; color:#888; margin-top:3px; }
+  .score-box { text-align:center; border:2px solid #1FC27D; border-radius:12px; padding:18px; margin-bottom:20px; background:#f0faf5; }
+  .score-big { font-size:48px; font-weight:900; color:#1FC27D; }
+  .score-label { font-size:10px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-top:4px; }
+  .info-row { display:flex; gap:16px; margin-bottom:20px; }
+  .info-card { flex:1; border:1px solid #eee; border-radius:8px; padding:10px 14px; }
+  .info-card .label { font-size:9px; color:#888; text-transform:uppercase; }
+  .info-card .value { font-size:16px; font-weight:800; color:#333; margin-top:2px; }
+  .section-title { font-size:12px; font-weight:700; color:#24362f; margin:16px 0 8px; border-left:3px solid #1FC27D; padding-left:8px; }
+  table { width:100%; border-collapse:collapse; font-size:10px; }
+  th { background:#1FC27D; color:#fff; padding:8px 10px; text-align:center; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; }
+  .footer { margin-top:24px; padding-top:8px; border-top:1px solid #ddd; font-size:8px; color:#aaa; text-align:center; }
+</style></head>
+<body>
+  <div class="header">
+    <div class="header-text">
+      <h1>Gordon College — Scan Result Report</h1>
+      <h2>Olongapo City</h2>
+      <p>Generated ${new Date().toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })}</p>
+    </div>
+  </div>
+  <div class="score-box">
+    <div class="score-big">${result.score} / ${totalQuestions}</div>
+    <div class="score-label">${percentage}% — Overall Score</div>
+  </div>
+  <div class="info-row">
+    <div class="info-card">
+      <div class="label">Student ID</div>
+      <div class="value">${editedStudentId || 'N/A'}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Total Items</div>
+      <div class="value">${totalQuestions}</div>
+    </div>
+    <div class="info-card">
+      <div class="label">Score</div>
+      <div class="value">${result.score}</div>
+    </div>
+  </div>
+  <p class="section-title">Answer Breakdown</p>
+  <table>
+    <thead><tr><th>#</th><th>Student Answer</th><th>Correct Answer</th><th>Result</th></tr></thead>
+    <tbody>${detailRows}</tbody>
+  </table>
+  <div class="footer">GC SmartCheck &bull; Scan Result Report &bull; ${new Date().toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' })}</div>
+</body></html>`;
+
+      const { uri } = await Print.printToFileAsync({ html, width: 612, height: 792 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/pdf',
+          dialogTitle: `Scan Result — ${editedStudentId || 'Student'}`,
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        Alert.alert('Success', `PDF saved to:\n${uri}`);
+      }
+    } catch (error) {
+      console.error('Export PDF failed:', error);
+      Alert.alert('Export Failed', 'Could not generate PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  }, [result, details, totalQuestions, editedStudentId, isExporting]);
 
   return (
     <View style={styles.container}>
@@ -226,9 +327,19 @@ export default function ScanResults({
 
       {/* Footer Actions */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.discardBtn} onPress={onClose}>
-          <Text style={styles.discardText}>Discard</Text>
-        </TouchableOpacity>
+        <View style={styles.footerTopRow}>
+          <TouchableOpacity style={styles.discardBtn} onPress={onClose}>
+            <Text style={styles.discardText}>Discard</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.btnExport, isExporting && { opacity: 0.6 }]}
+            onPress={handleExportPdf}
+            disabled={isExporting}
+          >
+            <Ionicons name="document-text-outline" size={16} color="#1FC27D" />
+            <Text style={styles.exportText}>{isExporting ? 'Exporting…' : 'Export PDF'}</Text>
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity style={styles.nextBtn} onPress={onScanAnother}>
           <Text style={styles.nextText}>Quick Scan</Text>
           <Ionicons name="scan-outline" size={18} color="#FFF" style={{ marginLeft: 6 }} />
@@ -499,19 +610,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   footer: {
-    flexDirection: "row",
-    paddingHorizontal: 16, // Reduced from 20 to match container
-    paddingVertical: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     backgroundColor: "#FFF",
     borderTopWidth: 1,
     borderTopColor: "rgba(0,0,0,0.05)",
-    gap: 12,
+    gap: 10,
+  },
+  footerTopRow: {
+    flexDirection: "row",
+    gap: 10,
   },
   discardBtn: {
     flex: 1,
     backgroundColor: "#F8F9FA",
-    paddingVertical: 18,
-    borderRadius: 18,
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#F1F3F5",
@@ -519,10 +633,9 @@ const styles = StyleSheet.create({
   discardText: {
     color: "#717171",
     fontWeight: "700",
-    fontSize: 16,
+    fontSize: 15,
   },
   nextBtn: {
-    flex: 2,
     backgroundColor: "#1FC27D",
     paddingVertical: 18,
     borderRadius: 18,
@@ -547,14 +660,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   btnExport: {
-    flex: 1.2,
-    backgroundColor: "#2196F3",
-    padding: 16,
-    borderRadius: 10,
+    flex: 1,
+    backgroundColor: "#F0FAF5",
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     gap: 6,
+    borderWidth: 1.5,
+    borderColor: "#1FC27D",
+  },
+  exportText: {
+    color: "#1FC27D",
+    fontWeight: "700",
+    fontSize: 15,
   },
   modalClose: {
     position: "absolute",
