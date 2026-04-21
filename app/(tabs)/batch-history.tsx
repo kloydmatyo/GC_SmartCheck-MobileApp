@@ -1,30 +1,31 @@
-import { auth, db } from "@/config/firebase";
 import ConfirmationModal from "@/components/common/ConfirmationModal";
+import { auth, db } from "@/config/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  query,
-  updateDoc,
-  where,
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    query,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import React, { useCallback, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Dimensions,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Dimensions,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { ClassService } from "../../services/classService";
+import { RealmService } from "../../services/realmService";
 
 type ArchivedMode = "classes" | "exams";
 
@@ -81,6 +82,8 @@ function formatDateLabel(value: any) {
 
 export default function ArchivedScreen() {
   const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [mode, setMode] = useState<ArchivedMode>("classes");
   const [searchQuery, setSearchQuery] = useState("");
   const [archivedClasses, setArchivedClasses] = useState<ArchivedClass[]>([]);
@@ -106,6 +109,7 @@ export default function ArchivedScreen() {
           return;
         }
 
+        // 1. Fetch from Firestore
         const [classSnapshot, examSnapshot] = await Promise.all([
           getDocs(
             query(
@@ -123,38 +127,87 @@ export default function ArchivedScreen() {
           ),
         ]);
 
+        // 2. Fetch from Local Cache (Realm)
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedClasses = cacheRealm.objects("ClassCache").filtered("isArchived == true");
+        const cachedExams = cacheRealm.objects("QuizCache").filtered("isArchived == true");
+
         if (!active) return;
 
-        setArchivedClasses(
-          classSnapshot.docs.map((item) => {
-            const data = item.data();
-            return {
-              id: item.id,
-              title: data.class_name || "Archived Class",
-              studentCount: Array.isArray(data.students) ? data.students.length : 0,
-              dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
-            };
-          }),
-        );
+        // Map Firestore classes to ArchivedClass format
+        const firestoreClasses = classSnapshot.docs.map((item) => {
+          const data = item.data();
+          return {
+            id: item.id,
+            title: data.class_name || "Archived Class",
+            studentCount: Array.isArray(data.students) ? data.students.length : 0,
+            dateLabel: formatDateLabel(data.updatedAt || data.createdAt),
+          };
+        });
 
-        setArchivedExams(
-          examSnapshot.docs.map((item) => {
-            const data = item.data();
-            const questions =
-              Number(data.num_items || data.totalQuestions || 0) ||
-              (Array.isArray(data.questions) ? data.questions.length : 0) ||
-              (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0) ||
-              0;
-            const className = String(data.className || "").trim();
-            return {
-              id: item.id,
-              title: data.title || "Archived Exam",
-              subtitle: className,
-              dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
-              questions,
-            };
-          }),
-        );
+        // Map cached classes to ArchivedClass format
+        const cacheClassList = Array.from(cachedClasses).map((item: any) => ({
+          id: item.id,
+          title: item.class_name || "Archived Class",
+          studentCount: Array.isArray(JSON.parse(item.students || "[]")) ? JSON.parse(item.students || "[]").length : 0,
+          dateLabel: formatDateLabel(item.updatedAt),
+        }));
+
+        // Deduplicate by ID - PRIORITIZE CACHE (has optimistic updates)
+        const classesMap = new Map<string, ArchivedClass>();
+
+        // Add cache first (has optimistic updates)
+        cacheClassList.forEach((cls) => classesMap.set(cls.id, cls));
+
+        // Add Firestore only if not already in cache
+        firestoreClasses.forEach((cls) => {
+          if (!classesMap.has(cls.id)) {
+            classesMap.set(cls.id, cls);
+          }
+        });
+
+        setArchivedClasses(Array.from(classesMap.values()));
+
+        // Combine Firestore + Local Cache exams
+        const firestoreExams = examSnapshot.docs.map((item) => {
+          const data = item.data();
+          const questions =
+            Number(data.num_items || data.totalQuestions || 0) ||
+            (Array.isArray(data.questions) ? data.questions.length : 0) ||
+            (Array.isArray(data.questionSettings) ? data.questionSettings.length : 0) ||
+            0;
+          const className = String(data.className || "").trim();
+          return {
+            id: item.id,
+            title: data.title || "Archived Exam",
+            subtitle: className,
+            dateLabel: formatDateLabel(data.updatedAt || data.createdAt || data.created_at),
+            questions,
+          };
+        });
+
+        const cacheExamList = Array.from(cachedExams).map((item: any) => ({
+          id: item.id,
+          title: item.title || "Archived Exam",
+          subtitle: item.className || "",
+          dateLabel: formatDateLabel(item.updatedAt),
+          questions: item.questionCount || 0,
+        }));
+
+        // Deduplicate by ID - PRIORITIZE CACHE (has optimistic updates)
+        const examsMap = new Map<string, ArchivedExam>();
+
+        // Add cache first (has optimistic updates)
+        cacheExamList.forEach((exam) => examsMap.set(exam.id, exam));
+
+        // Add Firestore only if not already in cache
+        firestoreExams.forEach((exam) => {
+          if (!examsMap.has(exam.id)) {
+            examsMap.set(exam.id, exam);
+          }
+        });
+
+        setArchivedExams(Array.from(examsMap.values()));
       } catch (error) {
         console.error("Error loading archived items:", error);
         if (active) {
@@ -192,76 +245,140 @@ export default function ArchivedScreen() {
 
   const restoreClass = async (id: string) => {
     try {
+      setRestoring(true);
+
+      // Optimistic UI update - remove from archive immediately
+      setArchivedClasses((prev) => prev.filter((cls) => cls.id !== id));
+
+      // Also update local cache immediately
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey("ClassCache", id);
+      if (cached) {
+        cacheRealm.write(() => {
+          (cached as any).isArchived = false;
+        });
+      }
+
+      // Then sync to Firebase
       await ClassService.updateClass(id, { isArchived: false });
+
       setRestoreTarget(null);
       Toast.show({
         type: "save_result",
         text1: "Restored",
         text2: "Class moved out of Archived",
       });
-      loadArchivedItems();
     } catch (error) {
       console.error("Error restoring class:", error);
+      // Reload in case of error to show correct state
+      loadArchivedItems();
       Toast.show({
         type: "error",
         text1: "Error",
         text2: "Failed to restore class",
       });
+    } finally {
+      setRestoring(false);
     }
   };
 
   const restoreExam = async (id: string) => {
     try {
+      setRestoring(true);
+
+      // Optimistic UI update - remove from archive immediately
+      setArchivedExams((prev) => prev.filter((exam) => exam.id !== id));
+
+      // Also update local cache immediately
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey("QuizCache", id);
+      if (cached) {
+        cacheRealm.write(() => {
+          (cached as any).isArchived = false;
+        });
+      }
+
+      // Then sync to Firebase
       await updateDoc(doc(db, "exams", id), { isArchived: false });
+
       setRestoreTarget(null);
+      
       Toast.show({
         type: "save_result",
         text1: "Restored",
         text2: "Exam moved out of Archived",
       });
-      loadArchivedItems();
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error restoring exam:", error);
+      // Reload in case of error to show correct state
+      loadArchivedItems();
       Toast.show({
         type: "error",
         text1: "Error",
         text2: "Failed to restore exam",
       });
+    } finally {
+      setRestoring(false);
     }
   };
 
   const deleteClass = async (id: string) => {
     try {
+      setDeleting(true);
+
+      // Optimistic UI update - remove from archive immediately
+      setArchivedClasses((prev) => prev.filter((cls) => cls.id !== id));
+
+      // Delete from Firebase
       await deleteDoc(doc(db, "classes", id));
+
       setDeleteTarget(null);
       Toast.show({
         type: "delete_result",
         text1: "Deleted",
         text2: "Class deleted successfully",
       });
-      loadArchivedItems();
     } catch (error) {
       console.error("Error deleting class:", error);
+      // Reload in case of error to show correct state
+      loadArchivedItems();
       Toast.show({
         type: "error",
         text1: "Delete failed",
         text2: "Failed to delete class",
       });
+    } finally {
+      setDeleting(false);
     }
   };
 
   const deleteExam = async (id: string) => {
     try {
+      setDeleting(true);
+
+      // Optimistic UI update - remove from archive immediately
+      setArchivedExams((prev) => prev.filter((exam) => exam.id !== id));
+
+      // Delete from Firebase
       await deleteDoc(doc(db, "exams", id));
+
       setDeleteTarget(null);
+      
       Toast.show({
         type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });
-      loadArchivedItems();
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error deleting exam:", error);
+      // Reload in case of error to show correct state
+      loadArchivedItems();
       Toast.show({
         type: "error",
         text1: "Delete failed",
@@ -421,6 +538,7 @@ export default function ArchivedScreen() {
         message={`Are you sure you want to restore ${restoreTarget?.title ?? "this item"}? It will appear again in its active section.`}
         cancelText="Cancel"
         confirmText="Restore"
+        loading={restoring}
         onCancel={() => setRestoreTarget(null)}
         onConfirm={() => {
           if (!restoreTarget) return;
@@ -439,6 +557,7 @@ export default function ArchivedScreen() {
         cancelText="Cancel"
         confirmText="Delete"
         destructive
+        loading={deleting}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => {
           if (!deleteTarget) return;

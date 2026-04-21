@@ -7,6 +7,14 @@ export class NetworkService {
   private static isConnected: boolean = true;
   private static unsubscribe: (() => void) | null = null;
 
+  private static resolveConnectionState(state: NetInfoState): boolean {
+    if (!state.isConnected) return false;
+    if (state.isInternetReachable === null || state.isInternetReachable === undefined) {
+      return state.isConnected ?? false;
+    }
+    return Boolean(state.isConnected && state.isInternetReachable);
+  }
+
   /**
    * Initialize network monitoring
    */
@@ -16,12 +24,12 @@ export class NetworkService {
     }
 
     this.unsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
-      const connected = state.isConnected ?? false;
+      const connected = this.resolveConnectionState(state);
 
       if (connected !== this.isConnected) {
         this.isConnected = connected;
         console.log(
-          `📡 Network status changed: ${connected ? "ONLINE" : "OFFLINE"}`,
+          `Network status changed: ${connected ? "ONLINE" : "OFFLINE"}`,
         );
 
         // Notify all listeners
@@ -31,9 +39,9 @@ export class NetworkService {
 
     // Get initial state
     NetInfo.fetch().then((state) => {
-      this.isConnected = state.isConnected ?? false;
+      this.isConnected = this.resolveConnectionState(state);
       console.log(
-        `📡 Initial network status: ${this.isConnected ? "ONLINE" : "OFFLINE"}`,
+        `Initial network status: ${this.isConnected ? "ONLINE" : "OFFLINE"}`,
       );
     });
   }
@@ -47,9 +55,9 @@ export class NetworkService {
       if (this.unsubscribe) {
         return this.isConnected;
       }
-      
+
       const state = await NetInfo.fetch();
-      this.isConnected = state.isConnected ?? false;
+      this.isConnected = this.resolveConnectionState(state);
       return this.isConnected;
     } catch (error) {
       console.error("Error checking network status:", error);

@@ -2,33 +2,31 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 
 import ReportPdfViewer from "@/components/pdf/ReportPdfViewer";
 import SendScoresModal from "@/components/scores/SendScoresModal";
 import {
-    ExportDateFilter,
-    ExportFormat,
-    GradeExportService,
+  DashboardDateFilter,
+  DashboardService,
+  ExamDashboardStats,
+} from "@/services/dashboardService";
+import {
+  ExportDateFilter,
+  ExportFormat,
+  GradeExportService,
 } from "@/services/gradeExportService";
 import { ReportPdfService } from "@/services/reportPdfService";
 
-import {
-    DashboardDateFilter,
-    DashboardService,
-    ExamDashboardStats,
-} from "@/services/dashboardService";
-
-// ── Skeleton placeholder block ────────────────────────────────────────────
 function SkeletonBox({
   width,
   height,
@@ -41,14 +39,18 @@ function SkeletonBox({
   return (
     <View
       style={[
-        { width, height, backgroundColor: "#ddd8c8", borderRadius: 6 },
+        {
+          width,
+          height,
+          backgroundColor: "#EDF1F5",
+          borderRadius: 8,
+        },
         style,
       ]}
     />
   );
 }
 
-// ── Skeleton layout matching the real content ────────────────────────────
 function StatsSkeleton() {
   return (
     <ScrollView
@@ -56,46 +58,45 @@ function StatsSkeleton() {
       contentContainerStyle={styles.scrollContent}
       scrollEnabled={false}
     >
-      {/* Cards row 1 */}
       <View style={styles.row}>
         {[0, 1].map((i) => (
-          <View key={i} style={[styles.card, styles.cardGreen]}>
-            <SkeletonBox width={22} height={22} style={{ borderRadius: 11 }} />
-            <SkeletonBox width={56} height={28} style={{ marginTop: 6 }} />
-            <SkeletonBox width={72} height={12} style={{ marginTop: 4 }} />
+          <View key={i} style={styles.card}>
+            <SkeletonBox width={24} height={24} style={{ borderRadius: 12 }} />
+            <SkeletonBox width={68} height={30} style={{ marginTop: 8 }} />
+            <SkeletonBox width={90} height={12} style={{ marginTop: 6 }} />
           </View>
         ))}
       </View>
-      {/* Cards row 2 */}
+
       <View style={styles.row}>
         {[0, 1].map((i) => (
-          <View key={i} style={[styles.card, styles.cardGreen]}>
-            <SkeletonBox width={22} height={22} style={{ borderRadius: 11 }} />
-            <SkeletonBox width={48} height={28} style={{ marginTop: 6 }} />
-            <SkeletonBox width={88} height={12} style={{ marginTop: 4 }} />
+          <View key={i} style={styles.card}>
+            <SkeletonBox width={24} height={24} style={{ borderRadius: 12 }} />
+            <SkeletonBox width={68} height={30} style={{ marginTop: 8 }} />
+            <SkeletonBox width={96} height={12} style={{ marginTop: 6 }} />
           </View>
         ))}
       </View>
-      {/* Hi/Lo box */}
+
       <View style={styles.hiloBox}>
         {[0, 1].map((i) => (
           <View key={i} style={styles.hiloItem}>
-            <SkeletonBox width={22} height={22} style={{ borderRadius: 11 }} />
-            <SkeletonBox width={56} height={24} style={{ marginTop: 6 }} />
-            <SkeletonBox width={80} height={12} style={{ marginTop: 4 }} />
+            <SkeletonBox width={24} height={24} style={{ borderRadius: 12 }} />
+            <SkeletonBox width={64} height={24} style={{ marginTop: 8 }} />
+            <SkeletonBox width={90} height={12} style={{ marginTop: 6 }} />
           </View>
         ))}
       </View>
-      {/* Distribution box */}
+
       <View style={styles.distBox}>
-        <SkeletonBox width={140} height={16} style={{ marginBottom: 12 }} />
+        <SkeletonBox width={150} height={18} style={{ marginBottom: 8 }} />
         {[0, 1, 2, 3, 4].map((i) => (
           <View key={i} style={[styles.distRow, { marginBottom: 10 }]}>
-            <SkeletonBox width={78} height={10} />
+            <SkeletonBox width={82} height={12} />
             <View style={{ flex: 1, marginHorizontal: 8 }}>
-              <SkeletonBox width={`${60 - i * 8}%`} height={10} />
+              <SkeletonBox width={`${68 - i * 8}%`} height={10} />
             </View>
-            <SkeletonBox width={54} height={10} />
+            <SkeletonBox width={56} height={12} />
           </View>
         ))}
       </View>
@@ -103,14 +104,24 @@ function StatsSkeleton() {
   );
 }
 
-// ── Date-filter chip options ─────────────────────────────────────────────
 const DATE_FILTERS: { label: string; value: DashboardDateFilter }[] = [
   { label: "All Time", value: "all" },
   { label: "Today", value: "today" },
   { label: "This Week", value: "week" },
 ];
 
-// ── Main screen ───────────────────────────────────────────────────────────
+const BASE_GRADES: {
+  label: string;
+  key: keyof ExamDashboardStats["distribution"];
+  color: string;
+}[] = [
+  { label: "A  >=90%", key: "A", color: "#20BE7B" },
+  { label: "B  80-89%", key: "B", color: "#3B82F6" },
+  { label: "C  70-79%", key: "C", color: "#F59E0B" },
+  { label: "D  60-69%", key: "D", color: "#F97316" },
+  { label: "F  <60%", key: "F", color: "#EF4444" },
+];
+
 export default function ExamStatsScreen() {
   const router = useRouter();
   const { examId, examTitle } = useLocalSearchParams<{
@@ -127,18 +138,28 @@ export default function ExamStatsScreen() {
   const [exporting, setExporting] = useState(false);
   const [exportStage, setExportStage] = useState("");
   const [exportPercent, setExportPercent] = useState(0);
-
-  // ── PDF report viewer state ───────────────────────────────────────────────
   const [reportGenerating, setReportGenerating] = useState(false);
   const [reportViewerVisible, setReportViewerVisible] = useState(false);
   const [reportHtml, setReportHtml] = useState("");
   const [reportViewerTitle, setReportViewerTitle] = useState("");
   const [sendScoresVisible, setSendScoresVisible] = useState(false);
 
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  const title = examTitle
+    ? decodeURIComponent(examTitle)
+    : (stats?.examTitle ?? "Exam Stats");
+
+  const grades =
+    sortByCount && stats
+      ? [...BASE_GRADES].sort(
+          (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
+        )
+      : BASE_GRADES;
+
   const handleExport = useCallback(() => {
     if (!examId || exporting) return;
 
-    // Build subtitle showing which filter is currently active
     const filterLabel =
       dateFilter === "today"
         ? "Today's records"
@@ -146,38 +167,28 @@ export default function ExamStatsScreen() {
           ? "This week's records"
           : "All records";
 
-    Alert.alert(
-      "Export Grades",
-      `Format? (Exporting: ${filterLabel})`,
-      [
-        { text: "CSV", onPress: () => doExport("csv") },
-        { text: "Excel", onPress: () => doExport("excel") },
-        { text: "PDF (with logo)", onPress: () => doExport("pdf") },
-        { text: "Cancel", style: "cancel" },
-      ],
-      { cancelable: true },
-    );
-  }, [examId, exporting, dateFilter]);
+    Alert.alert("Export Grades", `Format? Exporting ${filterLabel}.`, [
+      { text: "CSV", onPress: () => void doExport("csv") },
+      { text: "Excel", onPress: () => void doExport("excel") },
+      { text: "PDF", onPress: () => void doExport("pdf") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [dateFilter, examId, exporting]);
 
   const doExport = async (format: ExportFormat) => {
     setExporting(true);
-    setExportStage("Starting export…");
+    setExportStage("Starting export...");
     setExportPercent(0);
 
     try {
-      const result = await GradeExportService.exportExamGrades(
-        examId as string,
-        {
-          format,
-          // Pass the active date filter so export scope matches the view (#9)
-          dateFilter: dateFilter as ExportDateFilter,
-          // Progress callback drives the overlay (#6)
-          onProgress: (stage, percent) => {
-            setExportStage(stage);
-            setExportPercent(percent);
-          },
+      const result = await GradeExportService.exportExamGrades(examId as string, {
+        format,
+        dateFilter: dateFilter as ExportDateFilter,
+        onProgress: (stage, percent) => {
+          setExportStage(stage);
+          setExportPercent(percent);
         },
-      );
+      });
 
       if (result.success) {
         Toast.show({
@@ -207,16 +218,18 @@ export default function ExamStatsScreen() {
       setExportPercent(0);
     }
   };
+
   const handleGenerateReport = useCallback(async () => {
     if (!examId || reportGenerating) return;
+
     setReportGenerating(true);
     try {
       const result = await ReportPdfService.generateClassSummaryReport(
         examId as string,
       );
+
       if (result.success && result.previewHtml) {
-        const decoded = examTitle ? decodeURIComponent(examTitle) : "Exam";
-        setReportViewerTitle(`${decoded} — Class Summary`);
+        setReportViewerTitle(`${title} - Class Summary`);
         setReportHtml(result.previewHtml);
         setReportViewerVisible(true);
       } else {
@@ -237,9 +250,7 @@ export default function ExamStatsScreen() {
     } finally {
       setReportGenerating(false);
     }
-  }, [examId, examTitle, reportGenerating]);
-
-  const unsubscribeRef = useRef<(() => void) | null>(null);
+  }, [examId, reportGenerating, title]);
 
   const subscribe = useCallback(
     (isRefresh = false) => {
@@ -270,22 +281,22 @@ export default function ExamStatsScreen() {
           setRefreshing(false);
         },
         (err) => {
-          setError(
-            err.message || "Failed to load stats. Check your connection.",
-          );
+          setError(err.message || "Failed to load stats. Check your connection.");
           setLoading(false);
           setRefreshing(false);
         },
         dateFrom,
       );
+
       unsubscribeRef.current = unsub;
     },
-    [examId, dateFilter],
+    [dateFilter, examId],
   );
 
   useEffect(() => {
     if (!examId) return;
     subscribe();
+
     return () => {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
@@ -297,33 +308,8 @@ export default function ExamStatsScreen() {
     subscribe(true);
   }, [subscribe]);
 
-  const title = examTitle
-    ? decodeURIComponent(examTitle)
-    : (stats?.examTitle ?? "Exam Stats");
-
-  // Grade definitions — may be reordered by sort toggle
-  const BASE_GRADES: {
-    label: string;
-    key: keyof NonNullable<typeof stats>["distribution"];
-    color: string;
-  }[] = [
-    { label: "A  ≥90%", key: "A", color: "#00a550" },
-    { label: "B  80–89%", key: "B", color: "#4a90e2" },
-    { label: "C  70–79%", key: "C", color: "#f5a623" },
-    { label: "D  60–69%", key: "D", color: "#e67e22" },
-    { label: "F  <60%", key: "F", color: "#e74c3c" },
-  ];
-
-  const grades =
-    sortByCount && stats
-      ? [...BASE_GRADES].sort(
-          (a, b) => stats.distribution[b.key] - stats.distribution[a.key],
-        )
-      : BASE_GRADES;
-
   return (
     <View style={styles.container}>
-      {/* ── PDF Report Viewer Modal ───────────────────────────────────── */}
       <ReportPdfViewer
         visible={reportViewerVisible}
         onClose={() => setReportViewerVisible(false)}
@@ -332,7 +318,6 @@ export default function ExamStatsScreen() {
         fileName="GC_ClassSummary"
       />
 
-      {/* ── Send Scores Modal ─────────────────────────────────────────── */}
       <SendScoresModal
         visible={sendScoresVisible}
         onClose={() => setSendScoresVisible(false)}
@@ -340,13 +325,11 @@ export default function ExamStatsScreen() {
         examLabel={title}
       />
 
-      {/* ── Export progress overlay (#6) ─────────────────────── */}
       {exporting && (
         <View style={styles.exportOverlay}>
           <View style={styles.exportCard}>
-            <ActivityIndicator size="large" color="#00a550" />
+            <ActivityIndicator size="large" color="#20BE7B" />
             <Text style={styles.exportStageText}>{exportStage}</Text>
-            {/* Progress bar */}
             <View style={styles.exportBarBg}>
               <View
                 style={[styles.exportBarFill, { width: `${exportPercent}%` }]}
@@ -357,57 +340,56 @@ export default function ExamStatsScreen() {
         </View>
       )}
 
-      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color="#24362f" />
+        <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
+          <Ionicons name="arrow-back" size={22} color="#1F2937" />
         </TouchableOpacity>
+
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
         </Text>
-        {/* Right: Report + Export + Send Scores buttons */}
+
         <View style={styles.headerRight}>
           <TouchableOpacity
             onPress={() => setSendScoresVisible(true)}
-            style={styles.backBtn}
+            style={styles.iconButton}
             disabled={!stats || stats.totalGraded === 0}
           >
             <Ionicons
               name="mail-outline"
-              size={22}
-              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+              size={20}
+              color={!stats || stats.totalGraded === 0 ? "#C7CDD6" : "#20BE7B"}
             />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleGenerateReport}
-            style={styles.backBtn}
+            style={styles.iconButton}
             disabled={reportGenerating || !stats || stats.totalGraded === 0}
           >
             {reportGenerating ? (
-              <ActivityIndicator size="small" color="#00a550" />
+              <ActivityIndicator size="small" color="#20BE7B" />
             ) : (
               <Ionicons
                 name="document-text-outline"
-                size={22}
-                color={!stats || stats.totalGraded === 0 ? "#ccc" : "#00a550"}
+                size={20}
+                color={!stats || stats.totalGraded === 0 ? "#C7CDD6" : "#20BE7B"}
               />
             )}
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleExport}
-            style={styles.backBtn}
+            style={styles.iconButton}
             disabled={exporting || !stats || stats.totalGraded === 0}
           >
             <Ionicons
               name={exporting ? "hourglass-outline" : "download-outline"}
-              size={24}
-              color={!stats || stats.totalGraded === 0 ? "#ccc" : "#24362f"}
+              size={20}
+              color={!stats || stats.totalGraded === 0 ? "#C7CDD6" : "#1F2937"}
             />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Date filter chips */}
       <View style={styles.filterRow}>
         {DATE_FILTERS.map(({ label, value }) => (
           <TouchableOpacity
@@ -430,14 +412,13 @@ export default function ExamStatsScreen() {
         ))}
       </View>
 
-      {/* Error fallback */}
       {error && !loading ? (
         <View style={styles.errorCenter}>
-          <Ionicons name="cloud-offline-outline" size={52} color="#e74c3c" />
+          <Ionicons name="cloud-offline-outline" size={52} color="#EF4444" />
           <Text style={styles.errorTitle}>Could Not Load Stats</Text>
           <Text style={styles.errorSubtitle}>{error}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={() => subscribe()}>
-            <Ionicons name="refresh" size={16} color="#fff" />
+            <Ionicons name="refresh" size={16} color="#FFFFFF" />
             <Text style={styles.retryBtnText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -445,7 +426,7 @@ export default function ExamStatsScreen() {
         <StatsSkeleton />
       ) : !stats || stats.totalGraded === 0 ? (
         <View style={styles.emptyCenter}>
-          <Ionicons name="bar-chart-outline" size={52} color="#ccc" />
+          <Ionicons name="bar-chart-outline" size={52} color="#C7CDD6" />
           <Text style={styles.emptyTitle}>No Results Yet</Text>
           <Text style={styles.emptySubtitle}>
             {dateFilter !== "all"
@@ -462,76 +443,69 @@ export default function ExamStatsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={["#00a550"]}
-              tintColor="#00a550"
+              colors={["#20BE7B"]}
+              tintColor="#20BE7B"
             />
           }
         >
-          {/* Summary Cards Row 1 */}
           <View style={styles.row}>
-            <View style={[styles.card, styles.cardGreen]}>
-              <Ionicons name="people" size={22} color="#00a550" />
+            <View style={styles.card}>
+              <Ionicons name="people-outline" size={22} color="#20BE7B" />
               <Text style={styles.cardValue}>{stats.totalGraded}</Text>
               <Text style={styles.cardLabel}>Total Graded</Text>
             </View>
-            <View style={[styles.card, styles.cardGreen]}>
-              <Ionicons name="stats-chart" size={22} color="#00a550" />
+            <View style={styles.card}>
+              <Ionicons name="stats-chart-outline" size={22} color="#20BE7B" />
               <Text style={styles.cardValue}>{stats.classAverage}%</Text>
               <Text style={styles.cardLabel}>Class Average</Text>
             </View>
           </View>
 
-          {/* Summary Cards Row 2 */}
           <View style={styles.row}>
             <View style={[styles.card, styles.cardPass]}>
-              <Ionicons name="checkmark-circle" size={22} color="#00a550" />
+              <Ionicons name="checkmark-circle-outline" size={22} color="#20BE7B" />
               <Text style={styles.cardValue}>{stats.passCount}</Text>
               <Text style={styles.cardLabel}>Passed ({stats.passRate}%)</Text>
             </View>
             <View style={[styles.card, styles.cardFail]}>
-              <Ionicons name="close-circle" size={22} color="#e74c3c" />
-              <Text style={[styles.cardValue, { color: "#e74c3c" }]}>
+              <Ionicons name="close-circle-outline" size={22} color="#EF4444" />
+              <Text style={[styles.cardValue, { color: "#EF4444" }]}>
                 {stats.failCount}
               </Text>
-              <Text style={styles.cardLabel}>
-                Failed ({100 - stats.passRate}%)
-              </Text>
+              <Text style={styles.cardLabel}>Failed ({100 - stats.passRate}%)</Text>
             </View>
           </View>
 
-          {/* Highest / Lowest */}
           <View style={styles.hiloBox}>
             <View style={styles.hiloItem}>
-              <Ionicons name="arrow-up-circle" size={22} color="#00a550" />
+              <Ionicons name="arrow-up-circle-outline" size={22} color="#20BE7B" />
               <Text style={styles.hiloValue}>{stats.highestPercentage}%</Text>
               <Text style={styles.hiloLabel}>Highest Score</Text>
             </View>
             <View style={styles.hiloDivider} />
             <View style={styles.hiloItem}>
-              <Ionicons name="arrow-down-circle" size={22} color="#e74c3c" />
-              <Text style={[styles.hiloValue, { color: "#e74c3c" }]}>
+              <Ionicons name="arrow-down-circle-outline" size={22} color="#EF4444" />
+              <Text style={[styles.hiloValue, { color: "#EF4444" }]}>
                 {stats.lowestPercentage}%
               </Text>
               <Text style={styles.hiloLabel}>Lowest Score</Text>
             </View>
           </View>
 
-          {/* Distribution Chart */}
           <View style={styles.distBox}>
             <View style={styles.distHeader}>
               <Text style={styles.distTitle}>Score Distribution</Text>
-              {/* Sort toggle */}
               <TouchableOpacity
                 style={[
                   styles.sortToggle,
                   sortByCount && styles.sortToggleActive,
                 ]}
-                onPress={() => setSortByCount((v) => !v)}
+                onPress={() => setSortByCount((value) => !value)}
               >
                 <Ionicons
                   name="swap-vertical"
                   size={13}
-                  color={sortByCount ? "#fff" : "#555"}
+                  color={sortByCount ? "#FFFFFF" : "#6B7280"}
                 />
                 <Text
                   style={[
@@ -543,17 +517,12 @@ export default function ExamStatsScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+
             {(() => {
               const dist = stats.distribution;
               const total = stats.totalGraded;
-              const maxCount = Math.max(
-                dist.A,
-                dist.B,
-                dist.C,
-                dist.D,
-                dist.F,
-                1,
-              );
+              const maxCount = Math.max(dist.A, dist.B, dist.C, dist.D, dist.F, 1);
+
               return grades.map(({ label, key, color }) => (
                 <View key={key} style={styles.distRow}>
                   <Text style={styles.distLabel}>{label}</Text>
@@ -569,15 +538,13 @@ export default function ExamStatsScreen() {
                     />
                   </View>
                   <Text style={styles.distCount}>
-                    {dist[key]} (
-                    {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                    {dist[key]} ({total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
                   </Text>
                 </View>
               ));
             })()}
           </View>
 
-          {/* Last updated */}
           <Text style={styles.updatedText}>
             Last updated:{" "}
             {stats.lastUpdated.toLocaleTimeString("en-US", {
@@ -585,8 +552,6 @@ export default function ExamStatsScreen() {
               minute: "2-digit",
             })}
           </Text>
-
-          <View style={{ height: 32 }} />
         </ScrollView>
       )}
     </View>
@@ -596,64 +561,68 @@ export default function ExamStatsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#F7F7F8",
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
-    paddingVertical: 14,
-    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 14,
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e0e0",
+    borderBottomColor: "#ECEEF2",
   },
-  backBtn: {
-    padding: 4,
+  iconButton: {
     width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 2,
   },
   headerTitle: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#24362f",
     textAlign: "center",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1F2937",
+    marginHorizontal: 10,
   },
-  // ── Date filter chips ────────────────────────────────────────────────────
   filterRow: {
     flexDirection: "row",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
     gap: 8,
-    backgroundColor: "#fff",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#ebebeb",
+    borderBottomColor: "#ECEEF2",
   },
   filterChip: {
     paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 20,
-    borderWidth: 1.5,
-    borderColor: "#c8c0a8",
-    backgroundColor: "#f5f2eb",
+    borderWidth: 1,
+    borderColor: "#D9E4DC",
+    backgroundColor: "#FFFFFF",
   },
   filterChipActive: {
-    backgroundColor: "#24362f",
-    borderColor: "#24362f",
+    backgroundColor: "#E9F8F1",
+    borderColor: "#20BE7B",
   },
   filterChipText: {
     fontSize: 12,
-    fontWeight: "600",
-    color: "#555",
+    fontWeight: "700",
+    color: "#6B7280",
   },
   filterChipTextActive: {
-    color: "#fff",
+    color: "#109B67",
   },
-  // ── Error state ──────────────────────────────────────────────────────────
   errorCenter: {
     flex: 1,
     alignItems: "center",
@@ -663,13 +632,13 @@ const styles = StyleSheet.create({
   },
   errorTitle: {
     fontSize: 18,
-    fontWeight: "700",
-    color: "#444",
+    fontWeight: "800",
+    color: "#1F2937",
     marginTop: 8,
   },
   errorSubtitle: {
     fontSize: 13,
-    color: "#888",
+    color: "#8E97A6",
     textAlign: "center",
   },
   retryBtn: {
@@ -677,17 +646,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     marginTop: 8,
-    backgroundColor: "#24362f",
+    backgroundColor: "#20BE7B",
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 10,
+    borderRadius: 12,
   },
   retryBtnText: {
     fontSize: 14,
-    fontWeight: "700",
-    color: "#fff",
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
-  // ── Empty state ──────────────────────────────────────────────────────────
   emptyCenter: {
     flex: 1,
     alignItems: "center",
@@ -697,22 +665,22 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: "700",
-    color: "#999",
+    fontWeight: "800",
+    color: "#1F2937",
     marginTop: 8,
   },
   emptySubtitle: {
     fontSize: 13,
-    color: "#bbb",
+    color: "#8E97A6",
     textAlign: "center",
   },
-  // ── Scroll content ───────────────────────────────────────────────────────
   scroll: {
     flex: 1,
   },
   scrollContent: {
     padding: 16,
     gap: 12,
+    paddingBottom: 32,
   },
   row: {
     flexDirection: "row",
@@ -720,40 +688,36 @@ const styles = StyleSheet.create({
   },
   card: {
     flex: 1,
-    borderRadius: 12,
+    borderRadius: 18,
     padding: 16,
     alignItems: "center",
     gap: 6,
-    borderWidth: 2,
-  },
-  cardGreen: {
-    backgroundColor: "#f0ead6",
-    borderColor: "#d4c5a0",
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    backgroundColor: "#FFFFFF",
   },
   cardPass: {
-    backgroundColor: "#e8f5ee",
-    borderColor: "#a8d8b9",
+    borderColor: "#D9F1E4",
   },
   cardFail: {
-    backgroundColor: "#fdf0f0",
-    borderColor: "#f0b8b8",
+    borderColor: "#F5D9DD",
   },
   cardValue: {
     fontSize: 28,
-    fontWeight: "bold",
-    color: "#333",
+    fontWeight: "800",
+    color: "#1F2937",
   },
   cardLabel: {
     fontSize: 12,
-    color: "#666",
+    color: "#8E97A6",
     textAlign: "center",
   },
   hiloBox: {
     flexDirection: "row",
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
     overflow: "hidden",
   },
   hiloItem: {
@@ -764,24 +728,23 @@ const styles = StyleSheet.create({
   },
   hiloDivider: {
     width: 1,
-    backgroundColor: "#d4c5a0",
+    backgroundColor: "#E8EBF0",
     marginVertical: 10,
   },
   hiloValue: {
     fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
+    fontWeight: "800",
+    color: "#1F2937",
   },
   hiloLabel: {
     fontSize: 12,
-    color: "#666",
+    color: "#8E97A6",
   },
-  // ── Distribution chart ───────────────────────────────────────────────────
   distBox: {
-    backgroundColor: "#f0ead6",
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: "#d4c5a0",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
     padding: 16,
     gap: 10,
   },
@@ -792,32 +755,32 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   distTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#333",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1F2937",
   },
   sortToggle: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#b8b0a0",
-    backgroundColor: "#ede8da",
+    borderColor: "#D9E4DC",
+    backgroundColor: "#F7F8FA",
   },
   sortToggleActive: {
-    backgroundColor: "#24362f",
-    borderColor: "#24362f",
+    backgroundColor: "#20BE7B",
+    borderColor: "#20BE7B",
   },
   sortToggleText: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#555",
+    fontWeight: "700",
+    color: "#6B7280",
   },
   sortToggleTextActive: {
-    color: "#fff",
+    color: "#FFFFFF",
   },
   distRow: {
     flexDirection: "row",
@@ -825,14 +788,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   distLabel: {
+    width: 82,
     fontSize: 11,
-    color: "#555",
-    width: 78,
+    color: "#6B7280",
   },
   distBarBg: {
     flex: 1,
     height: 10,
-    backgroundColor: "#e0d8c0",
+    backgroundColor: "#EEF2F5",
     borderRadius: 5,
     overflow: "hidden",
   },
@@ -841,19 +804,17 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   distCount: {
-    fontSize: 11,
-    color: "#555",
     width: 58,
     textAlign: "right",
+    fontSize: 11,
+    color: "#6B7280",
   },
   updatedText: {
     fontSize: 11,
-    color: "#aaa",
+    color: "#98A2B3",
     textAlign: "center",
     marginTop: 4,
   },
-
-  // ── Export progress overlay (#6) ────────────────────────────────────────
   exportOverlay: {
     position: "absolute",
     top: 0,
@@ -866,40 +827,40 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   exportCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
     paddingVertical: 28,
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
     alignItems: "center",
     gap: 14,
     minWidth: 240,
     shadowColor: "#000",
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
   exportStageText: {
     fontSize: 13,
-    color: "#444",
+    color: "#4B5563",
     textAlign: "center",
-    fontWeight: "500",
+    fontWeight: "600",
   },
   exportBarBg: {
     width: "100%",
     height: 8,
-    backgroundColor: "#e0e0e0",
+    backgroundColor: "#E5E7EB",
     borderRadius: 4,
     overflow: "hidden",
   },
   exportBarFill: {
     height: 8,
-    backgroundColor: "#00a550",
+    backgroundColor: "#20BE7B",
     borderRadius: 4,
   },
   exportPercentText: {
     fontSize: 12,
-    color: "#00a550",
-    fontWeight: "700",
+    color: "#20BE7B",
+    fontWeight: "800",
   },
 });

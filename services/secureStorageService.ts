@@ -1,33 +1,96 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
+import { RealmService, SystemKV } from "./realmService";
 
 /**
  * Secure Storage Service with encryption
  * Uses expo-crypto for encryption/decryption
  */
 export class SecureStorageService {
-  private static ENCRYPTION_KEY = "@secure_storage_key";
+  private static ENCRYPTION_KEY_NAME = "@secure_storage_key";
+  private static MIGRATION_KEY = "@secure_storage_migrated_to_realm";
   private static encryptionKey: string | null = null;
 
   /**
-   * Initialize encryption key
+   * Initialize encryption key and migrate data if needed
    */
   static async initialize(): Promise<void> {
     try {
-      // Try to get existing key
-      let key = await AsyncStorage.getItem(this.ENCRYPTION_KEY);
+      const realm = await RealmService.getStagingRealm();
+
+      // Try to get existing key from Realm
+      const keyRecord = realm.objectForPrimaryKey<SystemKV>(
+        "SystemKV",
+        this.ENCRYPTION_KEY_NAME,
+      );
+      let key = keyRecord?.value;
 
       if (!key) {
-        // Generate new key
-        key = await this.generateEncryptionKey();
-        await AsyncStorage.setItem(this.ENCRYPTION_KEY, key);
+        // Fallback to AsyncStorage for migration
+        key = (await AsyncStorage.getItem(this.ENCRYPTION_KEY_NAME)) || undefined;
+
+        if (!key) {
+          // Generate new key
+          key = await this.generateEncryptionKey();
+        }
+
+        // Save to Realm
+        realm.write(() => {
+          realm.create(
+            "SystemKV",
+            { key: this.ENCRYPTION_KEY_NAME, value: key! },
+            Realm.UpdateMode.Modified,
+          );
+        });
       }
 
-      this.encryptionKey = key;
-      console.log("✅ Secure storage initialized");
+      this.encryptionKey = key ?? null;
+
+      // Migrate existing secure items from AsyncStorage to Realm
+      await this.ensureMigrated();
+
+      console.log("Secure storage initialized via Realm");
     } catch (error) {
       console.error("Error initializing secure storage:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Helper to ensure data is migrated from AsyncStorage to Realm
+   */
+  private static async ensureMigrated(): Promise<void> {
+    try {
+      const migrated = await AsyncStorage.getItem(this.MIGRATION_KEY);
+      if (migrated === "true") return;
+
+      console.log(
+        "[SecureStorageService] Migrating secure data from AsyncStorage to Realm...",
+      );
+      const keys = await AsyncStorage.getAllKeys();
+      const secureKeys = keys.filter((k) => k.startsWith("@secure_"));
+
+      if (secureKeys.length > 0) {
+        const realm = await RealmService.getStagingRealm();
+        for (const fullKey of secureKeys) {
+          const value = await AsyncStorage.getItem(fullKey);
+          if (value) {
+            const shortKey = fullKey.replace("@secure_", "");
+            realm.write(() => {
+              realm.create(
+                "SystemKV",
+                { key: `secure_${shortKey}`, value },
+                Realm.UpdateMode.Modified,
+              );
+            });
+          }
+        }
+      }
+
+      await AsyncStorage.setItem(this.MIGRATION_KEY, "true");
+      console.log("[SecureStorageService] Migration complete.");
+    } catch (err) {
+      console.error("[SecureStorageService] Migration failed:", err);
     }
   }
 
@@ -103,7 +166,14 @@ export class SecureStorageService {
   static async setItem(key: string, value: string): Promise<void> {
     try {
       const encrypted = await this.encrypt(value);
-      await AsyncStorage.setItem(`@secure_${key}`, encrypted);
+      const realm = await RealmService.getStagingRealm();
+      realm.write(() => {
+        realm.create(
+          "SystemKV",
+          { key: `secure_${key}`, value: encrypted },
+          Realm.UpdateMode.Modified,
+        );
+      });
     } catch (error) {
       console.error("Error storing encrypted data:", error);
       throw error;
@@ -115,8 +185,19 @@ export class SecureStorageService {
    */
   static async getItem(key: string): Promise<string | null> {
     try {
-      const encrypted = await AsyncStorage.getItem(`@secure_${key}`);
-      if (!encrypted) return null;
+      const realm = await RealmService.getStagingRealm();
+      const record = realm.objectForPrimaryKey<SystemKV>(
+        "SystemKV",
+        `secure_${key}`,
+      );
+
+      let encrypted = record?.value;
+
+      // Fallback for non-migrated items
+      if (!encrypted) {
+        encrypted = (await AsyncStorage.getItem(`@secure_${key}`)) || undefined;
+        if (!encrypted) return null;
+      }
 
       return await this.decrypt(encrypted);
     } catch (error) {
@@ -158,6 +239,18 @@ export class SecureStorageService {
    */
   static async removeItem(key: string): Promise<void> {
     try {
+      const realm = await RealmService.getStagingRealm();
+      const record = realm.objectForPrimaryKey<SystemKV>(
+        "SystemKV",
+        `secure_${key}`,
+      );
+      if (record) {
+        realm.write(() => {
+          realm.delete(record);
+        });
+      }
+
+      // Also remove from legacy storage
       await AsyncStorage.removeItem(`@secure_${key}`);
     } catch (error) {
       console.error("Error removing encrypted data:", error);
@@ -170,10 +263,21 @@ export class SecureStorageService {
    */
   static async clear(): Promise<void> {
     try {
+      const realm = await RealmService.getStagingRealm();
+      const secureItems = realm
+        .objects<SystemKV>("SystemKV")
+        .filtered("key BEGINSWITH 'secure_'");
+
+      realm.write(() => {
+        realm.delete(secureItems);
+      });
+
+      // Clear legacy storage
       const keys = await AsyncStorage.getAllKeys();
       const secureKeys = keys.filter((k) => k.startsWith("@secure_"));
       await AsyncStorage.multiRemove(secureKeys);
-      console.log("✅ All encrypted data cleared");
+
+      console.log("All encrypted data cleared from Realm and AsyncStorage");
     } catch (error) {
       console.error("Error clearing encrypted data:", error);
       throw error;
@@ -187,7 +291,7 @@ export class SecureStorageService {
     try {
       await this.initialize();
       return this.encryptionKey !== null;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

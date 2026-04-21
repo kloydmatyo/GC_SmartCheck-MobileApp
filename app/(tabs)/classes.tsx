@@ -521,7 +521,10 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       await loadClasses();
       router.push("/(tabs)/batch-history");
     } catch (error) {
-      console.error("Error archiving class:", error);
+      console.warn(
+        "Archive class failed:",
+        error instanceof Error ? error.message : String(error),
+      );
       Toast.show({
         type: "error",
         text1: "Error",
@@ -1039,11 +1042,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 16,
     minHeight: 96,
+    borderRadius: 24,
+    overflow: "hidden",
   },
   cardAccent: {
     width: 6,
-    borderTopLeftRadius: 0,
-    borderBottomLeftRadius: 0,
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
   },
   classCardSurface: {
     backgroundColor: "#FFFFFF",
@@ -1053,6 +1058,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 18,
     paddingVertical: 18,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
   },
   classHeader: {
     flexDirection: "row",

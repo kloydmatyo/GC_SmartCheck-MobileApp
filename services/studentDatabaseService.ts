@@ -6,7 +6,6 @@
 
 import { auth, db } from "@/config/firebase";
 import { CacheMetadata, StudentExtended, SyncStatus } from "@/types/student";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
     addDoc,
     collection,
@@ -447,7 +446,10 @@ export class StudentDatabaseService {
     try {
       const count = await this.downloadStudentDatabase();
       const lastSyncAt = new Date().toISOString();
-      await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC, lastSyncAt);
+      const realm = await RealmService.getStagingRealm();
+      realm.write(() => {
+        realm.create("SystemKV", { key: STORAGE_KEYS.LAST_SYNC, value: lastSyncAt }, Realm.UpdateMode.Modified);
+      });
       return { isSyncing: false, pendingChanges: 0, syncErrors: [], lastSyncAt };
     } catch (error) {
       return { 
@@ -460,9 +462,10 @@ export class StudentDatabaseService {
 
   static async getCacheMetadata(): Promise<CacheMetadata> {
     try {
-      const json = await AsyncStorage.getItem(STORAGE_KEYS.CACHE_METADATA);
-      if (!json) return this.getEmptyCacheMetadata();
-      const metadata: CacheMetadata = JSON.parse(json);
+      const realm = await RealmService.getStagingRealm();
+      const kv = realm.objectForPrimaryKey<any>("SystemKV", STORAGE_KEYS.CACHE_METADATA);
+      if (!kv) return this.getEmptyCacheMetadata();
+      const metadata: CacheMetadata = JSON.parse(kv.value);
       metadata.isExpired = new Date(metadata.expiresAt) < new Date();
       return metadata;
     } catch {
@@ -483,7 +486,11 @@ export class StudentDatabaseService {
       encryptionEnabled: false,
     };
 
-    await AsyncStorage.setItem(STORAGE_KEYS.CACHE_METADATA, JSON.stringify(metadata));
+    const metadataStr = JSON.stringify(metadata);
+    const realm = await RealmService.getStagingRealm();
+    realm.write(() => {
+      realm.create("SystemKV", { key: STORAGE_KEYS.CACHE_METADATA, value: metadataStr }, Realm.UpdateMode.Modified);
+    });
   }
 
   private static getEmptyCacheMetadata(): CacheMetadata {

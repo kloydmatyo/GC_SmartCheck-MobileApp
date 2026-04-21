@@ -1285,7 +1285,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 280,
+    paddingBottom: 140,
   },
   actionRow: {
     flexDirection: "row",
@@ -1505,8 +1505,8 @@ const styles = StyleSheet.create({
     flexGrow: 0,
   },
   unansweredChip: {
-    minWidth: 38,
-    paddingHorizontal: 10,
+    width: 38,
+    paddingHorizontal: 0,
     paddingVertical: 8,
     borderRadius: 999,
     backgroundColor: "#FFF7E6",
@@ -1516,7 +1516,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   unansweredChipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
     color: "#A16207",
   },
