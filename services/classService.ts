@@ -11,7 +11,7 @@ import {
     updateDoc,
     where,
 } from "firebase/firestore";
-import Realm from 'realm';
+import Realm from "realm";
 import { Class, CreateClassData, Student } from "../types/class";
 import { NetworkService } from "./networkService";
 import { ClassCache, OfflineClass, RealmService } from "./realmService";
@@ -92,7 +92,7 @@ export class ClassService {
           created_at: new Date().toISOString(),
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
-        }).filter(([, v]) => v !== undefined)
+        }).filter(([, v]) => v !== undefined),
       );
 
       const docRef = await addDoc(collection(db, this.COLLECTION), newClass);
@@ -108,7 +108,9 @@ export class ClassService {
             course_subject: classData.course_subject,
             ...(classData.room ? { room: classData.room } : {}),
             ...(classData.year ? { year: classData.year } : {}),
-            ...(classData.section_block ? { section_block: classData.section_block } : {}),
+            ...(classData.section_block
+              ? { section_block: classData.section_block }
+              : {}),
             isArchived: classData.isArchived || false,
             students: JSON.stringify(classData.students || []),
             createdBy: currentUser.uid,
@@ -177,41 +179,47 @@ export class ClassService {
       // --- LOCAL-FIRST OPTIMIZATION ---
       // If we have local data, return it IMMEDIATELY for instant UI responsiveness.
       // We only fetch from Firestore if we're online AND (we have no local data OR we want to background-sync).
-      
+
       const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
 
       if (localClasses.length > 0) {
-        console.log(`[ClassService] Returning ${localClasses.length} local classes instantly.`);
-        
+        console.log(
+          `[ClassService] Returning ${localClasses.length} local classes instantly.`,
+        );
+
         // Optional: Trigger background refresh if online without awaiting it
         if (isOnline) {
-          this.backgroundSyncClasses(currentUser.uid).catch(err => 
-            console.error("[ClassService] Background sync failed:", err)
+          this.backgroundSyncClasses(currentUser.uid).catch((err) =>
+            console.error("[ClassService] Background sync failed:", err),
           );
         }
-        
-        return localClasses.sort((a, b) => getClassSortTime(b) - getClassSortTime(a));
+
+        return localClasses.sort(
+          (a, b) => getClassSortTime(b) - getClassSortTime(a),
+        );
       }
 
       if (isOnline) {
-        console.log("[ClassService] No local classes, fetching from Firestore...");
+        console.log(
+          "[ClassService] No local classes, fetching from Firestore...",
+        );
         const q = query(
           collection(db, this.COLLECTION),
           where("createdBy", "==", currentUser.uid),
         );
         const querySnapshot = await getDocs(q);
         const firestoreClasses: Class[] = [];
-        
+
         // Safely convert Firestore Timestamps to Date objects
         const safeToDate = (timestamp: any): Date => {
           if (!timestamp) return new Date();
-          if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+          if (typeof timestamp.toDate === "function") return timestamp.toDate();
           if (timestamp instanceof Date) return timestamp;
-          if (typeof timestamp === 'string') return new Date(timestamp);
+          if (typeof timestamp === "string") return new Date(timestamp);
           return new Date();
         };
-        
+
         // Update Cache Realm with fresh data
         cacheRealm.write(() => {
           querySnapshot.forEach((docSnap) => {
@@ -236,18 +244,22 @@ export class ClassService {
             };
             firestoreClasses.push(cls);
 
-            cacheRealm.create("ClassCache", {
-              id: docSnap.id,
-              class_name: data.class_name,
-              course_subject: data.course_subject,
-              room: data.room ?? "",
-              year: data.year ?? "",
-              section_block: data.section_block ?? "",
-              isArchived: data.isArchived || false,
-              students: JSON.stringify(data.students || []),
-              createdBy: data.createdBy,
-              updatedAt: updatedAt,
-            }, Realm.UpdateMode.Modified);
+            cacheRealm.create(
+              "ClassCache",
+              {
+                id: docSnap.id,
+                class_name: data.class_name,
+                course_subject: data.course_subject,
+                room: data.room ?? "",
+                year: data.year ?? "",
+                section_block: data.section_block ?? "",
+                isArchived: data.isArchived || false,
+                students: JSON.stringify(data.students || []),
+                createdBy: data.createdBy,
+                updatedAt: updatedAt,
+              },
+              Realm.UpdateMode.Modified,
+            );
           });
         });
 
@@ -323,7 +335,9 @@ export class ClassService {
         });
 
         // Remove cached entries that no longer exist in Firestore
-        const allCached = cacheRealm.objects<ClassCache>("ClassCache").filtered("createdBy == $0", userId);
+        const allCached = cacheRealm
+          .objects<ClassCache>("ClassCache")
+          .filtered("createdBy == $0", userId);
         const toDelete = allCached.filter((c) => !firestoreIds.has(c.id));
         toDelete.forEach((c) => cacheRealm.delete(c));
       });
@@ -341,10 +355,10 @@ export class ClassService {
         const stagingRealm = await RealmService.getStagingRealm();
         const hexId = classId.replace("staging_", "");
         const sClass = stagingRealm.objectForPrimaryKey<OfflineClass>(
-          "OfflineClass", 
-          new Realm.BSON.ObjectId(hexId)
+          "OfflineClass",
+          new Realm.BSON.ObjectId(hexId),
         );
-        
+
         if (sClass) {
           return {
             id: classId,
@@ -367,7 +381,10 @@ export class ClassService {
       const isOnline = await NetworkService.isOnline();
 
       const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
+        "ClassCache",
+        classId,
+      );
 
       if (!isOnline && cached) {
         return {
@@ -386,22 +403,22 @@ export class ClassService {
         };
       }
       if (isOnline) {
-
         const docRef = doc(db, this.COLLECTION, classId);
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          
+
           // Safely convert Firestore Timestamps to Date objects
           const safeToDate = (timestamp: any): Date => {
             if (!timestamp) return new Date();
-            if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+            if (typeof timestamp.toDate === "function")
+              return timestamp.toDate();
             if (timestamp instanceof Date) return timestamp;
-            if (typeof timestamp === 'string') return new Date(timestamp);
+            if (typeof timestamp === "string") return new Date(timestamp);
             return new Date();
           };
-          
+
           const cls = {
             id: docSnap.id,
             class_name: data.class_name,
@@ -420,18 +437,22 @@ export class ClassService {
 
           // Update cache
           cacheRealm.write(() => {
-            cacheRealm.create("ClassCache", {
-              id: docSnap.id,
-              class_name: data.class_name,
-              course_subject: data.course_subject,
-              room: data.room ?? "",
-              year: data.year ?? "",
-              section_block: data.section_block ?? "",
-              isArchived: data.isArchived || false,
-              students: JSON.stringify(data.students || []),
-              createdBy: data.createdBy,
-              updatedAt: cls.updatedAt || new Date(),
-            }, Realm.UpdateMode.Modified);
+            cacheRealm.create(
+              "ClassCache",
+              {
+                id: docSnap.id,
+                class_name: data.class_name,
+                course_subject: data.course_subject,
+                room: data.room ?? "",
+                year: data.year ?? "",
+                section_block: data.section_block ?? "",
+                isArchived: data.isArchived || false,
+                students: JSON.stringify(data.students || []),
+                createdBy: data.createdBy,
+                updatedAt: cls.updatedAt || new Date(),
+              },
+              Realm.UpdateMode.Modified,
+            );
           });
 
           return cls;
@@ -460,16 +481,24 @@ export class ClassService {
       });
 
       const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
+        "ClassCache",
+        classId,
+      );
       if (cached) {
         cacheRealm.write(() => {
-          if (updates.class_name !== undefined) cached.class_name = updates.class_name;
-          if (updates.course_subject !== undefined) cached.course_subject = updates.course_subject;
+          if (updates.class_name !== undefined)
+            cached.class_name = updates.class_name;
+          if (updates.course_subject !== undefined)
+            cached.course_subject = updates.course_subject;
           if (updates.room !== undefined) cached.room = updates.room ?? "";
           if (updates.year !== undefined) cached.year = updates.year ?? "";
-          if (updates.section_block !== undefined) cached.section_block = updates.section_block ?? "";
-          if (updates.isArchived !== undefined) cached.isArchived = updates.isArchived;
-          if (updates.students !== undefined) cached.students = JSON.stringify(updates.students);
+          if (updates.section_block !== undefined)
+            cached.section_block = updates.section_block ?? "";
+          if (updates.isArchived !== undefined)
+            cached.isArchived = updates.isArchived;
+          if (updates.students !== undefined)
+            cached.students = JSON.stringify(updates.students);
           cached.updatedAt = new Date();
         });
       }
@@ -489,7 +518,10 @@ export class ClassService {
 
       // Remove from Realm cache
       const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
+        "ClassCache",
+        classId,
+      );
       if (cached) {
         cacheRealm.write(() => {
           cacheRealm.delete(cached);
@@ -513,13 +545,13 @@ export class ClassService {
 
       // Check if student with same ID already exists in this class
       const existingStudent = classData.students.find(
-        (s) => s.student_id === student.student_id
+        (s) => s.student_id === student.student_id,
       );
 
       if (existingStudent) {
         throw new Error(
           `Student with ID "${student.student_id}" already exists in this class. ` +
-          `Existing student: ${existingStudent.first_name} ${existingStudent.last_name}`
+            `Existing student: ${existingStudent.first_name} ${existingStudent.last_name}`,
         );
       }
 

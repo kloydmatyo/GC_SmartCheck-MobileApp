@@ -155,26 +155,66 @@ function clusterByY<T extends { y: number }>(
 
 function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
   if (rows.length === 0) return [];
+  
+  // Get full rows (close to targetCols bubbles)
   const fullRows = rows.filter(
     (r) => r.length >= targetCols - 1 && r.length <= targetCols + 1,
   );
   if (fullRows.length === 0) return [];
+  
+  // Sort each row by X position (left to right)
   const sortedRows = fullRows.map((r) => [...r].sort((a, b) => a.x - b.x));
+  
+  // Calculate span of each row (distance from leftmost to rightmost bubble)
   const spans = sortedRows.map((r) => r[r.length - 1].x - r[0].x);
   const medianSpan = [...spans].sort((a, b) => a - b)[
     Math.floor(spans.length / 2)
   ];
+  
+  // Filter rows with consistent span (within 20% of median)
   const cleanRows = sortedRows.filter(
     (_, i) => spans[i] >= medianSpan * 0.8 && spans[i] <= medianSpan * 1.2,
   );
   if (cleanRows.length === 0) return [];
-  const centroids: number[] = [];
-  for (let col = 0; col < targetCols; col++) {
-    const xs = cleanRows.filter((r) => r.length > col).map((r) => r[col].x);
-    if (xs.length > 0)
-      centroids.push(xs.reduce((a, b) => a + b, 0) / xs.length);
+  
+  // CRITICAL FIX: Map bubbles to column indices by X position, not array index
+  // This handles cases where some rows have fewer bubbles (blank columns)
+  const centroids: number[] = Array(targetCols).fill(0);
+  const counts: number[] = Array(targetCols).fill(0);
+  
+  for (const row of cleanRows) {
+    if (row.length < 2) continue; // Skip rows with <2 bubbles
+    
+    const minX = row[0].x;
+    const maxX = row[row.length - 1].x;
+    const colWidth = (maxX - minX) / (targetCols - 1); // Equal spacing between columns
+    
+    for (const bubble of row) {
+      // Determine which column this bubble belongs to based on X position
+      const relativeX = bubble.x - minX;
+      let colIdx = Math.round(relativeX / colWidth);
+      colIdx = Math.max(0, Math.min(targetCols - 1, colIdx)); // Clamp to 0-4
+      
+      centroids[colIdx] += bubble.x;
+      counts[colIdx]++;
+    }
   }
-  return centroids.sort((a, b) => a - b);
+  
+  // Average each column's X position
+  const result: number[] = [];
+  for (let i = 0; i < targetCols; i++) {
+    if (counts[i] > 0) {
+      result.push(centroids[i] / counts[i]);
+    }
+  }
+  
+  // Ensure we have exactly targetCols centroids, sorted by X position
+  if (result.length === targetCols) {
+    return result.sort((a, b) => a - b);
+  }
+  
+  // Fallback if calculation failed
+  return [];
 }
 
 function findModalClusterMedian(values: number[], windowRatio = 0.4): number {
@@ -279,10 +319,7 @@ function extractAnswersFromRegionBandBased(
 
     // Log bubble details for debugging sparse regions
     const bubbleDetails = bandBubbles
-      .map(
-        (b, i) =>
-          `#${i}(x=${Math.round(b.x)},fill=${b.fill.toFixed(2)})`,
-      )
+      .map((b, i) => `#${i}(x=${Math.round(b.x)},fill=${b.fill.toFixed(2)})`)
       .join(", ");
     console.log(
       `[OMR] Q${qNum} band: ${bandBubbles.length} bubble(s) - ${bubbleDetails}`,
@@ -298,10 +335,12 @@ function extractAnswersFromRegionBandBased(
       }
     }
 
-    // Threshold: 0.08 fill ratio (very lenient for sparse/light marks)
-    if (!bestBubble || bestFill < 0.08) {
+    // Threshold: 0.50 fill ratio (reject artifacts/erasures for accurate recognition)
+    // Band-based extraction is for sparse regions, so slightly more lenient than row-based
+    // but still strict enough to reject obvious artifacts
+    if (!bestBubble || bestFill < 0.50) {
       console.log(
-        `[OMR] Q${qNum}: best fill ${bestFill.toFixed(2)} < 0.08 threshold`,
+        `[OMR] Q${qNum}: best fill ${bestFill.toFixed(2)} < 0.50 threshold (rejecting artifact)`,
       );
       answers.push({ questionNumber: qNum, selectedAnswer: "" });
       continue;
@@ -418,8 +457,8 @@ function extractAnswersFromRegion(
       colCentroids[4] - colCentroids[3],
     ];
     const avgGap = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-    const maxDeviation = Math.max(...gaps.map((g) => Math.abs(g - avgGap)));    
-    const deviationThreshold = isTopRegion ? 0.55 : 0.40;
+    const maxDeviation = Math.max(...gaps.map((g) => Math.abs(g - avgGap)));
+    const deviationThreshold = isTopRegion ? 0.55 : 0.4;
 
     // If gaps vary by more than threshold, centroids are unreliable
     if (maxDeviation > avgGap * deviationThreshold) {
@@ -435,7 +474,13 @@ function extractAnswersFromRegion(
         `[OMR] Q${startQ}+ fallback centroids:`,
         fallbackCentroids.map((c) => Math.round(c)),
       );
-      return extractWithCentroids(allRows, fallbackCentroids, startQ, numQ, isTopRegion);
+      return extractWithCentroids(
+        allRows,
+        fallbackCentroids,
+        startQ,
+        numQ,
+        isTopRegion,
+      );
     }
   }
 
@@ -463,7 +508,7 @@ function extractWithCentroids(
   // Increased tolerance for edge bubbles and sparse regions (0.80 for top regions, 0.70 for dense)
   const maxDistanceFromCentroid =
     colCentroids.length > 1
-      ? Math.abs(colCentroids[1] - colCentroids[0]) * (isTopRegion ? 0.90 : 0.75)
+      ? Math.abs(colCentroids[1] - colCentroids[0]) * (isTopRegion ? 0.9 : 0.75)
       : 100; // fallback if centroids are unreliable
 
   const validRows = sortedRows.filter((row) => {
@@ -501,35 +546,39 @@ function extractWithCentroids(
 
     // SMARTER MULTI-BUBBLE DETECTION: Only reject if 2+ bubbles are CLEARLY filled (fill >= 0.60)
     // AND they're spatially close (same column). If they're far apart (different columns), accept the best.
-    const clearlFilledBubbles = row.filter((b) => b.fill >= 0.60);
-    
+    const clearlFilledBubbles = row.filter((b) => b.fill >= 0.6);
+
     if (clearlFilledBubbles.length >= 2) {
       // Calculate min gap between centroids (typical column spacing)
-      const minCentroidGap = 
+      const minCentroidGap =
         colCentroids.length > 1
           ? Math.min(
               ...Array.from({ length: colCentroids.length - 1 }, (_, i) =>
-                Math.abs(colCentroids[i + 1] - colCentroids[i])
-              )
+                Math.abs(colCentroids[i + 1] - colCentroids[i]),
+              ),
             )
           : 50; // fallback
 
       // Check if clearly-filled bubbles are close together (same column) or far apart (different columns)
       const sortedByX = [...clearlFilledBubbles].sort((a, b) => a.x - b.x);
       const maxSpacing = sortedByX[sortedByX.length - 1].x - sortedByX[0].x;
-      
+
       // If spacing between high-fill bubbles < 50% of min centroid gap, they're in SAME column → reject
       // If spacing >= 50% of min centroid gap, they're in DIFFERENT columns → accept best
-      const spacingThreshold = minCentroidGap * 0.50;
-      
+      const spacingThreshold = minCentroidGap * 0.5;
+
       if (maxSpacing < spacingThreshold) {
         // True double-shading in same column
-        console.warn(`[OMR] Q${qNum}: REJECTED - ${clearlFilledBubbles.length} bubbles in same column (spacing=${maxSpacing.toFixed(0)}px < ${spacingThreshold.toFixed(0)}px): ${clearlFilledBubbles.map(b => `x=${Math.round(b.x)} fill=${b.fill.toFixed(2)}`).join(", ")}`);
+        console.warn(
+          `[OMR] Q${qNum}: REJECTED - ${clearlFilledBubbles.length} bubbles in same column (spacing=${maxSpacing.toFixed(0)}px < ${spacingThreshold.toFixed(0)}px): ${clearlFilledBubbles.map((b) => `x=${Math.round(b.x)} fill=${b.fill.toFixed(2)}`).join(", ")}`,
+        );
         answers.push({ questionNumber: qNum, selectedAnswer: "" });
         return;
       } else {
         // Bubbles in different columns - use best one, don't reject
-        console.log(`[OMR] Q${qNum}: Multiple bubbles detected but in different columns (spacing=${maxSpacing.toFixed(0)}px >= ${spacingThreshold.toFixed(0)}px), accepting best`);
+        console.log(
+          `[OMR] Q${qNum}: Multiple bubbles detected but in different columns (spacing=${maxSpacing.toFixed(0)}px >= ${spacingThreshold.toFixed(0)}px), accepting best`,
+        );
       }
     }
 
@@ -542,7 +591,7 @@ function extractWithCentroids(
     // NUCLEAR: Accept ANY detected bubble, no fill threshold at all
     // Even if OpenCV detected a bubble with 0.001 fill, it's better than blank
     let fillThreshold = 0.0; // Accept anything detected
-    
+
     // But for clearly-empty rows (no bubbles at all after row-gap clustering),
     // we still return blank. This threshold is for when bubbles ARE present but light.
     if (row.length === 0) {
@@ -848,12 +897,12 @@ export class ZipgradeScanner {
       } else if (qCount === 150) {
         // 150Q: ALWAYS check orientation - papers are portrait (297mm H × 210mm W), camera may be landscape
         console.log(`[OMR] 150Q Pre-rotation: ${srcJs.cols}x${srcJs.rows}`);
-        
+
         // For 150Q, landscape (w > h) must be rotated to portrait
         // Expected: portrait = ~210W × 297H, aspect ~0.71
         const currentAspect = srcJs.cols / srcJs.rows;
         const isLandscape = currentAspect > 1.0;
-        
+
         if (isLandscape) {
           console.log(
             `[OMR] 150Q LANDSCAPE DETECTED: ${srcJs.cols}x${srcJs.rows} (aspect=${currentAspect.toFixed(2)}) - ROTATING 90° CW`,
@@ -872,7 +921,9 @@ export class ZipgradeScanner {
           );
           workingMat = rotatedMat;
         } else {
-          console.log(`[OMR] 150Q already PORTRAIT: ${srcJs.cols}x${srcJs.rows} (aspect=${currentAspect.toFixed(2)})`);
+          console.log(
+            `[OMR] 150Q already PORTRAIT: ${srcJs.cols}x${srcJs.rows} (aspect=${currentAspect.toFixed(2)})`,
+          );
           workingMat = srcMat;
         }
       }
@@ -960,8 +1011,28 @@ export class ZipgradeScanner {
         matsToCleanup.push(tAdapt);
       } catch (_) {}
 
-      const scoringMin = Math.pow(IMG_W * 0.02, 2);
-      const scoringMax = Math.pow(IMG_W * 0.12, 2);
+      // CRITICAL FIX: Match scoring criteria to template-specific bubble dimensions
+      // 150q bubbles are ~31×63px (aspect ≈ 0.49), not 0.5-2.0
+      // This was causing all thresholds to score poorly (0-5)
+      let scoringMin: number;
+      let scoringMax: number;
+      let scoringMinAspect: number;
+      let scoringMaxAspect: number;
+
+      if (qCount === 150) {
+        // 150q: narrow vertical bubbles (31×63, aspect ≈ 0.49)
+        scoringMin = Math.pow(IMG_W * 0.015, 2); // Smaller minimum
+        scoringMax = Math.pow(IMG_W * 0.15, 2); // Larger maximum
+        scoringMinAspect = 0.3; // Allow narrow bubbles
+        scoringMaxAspect = 3.0; // Allow vertical bubbles
+      } else {
+        // Generic: more square bubbles
+        scoringMin = Math.pow(IMG_W * 0.02, 2);
+        scoringMax = Math.pow(IMG_W * 0.12, 2);
+        scoringMinAspect = 0.5; // Roughly square
+        scoringMaxAspect = 2.0;
+      }
+
       const scoreThresh = (mat: any): number => {
         const cv = OpenCV.createObject(ObjectType.MatVector);
         const hi = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_32S);
@@ -980,7 +1051,12 @@ export class ZipgradeScanner {
           const r = OpenCV.toJSValue(OpenCV.invoke("boundingRect", c)) as any;
           const a = r.width * r.height;
           const asp = r.width / r.height;
-          if (a >= scoringMin && a <= scoringMax && asp >= 0.5 && asp <= 2.0)
+          if (
+            a >= scoringMin &&
+            a <= scoringMax &&
+            asp >= scoringMinAspect &&
+            asp <= scoringMaxAspect
+          )
             count++;
         }
         return count;
@@ -1299,7 +1375,9 @@ export class ZipgradeScanner {
           paperTop = imgHeight * 0.01;
           paperBottom = imgHeight * 0.99;
         }
-        console.log(`[OMR] crop: using ${qCount === 150 ? 'wide margins for 150q' : 'default margins'} (no reg marks)`);
+        console.log(
+          `[OMR] crop: using ${qCount === 150 ? "wide margins for 150q" : "default margins"} (no reg marks)`,
+        );
       }
 
       const paperW = paperRight - paperLeft;
@@ -1374,29 +1452,35 @@ export class ZipgradeScanner {
       // For 100q: use fixed regions (timing marks are unreliable)
       // For 150q: use fixed regions with density-based validation
       let regions = getLayoutRegions(detectedQ);
-      
+
       // For 150q, validate that regions overlap with detected bubble density
       if (detectedQ === 150) {
         console.log(`[OMR] Validating 150q regions against bubble density...`);
         for (const region of regions) {
           const regBubbles = bubbles.filter(
-            (b) => 
+            (b) =>
               b.x >= region.xMin * paperW &&
               b.x <= region.xMax * paperW &&
               b.y >= region.yMin * paperH &&
-              b.y <= region.yMax * paperH
+              b.y <= region.yMax * paperH,
           );
-          
+
           // Diagnostic logging
           if (regBubbles.length === 0) {
-            const regionXPct = ((region.xMin + region.xMax) / 2 * 100).toFixed(0);
-            const regionYPct = ((region.yMin + region.yMax) / 2 * 100).toFixed(0);
+            const regionXPct = (
+              ((region.xMin + region.xMax) / 2) *
+              100
+            ).toFixed(0);
+            const regionYPct = (
+              ((region.yMin + region.yMax) / 2) *
+              100
+            ).toFixed(0);
             console.warn(
-              `[OMR] EMPTY REGION ALERT: Q${region.startQ} at X~${regionXPct}%, Y~${regionYPct}% (bounds: X[${(region.xMin*100|0)}%-${(region.xMax*100|0)}%], Y[${(region.yMin*100|0)}%-${(region.yMax*100|0)}%])`
+              `[OMR] EMPTY REGION ALERT: Q${region.startQ} at X~${regionXPct}%, Y~${regionYPct}% (bounds: X[${(region.xMin * 100) | 0}%-${(region.xMax * 100) | 0}%], Y[${(region.yMin * 100) | 0}%-${(region.yMax * 100) | 0}%])`,
             );
           } else if (regBubbles.length < 5) {
             console.warn(
-              `[OMR] SPARSE REGION: Q${region.startQ} has only ${regBubbles.length} bubbles`
+              `[OMR] SPARSE REGION: Q${region.startQ} has only ${regBubbles.length} bubbles`,
             );
           }
         }
@@ -1527,7 +1611,9 @@ export class ZipgradeScanner {
         console.log(
           "[OMR] Using REGION-BASED extraction for 150-item template (row clustering)",
         );
-        console.log(`[OMR] Processing ${bubbles.length} bubbles in ${regions.length} regions`);
+        console.log(
+          `[OMR] Processing ${bubbles.length} bubbles in ${regions.length} regions`,
+        );
 
         const regionAnswers: StudentAnswer[] = [];
 
@@ -1554,7 +1640,7 @@ export class ZipgradeScanner {
         allAnswers = regionAnswers;
 
         console.log(
-          `[OMR] Region-based detection: ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`
+          `[OMR] Region-based detection: ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`,
         );
       } else if (detectedQ === 100 && regMarks.length >= 3) {
         console.log(
