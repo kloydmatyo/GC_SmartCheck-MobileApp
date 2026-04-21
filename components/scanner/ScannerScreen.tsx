@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Alert,
   Modal,
@@ -212,7 +212,8 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
-      setIsStage1Mode(questionCount >= 100);
+      // Disable 2-stage mode - use single-stage scanning for all exams
+      setIsStage1Mode(false);
       setStage1Result(null);
       setStage1Image(undefined);
       setStage1GradingResult(null);
@@ -232,15 +233,31 @@ export default function ScannerScreen({
         ExamService.getExamById(activeExamId),
         2500,
       );
-      if (examData?.answerKey?.answers) {
+      if (examData?.answerKey?.answers && examData.answerKey.answers.length > 0) {
         answerKey = examData.answerKey.answers;
+        console.log(
+          `[ScannerScreen] Using exam answer key: ${examData.answerKey.answers.length} answers`
+        );
       } else {
-        throw new Error("Missing key");
+        // No answer key - this exam needs the answer key to be set first
+        console.error("[ScannerScreen] Answer key not found for exam");
+        Alert.alert(
+          "Answer Key Not Set",
+          `This exam does not have an answer key configured. Please set up the answer key through the exam management interface first.`,
+          [{ text: "OK" }]
+        );
+        throw new Error("Answer key required but not set");
       }
     } catch (error) {
-      answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-        (ak) => ak.correctAnswer,
-      );
+      console.error("[ScannerScreen] Error loading exam answer key:", error);
+      if (!(error instanceof Error && error.message.includes("Answer key required"))) {
+        Alert.alert(
+          "Scanning Error",
+          "Failed to load exam data. Please try again.",
+          [{ text: "OK" }]
+        );
+      }
+      throw error;
     }
 
     const answerKeyFormatted = answerKey.map((answer, index) => ({

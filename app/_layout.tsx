@@ -1,3 +1,7 @@
+import Realm from "realm";
+
+Realm.flags.THROW_ON_GLOBAL_REALM = true;
+
 import NetInfo from "@react-native-community/netinfo";
 import {
   DarkTheme,

@@ -11,6 +11,7 @@ import {
     updateDoc,
     where,
 } from "firebase/firestore";
+import Realm from 'realm';
 import { Class, CreateClassData, Student } from "../types/class";
 import { NetworkService } from "./networkService";
 import { ClassCache, OfflineClass, RealmService } from "./realmService";
@@ -202,12 +203,21 @@ export class ClassService {
         const querySnapshot = await getDocs(q);
         const firestoreClasses: Class[] = [];
         
+        // Safely convert Firestore Timestamps to Date objects
+        const safeToDate = (timestamp: any): Date => {
+          if (!timestamp) return new Date();
+          if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+          if (timestamp instanceof Date) return timestamp;
+          if (typeof timestamp === 'string') return new Date(timestamp);
+          return new Date();
+        };
+        
         // Update Cache Realm with fresh data
         cacheRealm.write(() => {
           querySnapshot.forEach((docSnap) => {
             const data = docSnap.data();
-            const createdAt = data.createdAt?.toDate?.() ?? (data.created_at ? new Date(data.created_at) : new Date());
-            const updatedAt = data.updatedAt?.toDate?.() ?? (data.updated_at ? new Date(data.updated_at) : new Date());
+            const createdAt = safeToDate(data.createdAt);
+            const updatedAt = safeToDate(data.updatedAt);
 
             const cls: Class = {
               id: docSnap.id,
@@ -382,6 +392,16 @@ export class ClassService {
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+          
+          // Safely convert Firestore Timestamps to Date objects
+          const safeToDate = (timestamp: any): Date => {
+            if (!timestamp) return new Date();
+            if (typeof timestamp.toDate === 'function') return timestamp.toDate();
+            if (timestamp instanceof Date) return timestamp;
+            if (typeof timestamp === 'string') return new Date(timestamp);
+            return new Date();
+          };
+          
           const cls = {
             id: docSnap.id,
             class_name: data.class_name,
@@ -394,8 +414,8 @@ export class ClassService {
             isArchived: data.isArchived || false,
             createdBy: data.createdBy,
             created_at: data.created_at,
-            createdAt: data.createdAt?.toDate(),
-            updatedAt: data.updatedAt?.toDate(),
+            createdAt: safeToDate(data.createdAt),
+            updatedAt: safeToDate(data.updatedAt),
           };
 
           // Update cache
