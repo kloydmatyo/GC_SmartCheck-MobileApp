@@ -302,11 +302,15 @@ export default function ArchivedScreen() {
       await updateDoc(doc(db, "exams", id), { isArchived: false });
 
       setRestoreTarget(null);
+      
       Toast.show({
         type: "save_result",
         text1: "Restored",
         text2: "Exam moved out of Archived",
       });
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error restoring exam:", error);
       // Reload in case of error to show correct state
@@ -362,11 +366,15 @@ export default function ArchivedScreen() {
       await deleteDoc(doc(db, "exams", id));
 
       setDeleteTarget(null);
+      
       Toast.show({
         type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error deleting exam:", error);
       // Reload in case of error to show correct state

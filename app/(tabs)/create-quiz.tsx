@@ -382,40 +382,53 @@ export default function CreateQuizScreen() {
       setCreatedExamId(newExamId);
       setReviewVisible(false);
 
-      // Create default answer key in Firestore (Online path)
-      const answerKeyId = `ak_${newExamId}_${Date.now()}`;
-      const answerKeyData = {
-        examId: newExamId,
-        id: answerKeyId,
-        createdBy: currentUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        locked: false,
-        version: 1,
-        questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
-          questionNumber: i + 1,
-          correctAnswer: "",
-          points: 1,
-        })),
-      };
-
-      await setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData);
-
-      // Create template automatically (Online path)
+      // Create default answer key and template in Firestore (Online path)
+      // We wrap these in a try-catch and timeout to prevent hangs if the network is flaky
       try {
-        const templateData = {
-          name: `${quizName.trim()}_Template`,
-          numQuestions,
-          choicesPerQuestion: choicesPerItem,
-          createdBy: currentUser.uid,
+        const answerKeyId = `ak_${newExamId}_${Date.now()}`;
+        const answerKeyData = {
           examId: newExamId,
-          examName: quizName.trim(),
-          examCode,
+          id: answerKeyId,
+          createdBy: currentUser.uid,
           createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          locked: false,
+          version: 1,
+          questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
+            questionNumber: i + 1,
+            correctAnswer: "",
+            points: 1,
+          })),
         };
-        await addDoc(collection(db, "templates"), templateData);
-      } catch (err) {
-        console.warn("Template creation failed:", err);
+
+        // Attempt to create answer key with timeout
+        await Promise.race([
+          setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Answer key creation timed out")), 5000))
+        ]);
+
+        // Attempt to create template with timeout
+        try {
+          const templateData = {
+            name: `${quizName.trim()}_Template`,
+            numQuestions,
+            choicesPerQuestion: choicesPerItem,
+            createdBy: currentUser.uid,
+            examId: newExamId,
+            examName: quizName.trim(),
+            examCode,
+            createdAt: serverTimestamp(),
+          };
+          await Promise.race([
+            addDoc(collection(db, "templates"), templateData),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Template creation timed out")), 5000))
+          ]);
+        } catch (templateErr) {
+          console.warn("Template creation failed or timed out:", templateErr);
+        }
+      } catch (akErr) {
+        console.warn("Answer key creation failed or timed out:", akErr);
+        // Even if secondary tasks fail, we already have the exam doc, so we can proceed.
       }
 
       console.log("=== Quiz Creation Complete ===");

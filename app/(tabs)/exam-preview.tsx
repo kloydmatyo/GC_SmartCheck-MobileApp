@@ -229,6 +229,7 @@ export default function ExamPreviewScreen() {
       errorLog.push("[SUCCESS] Archive completed");
       console.log(errorLog.join("\n"));
 
+      await ExamApi.archiveExam(examId);
       setArchiveConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({

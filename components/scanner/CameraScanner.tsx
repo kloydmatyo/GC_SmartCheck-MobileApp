@@ -14,12 +14,14 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
+  scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
 }
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
+  scanStage,
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
@@ -107,10 +109,12 @@ export default function CameraScanner({
     } else if (questionCount <= 50) {
       // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
       return { width: 215, height: 500 };
+    } else if (questionCount <= 200) {
+      // 100-item / 200-item: 210mm × 297mm (aspect ~0.707, A4 paper)
+      // Both pages use the same physical layout
+      return { width: 320, height: 450 };
     } else {
-      // 100-item: 210mm × 297mm (aspect ~0.707, A4 paper)
-      // The paper is A4 size, nearly same aspect as 20-item but larger
-      // Use 85% of screen width to allow some margin
+      // Fallback for any other count
       return { width: 320, height: 450 };
     }
   };
@@ -155,6 +159,7 @@ export default function CameraScanner({
         photo.uri,
         questionCount,
         templateName,
+        scanStage?.current as 1 | 2 | undefined,
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");
@@ -247,6 +252,30 @@ export default function CameraScanner({
             </View>
           </View>
           <View style={{ flex: 1 }} />
+
+          {/* Stage Indicator Banner (200-item 2-stage mode) */}
+          {scanStage && (
+            <View style={styles.stageBanner}>
+              <View style={styles.stageIndicatorRow}>
+                <View style={[
+                  styles.stageDot,
+                  scanStage.current >= 1 && styles.stageDotActive,
+                ]} />
+                <View style={[
+                  styles.stageDot,
+                  scanStage.current >= 2 && styles.stageDotActive,
+                ]} />
+              </View>
+              <Text style={styles.stageText}>
+                Page {scanStage.current} of {scanStage.total}
+              </Text>
+              <Text style={styles.stageSubtext}>
+                {scanStage.current === 1
+                  ? "Scan Page 1 (Q1–100)"
+                  : "Scan Page 2 (Q101–200)"}
+              </Text>
+            </View>
+          )}
 
           {/* Controls Panel (Absolute bottom) */}
           <View style={styles.shutterContainer}>
@@ -379,5 +408,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
     letterSpacing: 0.3,
+  },
+  stageBanner: {
+    position: "absolute",
+    top: 140,
+    left: 0,
+    right: 0,
+    alignItems: "center" as const,
+    zIndex: 200,
+  },
+  stageIndicatorRow: {
+    flexDirection: "row" as const,
+    gap: 8,
+    marginBottom: 8,
+  },
+  stageDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "rgba(255,255,255,0.3)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.5)",
+  },
+  stageDotActive: {
+    backgroundColor: "#00FF7F",
+    borderColor: "#00FF7F",
+  },
+  stageText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700" as const,
+    textAlign: "center" as const,
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  stageSubtext: {
+    color: "rgba(255,255,255,0.8)",
+    fontSize: 13,
+    fontWeight: "500" as const,
+    textAlign: "center" as const,
+    marginTop: 4,
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 });

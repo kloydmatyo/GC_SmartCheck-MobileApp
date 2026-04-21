@@ -36,6 +36,7 @@ import { deleteDoc, doc } from "firebase/firestore";
 
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
+import { ExamService } from "../../services/examService";
 import { StudentImportService } from "../../services/studentImportService";
 import { Class } from "../../types/class";
 
@@ -564,6 +565,7 @@ export default function ClassDetailsScreen() {
   const handleArchiveExam = async () => {
     if (!selectedExam) return;
     try {
+      const examId = selectedExam.id;
       const examTitle = selectedExam.title;
       await ExamService.updateExam(selectedExam.id, { isArchived: true });
       closeExamMenu();
@@ -590,7 +592,10 @@ export default function ClassDetailsScreen() {
   const handleDeleteExam = async () => {
     if (!selectedExam) return;
     try {
-      await deleteDoc(doc(db, "exams", selectedExam.id));
+      const examId = selectedExam.id;
+      
+      await ExamService.deleteExam(examId);
+
       closeExamMenu();
       clearExamSelection();
       Toast.show({
@@ -601,7 +606,11 @@ export default function ClassDetailsScreen() {
       loadExams();
     } catch (error) {
       console.error("Error deleting exam:", error);
-      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete exam" });
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete exam",
+      });
     }
   };
 

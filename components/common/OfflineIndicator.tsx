@@ -45,6 +45,7 @@ export default function OfflineIndicator() {
 
     // Add listener for network changes
     const unsubscribe = NetworkService.addListener((connected) => {
+      if (!isMounted) return;
       setIsOnline(connected);
 
       if (!connected) {
@@ -65,6 +66,8 @@ export default function OfflineIndicator() {
     });
 
     return () => {
+      isMounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
       unsubscribe();
     };
   }, [slideAnim]);
