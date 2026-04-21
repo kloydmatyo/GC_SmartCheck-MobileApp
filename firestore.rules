@@ -1,198 +1,218 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper function to check if user is authenticated
     function isSignedIn() {
       return request.auth != null;
     }
-    
-    // Helper function to check if user owns the document
+
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
-    
-    // Users collection - users can read/write their own document
+
+    function ownsExam(examId) {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/exams/$(examId)).data.createdBy == request.auth.uid;
+    }
+
+    function isValidScannedResult(data) {
+      let examNumItems = get(/databases/$(database)/documents/exams/$(data.examId)).data.num_items;
+      let effectiveMax = data.keys().hasAll(['maxScore']) ? data.maxScore : data.totalQuestions;
+      return data.keys().hasAll(['examId', 'studentId', 'score', 'totalQuestions', 'scannedBy'])
+          && data.examId is string
+          && data.examId.size() > 0
+          && data.studentId is string
+          && data.score is number
+          && data.score >= 0
+          && data.totalQuestions is number
+          && data.totalQuestions > 0
+          && data.totalQuestions == examNumItems
+          && data.score <= effectiveMax;
+    }
+
+    function isValidGradeEntry(data) {
+      return data.keys().hasAll(['student_id', 'exam_id', 'class_id', 'score', 'max_score', 'percentage'])
+          && data.exam_id is string
+          && data.exam_id.size() > 0
+          && data.student_id is string
+          && data.student_id.size() > 0
+          && data.class_id is string
+          && data.class_id.size() > 0
+          && data.score is number
+          && data.score >= 0
+          && data.max_score is number
+          && data.max_score > 0
+          && data.percentage is number
+          && data.percentage >= 0
+          && data.percentage <= 100
+          && get(/databases/$(database)/documents/exams/$(data.exam_id)).data.num_items >= data.score
+          && get(/databases/$(database)/documents/exams/$(data.exam_id)).data.num_items == data.max_score;
+    }
+
     match /users/{userId} {
-      // Any authenticated user can read user data (needed for validation and lookups)
       allow read: if isSignedIn();
-      // Users can only write (create/update) their own document
       allow write: if isSignedIn() && isOwner(userId);
     }
-    
-    // Instructors collection - allow authenticated users to read/write
+
     match /instructors/{instructorId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
-    
-    // Metadata collection (for counters) - allow authenticated users
+
     match /metadata/{document} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
     }
-    
-    // Exams collection - users can only access their own exams
+
     match /exams/{examId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.instructorId == request.auth.uid
+      );
     }
-    
-    // Classes collection - users can only access their own classes
+
     match /classes/{classId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && 
+        (resource.data.createdBy == request.auth.uid || 
+         resource.data.userId == request.auth.uid ||
+         resource.data.instructorId == request.auth.uid);
     }
-    
-    // Answer Keys collection - instructors can access their own answer keys
+
     match /answerKeys/{answerKeyId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isSignedIn() && 
+                       (resource.data.createdBy == request.auth.uid || 
+                        ownsExam(resource.data.examId));
     }
-    
-    // Templates collection - instructors can create and manage answer sheet templates
+
     match /templates/{templateId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isSignedIn() && 
+                       (resource.data.createdBy == request.auth.uid || 
+                        ownsExam(resource.data.examId));
     }
-    
-    // Students collection - allow authenticated users
+
     match /students/{studentId} {
       allow read, write: if isSignedIn();
     }
-    
-    // Audit logs - read only for owners
+
     match /audit_logs/{logId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
     }
-    
-    // Audit logs (camelCase collection used by auditLogger service)
+
     match /auditLogs/{logId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if false; // immutable
+      allow update, delete: if false;
     }
-    
-    // Scanned Results collection - for exam scanning results
+
     match /scannedResults/{resultId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.scannedBy == request.auth.uid;
+      allow create: if isSignedIn() && isValidScannedResult(request.resource.data);
+      allow update: if isSignedIn()
+                       && resource.data.scannedBy == request.auth.uid
+                       && isValidScannedResult(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.scannedBy == request.auth.uid;
     }
-    
-    // Student Grades collection - for grading records
+
     match /studentGrades/{gradeId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && resource.data.graded_by == request.auth.uid;
+      allow create: if isSignedIn() && isValidGradeEntry(request.resource.data);
+      allow update: if isSignedIn() && isValidGradeEntry(request.resource.data)
+                       && resource.data.graded_by == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.graded_by == request.auth.uid;
     }
-    
-    // Null ID Alerts collection - for scanning alerts
+
     match /nullIdAlerts/{alertId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn();
     }
-    
-    // Student Attendance collection
+
     match /studentAttendance/{attendanceId} {
       allow read, write: if isSignedIn();
     }
-    
-    // Student Enrollments collection
+
     match /studentEnrollments/{enrollmentId} {
       allow read, write: if isSignedIn();
     }
-    
-    // Student Exam Results collection
+
     match /studentExamResults/{resultId} {
       allow read, write: if isSignedIn();
     }
-    
-    // Report History collection - instructors can manage their own report logs
+
     match /reportHistory/{reportId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn();
     }
-    
-    // ========================================
-    // NEW: Exam Batches Collection
-    // For batch tracking and duplication prevention
-    // ========================================
+
     match /examBatches/{batchId} {
-      // Allow read if user is authenticated and is the creator
       allow read: if isSignedIn() && resource.data.createdBy == request.auth.uid;
-      
-      // Allow create if user is authenticated and sets themselves as creator
-      allow create: if isSignedIn() && 
-                      request.resource.data.createdBy == request.auth.uid;
-      
-      // Allow update if user is the creator (for status changes like mark as printed)
-      allow update: if isSignedIn() && 
-                      resource.data.createdBy == request.auth.uid;
-      
-      // Allow delete if user is the creator (soft delete)
-      allow delete: if isSignedIn() && 
-                      resource.data.createdBy == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
 
-    // ========================================
-    // Scan Sessions Collection
-    // For tracking active scanning sessions
-    // ========================================
     match /scanSessions/{sessionId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
 
-    // ========================================
-    // Offline Queue Collection
-    // For offline data synchronization
-    // ========================================
     match /offlineQueue/{queueId} {
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
-    // ========================================
-    // Sync Status Collection
-    // For tracking sync operations
-    // ========================================
     match /syncStatus/{statusId} {
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
-    // ========================================
-    // Storage Usage Collection
-    // For tracking storage metrics
-    // ========================================
     match /storageUsage/{usageId} {
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
-    // ========================================
-    // Invalid Record Logs Collection
-    // For rejected/invalid record tracking (immutable)
-    // ========================================
     match /invalidRecordLogs/{logId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if false; // immutable logs
+      allow update, delete: if false;
     }
 
-    // ========================================
-    // Student Rosters Collection
-    // For exam student rosters
-    // ========================================
     match /studentRosters/{rosterId} {
       allow read, write: if isSignedIn();
+    }
+
+    match /import_sessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /validation_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /instructorSettings/{settingsId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /duplicateScoreOverrides/{overrideId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
   }
 }

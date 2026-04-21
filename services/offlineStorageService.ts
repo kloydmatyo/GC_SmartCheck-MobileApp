@@ -1,7 +1,9 @@
-import { RealmService, QuizCache, OfflinePendingUpdate, SystemKV } from "./realmService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Storage keys for SystemKV
+// Storage keys
 const STORAGE_KEYS = {
+  DOWNLOADED_EXAMS: "@downloaded_exams",
+  PENDING_UPDATES: "@pending_updates",
   LAST_SYNC: "@last_sync",
   OFFLINE_MODE: "@offline_mode",
 };
@@ -33,13 +35,40 @@ export interface PendingUpdate {
 export class OfflineStorageService {
   /**
    * Download exam for offline access
-   * Migrated to RealmDB: We now rely on the QuizCache populated by SyncService.
    */
   static async downloadExam(exam: any): Promise<void> {
     try {
-      // Exams are automatically cached in Realm via examService / syncService.
-      // This is left as a no-op to maintain the interface without duplicating data.
-      console.log("✅ Exam download mapped to Realm Cache:", exam.id);
+      const downloadedExams = await this.getDownloadedExams();
+
+      const downloadedExam: DownloadedExam = {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        questions: exam.questions || [],
+        answerKey: exam.answerKey || null,
+        createdBy: exam.createdBy,
+        createdAt: exam.createdAt,
+        updatedAt: exam.updatedAt,
+        version: exam.version || 1,
+        downloadedAt: new Date(),
+        lastSyncedAt: new Date(),
+      };
+
+      // Check if already downloaded
+      const existingIndex = downloadedExams.findIndex((e) => e.id === exam.id);
+
+      if (existingIndex >= 0) {
+        downloadedExams[existingIndex] = downloadedExam;
+      } else {
+        downloadedExams.push(downloadedExam);
+      }
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.DOWNLOADED_EXAMS,
+        JSON.stringify(downloadedExams),
+      );
+
+      console.log("✅ Exam downloaded for offline access:", exam.id);
     } catch (error) {
       console.error("Error downloading exam:", error);
       throw error;
@@ -51,21 +80,18 @@ export class OfflineStorageService {
    */
   static async getDownloadedExams(): Promise<DownloadedExam[]> {
     try {
-      const realm = await RealmService.getCacheRealm();
-      const cached = realm.objects<QuizCache>("QuizCache");
-      
-      return Array.from(cached).map((q) => ({
-        id: q.id,
-        title: q.title,
-        description: q.subject || q.className || "",
-        questions: [],
-        answerKey: q.answerKey ? JSON.parse(q.answerKey) : null,
-        createdBy: q.createdBy,
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt,
-        version: q.version || 1,
-        downloadedAt: q.createdAt,
-        lastSyncedAt: q.updatedAt,
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.DOWNLOADED_EXAMS);
+      if (!data) return [];
+
+      const exams = JSON.parse(data);
+
+      // Convert date strings back to Date objects
+      return exams.map((exam: any) => ({
+        ...exam,
+        createdAt: new Date(exam.createdAt),
+        updatedAt: new Date(exam.updatedAt),
+        downloadedAt: new Date(exam.downloadedAt),
+        lastSyncedAt: new Date(exam.lastSyncedAt),
       }));
     } catch (error) {
       console.error("Error getting downloaded exams:", error);
@@ -80,23 +106,8 @@ export class OfflineStorageService {
     examId: string,
   ): Promise<DownloadedExam | null> {
     try {
-      const realm = await RealmService.getCacheRealm();
-      const q = realm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
-      if (!q) return null;
-
-      return {
-        id: q.id,
-        title: q.title,
-        description: q.subject || q.className || "",
-        questions: [],
-        answerKey: q.answerKey ? JSON.parse(q.answerKey) : null,
-        createdBy: q.createdBy,
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt,
-        version: q.version || 1,
-        downloadedAt: q.createdAt,
-        lastSyncedAt: q.updatedAt,
-      };
+      const exams = await this.getDownloadedExams();
+      return exams.find((e) => e.id === examId) || null;
     } catch (error) {
       console.error("Error getting downloaded exam:", error);
       return null;
@@ -108,8 +119,8 @@ export class OfflineStorageService {
    */
   static async isExamDownloaded(examId: string): Promise<boolean> {
     try {
-      const realm = await RealmService.getCacheRealm();
-      return !!realm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+      const exam = await this.getDownloadedExam(examId);
+      return exam !== null;
     } catch (error) {
       return false;
     }
@@ -120,8 +131,15 @@ export class OfflineStorageService {
    */
   static async deleteDownloadedExam(examId: string): Promise<void> {
     try {
-      // Deleting from cache is handled by sync updates.
-      console.log("✅ Downloaded exam mapped to Realm Cache:", examId);
+      const exams = await this.getDownloadedExams();
+      const filtered = exams.filter((e) => e.id !== examId);
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.DOWNLOADED_EXAMS,
+        JSON.stringify(filtered),
+      );
+
+      console.log("✅ Downloaded exam deleted:", examId);
     } catch (error) {
       console.error("Error deleting downloaded exam:", error);
       throw error;
@@ -133,7 +151,7 @@ export class OfflineStorageService {
    */
   static async queueUpdate(
     examId: string,
-    action: "create" | "update" | "delete" | "audit_log" | "update-answer-key",
+    action: "create" | "update" | "delete",
     data: any,
     collection: "exams" | "classes" = "exams",
   ): Promise<void> {
@@ -169,16 +187,15 @@ export class OfflineStorageService {
    */
   static async getPendingUpdates(): Promise<PendingUpdate[]> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
-      
-      return Array.from(updates).map((u) => ({
-        id: u.updateId,
-        examId: u.examId,
-        action: u.action as any,
-        data: JSON.parse(u.data),
-        timestamp: u.timestamp,
-        retryCount: u.retryCount,
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.PENDING_UPDATES);
+      if (!data) return [];
+
+      const updates = JSON.parse(data);
+
+      // Convert date strings back to Date objects
+      return updates.map((update: any) => ({
+        ...update,
+        timestamp: new Date(update.timestamp),
       }));
     } catch (error) {
       console.error("Error getting pending updates:", error);
@@ -191,15 +208,13 @@ export class OfflineStorageService {
    */
   static async removePendingUpdate(updateId: string): Promise<void> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
-      const target = updates.filtered("updateId == $0", updateId)[0];
-      
-      if (target) {
-        realm.write(() => {
-          realm.delete(target);
-        });
-      }
+      const updates = await this.getPendingUpdates();
+      const filtered = updates.filter((u) => u.id !== updateId);
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.PENDING_UPDATES,
+        JSON.stringify(filtered),
+      );
     } catch (error) {
       console.error("Error removing pending update:", error);
       throw error;
@@ -211,12 +226,10 @@ export class OfflineStorageService {
    */
   static async clearPendingUpdates(): Promise<void> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
-      
-      realm.write(() => {
-        realm.delete(updates);
-      });
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.PENDING_UPDATES,
+        JSON.stringify([]),
+      );
       console.log("✅ Pending updates cleared");
     } catch (error) {
       console.error("Error clearing pending updates:", error);
@@ -229,19 +242,10 @@ export class OfflineStorageService {
    */
   static async updateLastSync(): Promise<void> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      const existing = realm.objectForPrimaryKey<SystemKV>("SystemKV", STORAGE_KEYS.LAST_SYNC);
-      
-      realm.write(() => {
-        if (existing) {
-          existing.value = new Date().toISOString();
-        } else {
-          realm.create("SystemKV", {
-            key: STORAGE_KEYS.LAST_SYNC,
-            value: new Date().toISOString(),
-          });
-        }
-      });
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.LAST_SYNC,
+        new Date().toISOString(),
+      );
     } catch (error) {
       console.error("Error updating last sync:", error);
     }
@@ -252,9 +256,8 @@ export class OfflineStorageService {
    */
   static async getLastSync(): Promise<Date | null> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      const entry = realm.objectForPrimaryKey<SystemKV>("SystemKV", STORAGE_KEYS.LAST_SYNC);
-      return entry ? new Date(entry.value) : null;
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.LAST_SYNC);
+      return data ? new Date(data) : null;
     } catch (error) {
       console.error("Error getting last sync:", error);
       return null;
@@ -294,10 +297,12 @@ export class OfflineStorageService {
    */
   static async clearAllData(): Promise<void> {
     try {
-      // Clearing Cache and Staging is fully handled by RealmService.clearAll()
-      // We just call that to ensure full cleanup.
-      await RealmService.clearAll();
-      console.log("✅ All offline data cleared via Realm");
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.DOWNLOADED_EXAMS,
+        STORAGE_KEYS.PENDING_UPDATES,
+        STORAGE_KEYS.LAST_SYNC,
+      ]);
+      console.log("✅ All offline data cleared");
     } catch (error) {
       console.error("Error clearing offline data:", error);
       throw error;
