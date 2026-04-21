@@ -115,12 +115,21 @@ export class SyncService {
         failedCount++;
       }
 
-      // 4. Flush Pending Updates (RealmDB)
+      // 4. Flush queued document updates
       try {
-        await this.processPendingUpdates();
-        syncedCount++;
+        const pendingUpdates = await OfflineStorageService.getPendingUpdates();
+        for (const update of pendingUpdates) {
+          const conflict = await this.syncUpdate(update);
+          if (conflict) {
+            conflicts.push(conflict);
+            failedCount++;
+            continue;
+          }
+          await OfflineStorageService.removePendingUpdate(update.id);
+          syncedCount++;
+        }
       } catch (e) {
-        console.error("Process Updates Error", e);
+        console.error("Pending update sync error", e);
         failedCount++;
       }
 
@@ -137,7 +146,7 @@ export class SyncService {
         success: failedCount === 0,
         syncedCount,
         failedCount,
-        conflicts: [],
+        conflicts,
       };
 
       console.log(
@@ -234,7 +243,9 @@ export class SyncService {
           class_name: data.class_name,
           course_subject: data.course_subject,
           room: data.room || "",
+          year: data.year || "",
           section_block: data.section_block || "",
+          isArchived: data.isArchived || false,
           students: JSON.stringify(data.students || []),
           createdBy: data.createdBy,
           updatedAt: data.updatedAt?.toDate?.() || new Date(),
@@ -421,11 +432,12 @@ export class SyncService {
       throw new Error("User not authenticated");
     }
 
-    const examRef = doc(db, "exams", update.examId);
+    const collectionName = update.collection ?? "exams";
+    const targetRef = doc(db, collectionName, update.examId);
 
     try {
       if (update.action === "create") {
-        await setDoc(examRef, {
+        await setDoc(targetRef, {
           ...update.data,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -434,15 +446,28 @@ export class SyncService {
       }
 
       if (update.action === "update") {
-        // Check for conflicts
-        const serverDoc = await getDoc(examRef);
+        if (collectionName === "classes") {
+          await updateDoc(targetRef, {
+            ...update.data,
+            updatedAt: serverTimestamp(),
+          });
+          return null;
+        }
+
+        // For exams: Check for conflicts
+        const serverDoc = await getDoc(targetRef);
 
         if (serverDoc.exists()) {
           const serverData = serverDoc.data();
           const serverVersion = serverData.version || 1;
-          const localVersion = update.data.version || 1;
 
-          // Conflict detected
+          // Get the current server version to increment properly
+          // If update.data doesn't have version info (e.g., just { isArchived: true }),
+          // use the server's current version as the base
+          const localVersion = update.data.version || serverVersion;
+
+          // Conflict detected: server version is higher than local version
+          // This means the exam was modified on another device/session
           if (serverVersion > localVersion) {
             return {
               examId: update.examId,
@@ -454,7 +479,7 @@ export class SyncService {
           }
         }
 
-        await updateDoc(examRef, {
+        await updateDoc(targetRef, {
           ...update.data,
           updatedAt: serverTimestamp(),
           version: update.data.version || 1,
@@ -503,7 +528,7 @@ export class SyncService {
       }
 
       if (update.action === "delete") {
-        await deleteDoc(examRef);
+        await deleteDoc(targetRef);
         return null;
       }
 

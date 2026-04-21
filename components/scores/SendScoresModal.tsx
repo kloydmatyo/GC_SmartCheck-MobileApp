@@ -168,7 +168,7 @@ export default function SendScoresModal({
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator size="large" color="#00a550" />
-            <Text style={styles.loadingText}>Loading results…</Text>
+            <Text style={styles.loadingText}>Loading results...</Text>
           </View>
         ) : entries.length === 0 ? (
           <View style={styles.center}>

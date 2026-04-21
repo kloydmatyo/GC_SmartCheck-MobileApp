@@ -26,15 +26,13 @@ import * as XLSX from "xlsx";
 
 import { StudentImportModal } from "@/components/student/StudentImportModal";
 import { auth, db } from "@/config/firebase";
+import { ExamService } from "@/services/examService";
+import { NetworkService } from "@/services/networkService";
 
 import { DashboardService } from "@/services/dashboardService";
 import { ImportResult } from "@/types/student";
 
-import {
-  deleteDoc,
-  doc,
-  updateDoc
-} from "firebase/firestore";
+import { deleteDoc, doc } from "firebase/firestore";
 
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
@@ -391,7 +389,6 @@ export default function ClassDetailsScreen() {
       const examsWithStats = await Promise.all(
         linkedExams.map(async (exam) => {
           try {
-            const { NetworkService } = await import("@/services/networkService");
             const isOnline = await NetworkService.isOnline();
             if (!isOnline) return exam;
             const stats = await DashboardService.getExamStats(exam.id);
@@ -441,9 +438,12 @@ export default function ClassDetailsScreen() {
         text1: "Archived",
         text2: `${classData.class_name} moved to Archived`,
       });
-      router.push("/(tabs)/batch-history");
+      goToClasses();
     } catch (error) {
-      console.error("Error archiving class:", error);
+      console.warn(
+        "Archive class failed:",
+        error instanceof Error ? error.message : String(error),
+      );
       Toast.show({
         type: "error",
         text1: "Error",
@@ -567,9 +567,7 @@ export default function ClassDetailsScreen() {
     try {
       const examId = selectedExam.id;
       const examTitle = selectedExam.title;
-      
-      await ExamService.archiveExam(examId);
-
+      await ExamService.updateExam(selectedExam.id, { isArchived: true });
       closeExamMenu();
       clearExamSelection();
       Toast.show({
@@ -579,7 +577,10 @@ export default function ClassDetailsScreen() {
       });
       loadExams();
     } catch (error) {
-      console.error("Error archiving exam:", error);
+      console.log("[ClassDetails] Archive exam failed:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : "",
+      });
       Toast.show({
         type: "error",
         text1: "Error",

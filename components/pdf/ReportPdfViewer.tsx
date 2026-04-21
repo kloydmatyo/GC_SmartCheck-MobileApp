@@ -144,7 +144,7 @@ export default function ReportPdfViewer({
             {generating ? (
               <>
                 <ActivityIndicator size="small" color="#fff" />
-                <Text style={styles.shareBtnText}>Generating PDF…</Text>
+                <Text style={styles.shareBtnText}>Generating PDF...</Text>
               </>
             ) : (
               <>

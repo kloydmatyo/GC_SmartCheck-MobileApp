@@ -1,18 +1,29 @@
 import { auth, db } from "@/config/firebase";
 import {
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    where,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
 } from "firebase/firestore";
 import Realm from "realm";
 import { ExamPreviewData } from "../types/exam";
 import { AuditLogService } from "./auditLogService";
+import { NetworkService } from "./networkService";
+import { OfflineStorageService } from "./offlineStorageService";
 import { OfflineQuiz, QuizCache, RealmService } from "./realmService";
 
 export class ExamService {
+  private static formatErrorForLog(error: any) {
+    return {
+      message: error?.message ?? String(error),
+      code: error?.code ?? "",
+      name: error?.name ?? "",
+      stack: error?.stack ?? "",
+    };
+  }
+
   /**
    * Get all exams for the current user (Local-First: Cache + Staging)
    */
@@ -37,6 +48,7 @@ export class ExamService {
           class: q.subject,
           classId: q.classId || "",
           className: q.className || "",
+          isArchived: q.isArchived || false,
           date: q.createdAt.toLocaleDateString(),
           createdAt: q.createdAt,
           updatedAt: q.updatedAt,
@@ -132,6 +144,7 @@ export class ExamService {
                 subject: data.subject || data.className || "No Subject",
                 className: data.className || "",
                 classId: data.classId || "",
+                isArchived: data.isArchived || false,
                 status: data.status || "Draft",
                 structureLocked: Boolean(data.structureLocked),
                 papersCount: data.scanned_papers || 0,
@@ -158,6 +171,7 @@ export class ExamService {
             ...data,
             title: data.title || "Untitled Exam",
             class: data.subject || data.className || "No Subject",
+            isArchived: data.isArchived || false,
             date: data.created_at || (data.createdAt?.toDate?.().toLocaleDateString()) || "No Date",
             papers: data.scanned_papers || 0,
             status: data.status || "Draft",
@@ -243,6 +257,7 @@ export class ExamService {
               subject: data.subject || data.className || "No Subject",
               className: data.className || "",
               classId: data.classId || "",
+              isArchived: data.isArchived || false,
               status: data.status || "Draft",
               structureLocked: Boolean(data.structureLocked),
               papersCount: data.scanned_papers || 0,
@@ -675,7 +690,6 @@ export class ExamService {
       }
 
       // 1.5. Check OfflineStorageService (Legacy/Persistence Fallback) - FAST
-      const { OfflineStorageService } = await import("./offlineStorageService");
       const offlineExam = await OfflineStorageService.getDownloadedExam(examId);
       if (offlineExam) {
         console.log("[ExamService] Found exam in OfflineStorageService (Persistence Path)");
@@ -1167,6 +1181,7 @@ export class ExamService {
       num_items?: number;
       choices_per_item?: 4 | 5;
       structureLocked?: boolean;
+      isArchived?: boolean;
     },
     expectedVersion: number,
   ): Promise<number> {
@@ -1277,6 +1292,7 @@ export class ExamService {
               subject: examData.subject || examData.className || "No Subject",
               className: examData.className || "",
               classId: examData.classId || "",
+              isArchived: updateData.isArchived ?? examData.isArchived ?? false,
               papersCount: examData.scanned_papers || 0,
               answerKey: existingCachedExam?.answerKey || "",
               createdBy: examData.createdBy || currentUser.uid,
@@ -1303,7 +1319,42 @@ export class ExamService {
 
       // Re-throw with more context
       if (this.isNetworkRelatedError(error)) {
-        throw new Error("Network error: " + error.message);
+        console.warn(
+          "[ExamService] Network failed before update completed. Falling back to offline queue.",
+          error,
+        );
+        await OfflineStorageService.queueUpdate(
+          examId,
+          "update",
+          updateData,
+          "exams",
+        );
+
+        const cacheRealm = await RealmService.getCacheRealm();
+        const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
+          "QuizCache",
+          examId,
+        );
+        if (existingCachedExam) {
+          cacheRealm.write(() => {
+            if (updateData.title !== undefined)
+              existingCachedExam.title = updateData.title;
+            if (updateData.subject !== undefined && updateData.subject !== null)
+              existingCachedExam.subject = updateData.subject;
+            if (updateData.isArchived !== undefined)
+              existingCachedExam.isArchived = updateData.isArchived;
+            if (updateData.num_items !== undefined)
+              existingCachedExam.questionCount = updateData.num_items;
+            if (updateData.choices_per_item !== undefined)
+              existingCachedExam.choicesPerItem = updateData.choices_per_item;
+            if (updateData.structureLocked !== undefined)
+              existingCachedExam.structureLocked = updateData.structureLocked;
+            existingCachedExam.updatedAt = new Date();
+            existingCachedExam.version = (existingCachedExam.version || 1) + 1;
+          });
+        }
+
+        return (existingCachedExam?.version || 1) + 1;
       }
 
       throw error;
@@ -1333,8 +1384,73 @@ export class ExamService {
       const currentUser = auth.currentUser;
       if (!currentUser) throw new Error("User not authenticated");
 
-      const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
+      const cacheRealm = await RealmService.getCacheRealm();
+      const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
+        "QuizCache",
+        examId,
+      );
+
+      // OFFLINE: Queue update and update cache immediately (same as ClassService)
+      if (!isOnline) {
+        try {
+          console.log("\n[ExamService] 📱 OFFLINE MODE - Queuing exam update");
+          console.log(`  examId: ${examId}`);
+          console.log(`  updateData:`, updateData);
+
+          await OfflineStorageService.queueUpdate(
+            examId,
+            "update",
+            updateData,
+            "exams",
+          );
+
+          console.log("[ExamService] ✅ Update queued to AsyncStorage");
+
+          if (existingCachedExam) {
+            console.log("[ExamService] 📝 Updating local cache...");
+            cacheRealm.write(() => {
+              if (updateData.title !== undefined)
+                existingCachedExam.title = updateData.title;
+              if (updateData.subject !== undefined && updateData.subject !== null)
+                existingCachedExam.subject = updateData.subject;
+              if (updateData.isArchived !== undefined) {
+                console.log(`  Setting isArchived to: ${updateData.isArchived}`);
+                existingCachedExam.isArchived = updateData.isArchived;
+              }
+              if (updateData.num_items !== undefined)
+                existingCachedExam.questionCount = updateData.num_items;
+              if (updateData.choices_per_item !== undefined)
+                existingCachedExam.choicesPerItem = updateData.choices_per_item;
+              if (updateData.structureLocked !== undefined)
+                existingCachedExam.structureLocked = updateData.structureLocked;
+              existingCachedExam.updatedAt = new Date();
+              existingCachedExam.version = (existingCachedExam.version || 1) + 1;
+            });
+            console.log("[ExamService] ✅ Cache updated");
+          } else {
+            console.log("[ExamService] ⚠️  No cached exam found to update");
+          }
+
+          const newVersion = (existingCachedExam?.version || 1) + 1;
+          console.log(`[ExamService] ✅ Offline update complete (version: ${newVersion})\n`);
+          return newVersion;
+        } catch (offlineError) {
+          console.error("\n❌ [ExamService] OFFLINE UPDATE FAILED:");
+          console.error("Error:", offlineError);
+          console.error("Stack:", offlineError instanceof Error ? offlineError.stack : "N/A");
+          console.error();
+          throw offlineError;
+        }
+      }
+
+      // ONLINE: Update Firebase
+      console.log("\n[ExamService] 🌐 ONLINE MODE - Updating Firebase");
+      console.log(`  examId: ${examId}`);
+      console.log(`  updateData:`, updateData);
+
+      const examRef = doc(db, "exams", examId);
+      const examSnap = await getDoc(examRef);
 
       // Handle Staging Exams
       if (examId.startsWith("staging_")) {
@@ -1395,84 +1511,107 @@ export class ExamService {
         updatedAt: serverTimestamp(),
       });
 
-      // Update local cache
-      const cacheRealm = await RealmService.getCacheRealm();
-      const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
-      if (cachedExam) {
-        cacheRealm.write(() => {
-          if (updateData.title) cachedExam.title = updateData.title;
-          if (updateData.subject) cachedExam.subject = updateData.subject;
-          if (updateData.num_items) cachedExam.questionCount = updateData.num_items;
-          if (updateData.choices_per_item) cachedExam.choicesPerItem = updateData.choices_per_item;
-          if (updateData.isArchived !== undefined) cachedExam.status = updateData.isArchived ? "Archived" : "Draft";
-          cachedExam.updatedAt = new Date();
+      try {
+        console.log(`[ExamService] 📤 Uploading to Firebase (version ${currentVersion} → ${newVersion})...`);
+        await updateDoc(examRef, {
+          ...updateData,
+          version: newVersion,
+          updatedAt: serverTimestamp(),
         });
-      }
-    } catch (error) {
-      console.error("Error updating exam:", error);
-      throw error;
-    }
-  }
+        console.log("[ExamService] ✅ Firebase update successful");
 
-  /**
-   * Archive an exam (Offline-aware)
-   */
-  static async archiveExam(examId: string): Promise<void> {
-    await this.updateExam(examId, { isArchived: true });
-    await AuditLogService.logAction("exam", "archive", examId, { archived: true });
-  }
+        console.log("[ExamService] 📝 Updating local cache...");
+        cacheRealm.write(() => {
+          cacheRealm.create(
+            "QuizCache",
+            {
+              id: examId,
+              status: examData.status || "Draft",
+              structureLocked:
+                updateData.structureLocked ?? Boolean(examData.structureLocked),
+              questionCount: updateData.num_items ?? examData.num_items ?? 0,
+              updatedAt: new Date(),
+              version: newVersion,
+              choicesPerItem:
+                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+              title: updateData.title ?? examData.title ?? "Untitled Exam",
+              subject: examData.subject || examData.className || "No Subject",
+              className: examData.className || "",
+              classId: examData.classId || "",
+              isArchived: updateData.isArchived ?? examData.isArchived ?? false,
+              papersCount: examData.scanned_papers || 0,
+              answerKey: existingCachedExam?.answerKey || "",
+              createdBy: examData.createdBy || currentUser.uid,
+              createdAt: examData.createdAt?.toDate?.() || new Date(),
+              instructorId: examData.instructorId || "",
+              examCode: examData.examCode || examData.room || "",
+            },
+            Realm.UpdateMode.Modified,
+          );
+        });
+        console.log("[ExamService] ✅ Cache updated");
+        console.log(`[ExamService] ✅ Online update complete (version: ${newVersion})\n`);
 
-  /**
-   * Unarchive an exam (Offline-aware)
-   */
-  static async unarchiveExam(examId: string): Promise<void> {
-    await this.updateExam(examId, { isArchived: false });
-    await AuditLogService.logAction("exam", "unarchive", examId, { archived: false });
-  }
+        return newVersion;
+      } catch (updateError: any) {
+        console.error("\n❌ [ExamService] Firebase update failed:");
+        console.error("Error:", updateError);
 
-  /**
-   * Delete an exam (Offline-aware)
-   */
-  static async deleteExam(examId: string): Promise<void> {
-    try {
-      const currentUser = auth.currentUser;
-      if (!currentUser) throw new Error("User not authenticated");
+        // Handle network errors specifically
+        if (this.isNetworkRelatedError(updateError)) {
+          console.warn(
+            "[ExamService] 📱 Network error detected - falling back to offline queue.",
+          );
+          await OfflineStorageService.queueUpdate(
+            examId,
+            "update",
+            updateData,
+            "exams",
+          );
 
-      const { NetworkService } = await import("./networkService");
-      const isOnline = await NetworkService.isOnline();
+          if (existingCachedExam) {
+            cacheRealm.write(() => {
+              if (updateData.title !== undefined)
+                existingCachedExam.title = updateData.title;
+              if (updateData.subject !== undefined && updateData.subject !== null)
+                existingCachedExam.subject = updateData.subject;
+              if (updateData.isArchived !== undefined)
+                existingCachedExam.isArchived = updateData.isArchived;
+              if (updateData.num_items !== undefined)
+                existingCachedExam.questionCount = updateData.num_items;
+              if (updateData.choices_per_item !== undefined)
+                existingCachedExam.choicesPerItem = updateData.choices_per_item;
+              if (updateData.structureLocked !== undefined)
+                existingCachedExam.structureLocked = updateData.structureLocked;
+              existingCachedExam.updatedAt = new Date();
+              existingCachedExam.version = (existingCachedExam.version || 1) + 1;
+            });
+          }
 
-      // Handle Staging Exams
-      if (examId.startsWith("staging_")) {
-        const stagingRealm = await RealmService.getStagingRealm();
-        const hexId = examId.replace("staging_", "");
-        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
-          "OfflineQuiz",
-          new Realm.BSON.ObjectId(hexId),
-        );
-        if (sQuiz) {
-          stagingRealm.write(() => {
-            stagingRealm.delete(sQuiz);
-          });
-          return;
-        }
-      }
-
-      // Offline Support
-      if (!isOnline) {
-        console.log("[ExamService] Offline. Queueing exam deletion...");
-        const { OfflineStorageService } = await import("./offlineStorageService");
-        await OfflineStorageService.queueUpdate(examId, "delete", {});
-
-        // Remove from local cache
-        const cacheRealm = await RealmService.getCacheRealm();
-        const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
-        if (cachedExam) {
-          cacheRealm.write(() => {
-            cacheRealm.delete(cachedExam);
-          });
+          console.log("[ExamService] ✅ Fallback to offline queue successful\n");
+          return (existingCachedExam?.version || 1) + 1;
         }
         return;
       }
+    } catch (error: any) {
+      console.error("\n❌ [ExamService] updateExam FAILED - FULL ERROR DETAILS:");
+      console.error("════════════════════════════════════════════════════════");
+      console.error("Exam ID:", examId);
+      console.error("Update Data:", updateData);
+
+      if (error instanceof Error) {
+        console.error("Error Name:", error.name);
+        console.error("Error Code:", (error as any).code);
+        console.error("Error Message:", error.message);
+        console.error("\nStack Trace:");
+        console.error(error.stack);
+      } else if (typeof error === "object") {
+        console.error("Error Object:", JSON.stringify(error, null, 2));
+      } else {
+        console.error("Error:", String(error));
+      }
+
+      console.error("════════════════════════════════════════════════════════\n");
 
       // Online Path
       const { deleteDoc } = await import("firebase/firestore");

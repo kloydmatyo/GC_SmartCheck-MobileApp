@@ -23,7 +23,8 @@ export interface DownloadedExam {
 export interface PendingUpdate {
   id: string;
   examId: string;
-  action: "create" | "update" | "delete" | "audit_log" | "update-answer-key";
+  action: "create" | "update" | "delete";
+  collection?: "exams" | "classes";
   data: any;
   timestamp: Date;
   retryCount: number;
@@ -134,20 +135,29 @@ export class OfflineStorageService {
     examId: string,
     action: "create" | "update" | "delete" | "audit_log" | "update-answer-key",
     data: any,
+    collection: "exams" | "classes" = "exams",
   ): Promise<void> {
     try {
-      const realm = await RealmService.getStagingRealm();
-      realm.write(() => {
-        realm.create("OfflinePendingUpdate", {
-          updateId: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          examId,
-          action,
-          data: JSON.stringify(data),
-          timestamp: new Date(),
-          retryCount: 0,
-        });
-      });
-      console.log("✅ Update queued for sync in Realm");
+      const pendingUpdates = await this.getPendingUpdates();
+
+      const update: PendingUpdate = {
+        id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        examId,
+        action,
+        collection,
+        data,
+        timestamp: new Date(),
+        retryCount: 0,
+      };
+
+      pendingUpdates.push(update);
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.PENDING_UPDATES,
+        JSON.stringify(pendingUpdates),
+      );
+
+      console.log("✅ Update queued for sync:", update.id);
     } catch (error) {
       console.error("Error queuing update:", error);
       throw error;

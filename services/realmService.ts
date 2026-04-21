@@ -198,47 +198,49 @@ export class ClassCache extends Realm.Object<ClassCache> {
 }
 
 export class QuizCache extends Realm.Object<QuizCache> {
-  id!: string;
-  title!: string;
-  subject!: string;
-  className?: string;
-  classId?: string;
-  status!: string;
-  structureLocked?: boolean;
-  papersCount!: number;
-  questionCount!: number;
-  answerKey?: string;
-  createdBy!: string;
-  createdAt!: Date;
-  updatedAt!: Date;
-  version?: number;
-  instructorId?: string;
-  examCode?: string;
-  choicesPerItem?: number;
+    id!: string;
+    title!: string;
+    subject!: string;
+    className?: string;
+    classId?: string;
+    isArchived?: boolean;
+    status!: string;
+    structureLocked?: boolean;
+    papersCount!: number;
+    questionCount!: number;
+    answerKey?: string;
+    createdBy!: string;
+    createdAt!: Date;
+    updatedAt!: Date;
+    version?: number;
+    instructorId?: string;
+    examCode?: string;
+    choicesPerItem?: number;
 
-  static schema: Realm.ObjectSchema = {
-    name: "QuizCache",
-    primaryKey: "id",
-    properties: {
-      id: "string",
-      title: "string",
-      subject: "string",
-      className: "string?",
-      classId: "string?",
-      status: "string",
-      structureLocked: { type: "bool", default: false },
-      papersCount: { type: "int", default: 0 },
-      questionCount: "int",
-      answerKey: "string?",
-      createdBy: "string",
-      createdAt: "date",
-      updatedAt: "date",
-      version: { type: "int", default: 1 },
-      instructorId: "string?",
-      examCode: "string?",
-      choicesPerItem: { type: "int", default: 4 },
-    },
-  };
+    static schema: Realm.ObjectSchema = {
+        name: "QuizCache",
+        primaryKey: "id",
+        properties: {
+            id: "string",
+            title: "string",
+            subject: "string",
+            className: "string?",
+            classId: "string?",
+            isArchived: { type: "bool", default: false },
+            status: "string",
+            structureLocked: { type: "bool", default: false },
+            papersCount: { type: "int", default: 0 },
+            questionCount: "int",
+            answerKey: "string?",
+            createdBy: "string",
+            createdAt: "date",
+            updatedAt: "date",
+            version: { type: "int", default: 1 },
+            instructorId: "string?",
+            examCode: "string?",
+            choicesPerItem: { type: "int", default: 4 },
+        },
+    };
 }
 
 export class GradeCache extends Realm.Object<GradeCache> {

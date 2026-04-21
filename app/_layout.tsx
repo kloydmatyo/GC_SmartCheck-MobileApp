@@ -22,6 +22,7 @@ import "react-native-reanimated";
 import Toast from "react-native-toast-message";
 
 import { toastConfig } from "@/components/ui/ToastConfig";
+import OfflineIndicator from "@/components/common/OfflineIndicator";
 import { auth } from "@/config/firebase";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { SyncService } from "@/services/syncService";
@@ -93,6 +94,8 @@ export default function RootLayout() {
 
   // Initial sync on mount
   useEffect(() => {
+    SyncService.initialize();
+
     const performInitialSync = async () => {
       // Small delay to ensure all services are ready
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -149,6 +152,7 @@ export default function RootLayout() {
         />
       </Stack>
       <StatusBar style="auto" />
+      <OfflineIndicator />
       <Toast config={toastConfig} />
       {(isSyncing || syncStatus === "synced") && (
         <View style={styles.syncOverlay} pointerEvents="none">
