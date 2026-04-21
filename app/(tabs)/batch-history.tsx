@@ -25,6 +25,7 @@ import {
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { ClassService } from "../../services/classService";
+import { ExamService } from "../../services/examService";
 
 type ArchivedMode = "classes" | "exams";
 
@@ -212,14 +213,20 @@ export default function ArchivedScreen() {
 
   const restoreExam = async (id: string) => {
     try {
-      await updateDoc(doc(db, "exams", id), { isArchived: false });
+      await ExamService.unarchiveExam(id);
+      
+      // Update local state for immediate UI response
+      setArchivedExams(prev => prev.filter(exam => exam.id !== id));
       setRestoreTarget(null);
+      
       Toast.show({
         type: "save_result",
         text1: "Restored",
         text2: "Exam moved out of Archived",
       });
-      loadArchivedItems();
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error restoring exam:", error);
       Toast.show({
@@ -252,14 +259,20 @@ export default function ArchivedScreen() {
 
   const deleteExam = async (id: string) => {
     try {
-      await deleteDoc(doc(db, "exams", id));
+      await ExamService.deleteExam(id);
+      
+      // Update local state for immediate UI response
+      setArchivedExams(prev => prev.filter(exam => exam.id !== id));
       setDeleteTarget(null);
+      
       Toast.show({
         type: "delete_result",
         text1: "Deleted",
         text2: "Exam deleted successfully",
       });
-      loadArchivedItems();
+      
+      const { NetworkService } = await import("../../services/networkService");
+      if (await NetworkService.isOnline()) loadArchivedItems();
     } catch (error) {
       console.error("Error deleting exam:", error);
       Toast.show({

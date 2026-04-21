@@ -151,9 +151,14 @@ export class GradeStorageService {
     }
 
     try {
-      // 1. Try Firestore
-      const snap = await getDoc(doc(db, "exams", examId));
-      if (snap.exists()) return true;
+      const netState = await NetInfo.fetch();
+      const isOnline = !!(netState.isConnected && netState.isInternetReachable);
+
+      if (isOnline) {
+        // 1. Try Firestore
+        const snap = await getDoc(doc(db, "exams", examId));
+        if (snap.exists()) return true;
+      }
 
       // 2. Fallback to local cache if Firestore record not found or offline
       const cacheRealm = await RealmService.getCacheRealm();
@@ -184,6 +189,13 @@ export class GradeStorageService {
     uid: string,
   ): Promise<boolean> {
     try {
+      const netState = await NetInfo.fetch();
+      const isOnline = !!(netState.isConnected && netState.isInternetReachable);
+
+      if (!isOnline) {
+        return false; // Skip duplicate check if offline to avoid hanging
+      }
+
       // Only check Firestore as source of truth — staging records are unconfirmed
       // and should not permanently block re-scans
       const q = query(

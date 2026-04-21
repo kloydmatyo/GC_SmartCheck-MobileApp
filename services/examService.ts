@@ -54,7 +54,8 @@ export class ExamService {
           id: `staging_${s._id.toHexString()}`,
           title: s.title,
           class: s.subject,
-          classId: (s as any).classId || "",
+          classId: s.classId || "",
+          className: s.className || "",
           date: s.createdAt.toLocaleDateString(),
           createdAt: s.createdAt,
           updatedAt: s.createdAt,
@@ -171,6 +172,8 @@ export class ExamService {
             id: `staging_${s._id.toHexString()}`,
             title: s.title,
             class: s.subject,
+            classId: s.classId || "",
+            className: s.className || "",
             date: s.createdAt.toLocaleDateString(),
             papers: 0,
             status: s.status,
@@ -339,8 +342,8 @@ export class ExamService {
         // For now, let's just use the existing OfflineStorageService for updates if it's not a staging quiz
         const { OfflineStorageService } =
           await import("./offlineStorageService");
-        await OfflineStorageService.queueUpdate(examId, "update", {
-          answerKey: { answers, locked: false },
+        await OfflineStorageService.queueUpdate(examId, "update-answer-key", {
+          answers,
         });
 
         await updateCachedAnswerKey(examId, {
@@ -431,6 +434,8 @@ export class ExamService {
           const sQuiz = stagingRealm.create<OfflineQuiz>("OfflineQuiz", {
             title: examData.title,
             subject: examData.subject || examData.className || "General",
+            className: examData.className || "",
+            classId: examData.classId || "",
             questionCount: examData.num_items,
             status: "Draft",
             createdBy: currentUser.uid,
@@ -1171,6 +1176,51 @@ export class ExamService {
         throw new Error("User not authenticated");
       }
 
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (examId.startsWith("staging_")) {
+        console.log("[ExamService] Updating Staging Exam metadata...");
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sQuiz) {
+          stagingRealm.write(() => {
+            if (updateData.title) sQuiz.title = updateData.title;
+            if (updateData.subject) sQuiz.subject = updateData.subject;
+            if (updateData.num_items) sQuiz.questionCount = updateData.num_items;
+            if (updateData.choices_per_item) sQuiz.choicesPerItem = updateData.choices_per_item;
+          });
+          return expectedVersion;
+        }
+        throw new Error("Staging exam not found");
+      }
+
+      if (!isOnline) {
+        console.log("[ExamService] Offline. Queueing exam metadata update...");
+        const { OfflineStorageService } = await import("./offlineStorageService");
+        await OfflineStorageService.queueUpdate(examId, "update", updateData);
+
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+        
+        if (cachedExam) {
+          cacheRealm.write(() => {
+            if (updateData.title) cachedExam.title = updateData.title;
+            if (updateData.subject) cachedExam.subject = updateData.subject;
+            if (updateData.num_items) cachedExam.questionCount = updateData.num_items;
+            if (updateData.choices_per_item) cachedExam.choicesPerItem = updateData.choices_per_item;
+            if (updateData.structureLocked !== undefined) cachedExam.structureLocked = updateData.structureLocked;
+            cachedExam.updatedAt = new Date();
+            cachedExam.version = expectedVersion + 1;
+          });
+        }
+        return expectedVersion + 1;
+      }
+
       const examRef = doc(db, "exams", examId);
       const examSnap = await getDoc(examRef);
 
@@ -1263,6 +1313,9 @@ export class ExamService {
   /**
    * Update exam metadata (legacy method - use updateExamWithVersionCheck for conflict detection)
    */
+  /**
+   * Update exam metadata (Offline-aware)
+   */
   static async updateExam(
     examId: string,
     updateData: {
@@ -1273,93 +1326,170 @@ export class ExamService {
       num_items?: number;
       choices_per_item?: 4 | 5;
       structureLocked?: boolean;
+      isArchived?: boolean;
     },
-  ): Promise<number> {
+  ): Promise<void> {
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser) {
-        throw new Error("User not authenticated");
+      if (!currentUser) throw new Error("User not authenticated");
+
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      // Handle Staging Exams
+      if (examId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sQuiz) {
+          stagingRealm.write(() => {
+            if (updateData.title) sQuiz.title = updateData.title;
+            if (updateData.subject) sQuiz.subject = updateData.subject;
+            if (updateData.num_items) sQuiz.questionCount = updateData.num_items;
+            if (updateData.choices_per_item) sQuiz.choicesPerItem = updateData.choices_per_item;
+          });
+          return;
+        }
+        throw new Error("Staging exam not found");
       }
 
-      const examRef = doc(db, "exams", examId);
-      const examSnap = await getDoc(examRef);
+      // Offline Support
+      if (!isOnline) {
+        console.log("[ExamService] Offline. Queueing exam update...");
+        
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+        const currentVersion = cachedExam?.version || 1;
+        const newVersion = currentVersion + 1;
 
-      if (!examSnap.exists()) {
-        throw new Error("Exam not found");
-      }
-
-      const examData = examSnap.data();
-
-      // Check if user is authorized
-      if (examData.createdBy !== currentUser.uid) {
-        throw new Error("Not authorized to update this exam");
-      }
-
-      // Check for version conflicts (optimistic locking)
-      const currentVersion = examData.version || 1;
-
-      // Prepare update
-      const { updateDoc, serverTimestamp } = await import("firebase/firestore");
-      const newVersion = currentVersion + 1;
-
-      try {
-        await updateDoc(examRef, {
+        const { OfflineStorageService } = await import("./offlineStorageService");
+        await OfflineStorageService.queueUpdate(examId, "update", {
           ...updateData,
           version: newVersion,
-          updatedAt: serverTimestamp(),
         });
 
-        const cacheRealm = await RealmService.getCacheRealm();
-        const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
-          "QuizCache",
-          examId,
-        );
-        cacheRealm.write(() => {
-          cacheRealm.create(
-            "QuizCache",
-            {
-              id: examId,
-              status: examData.status || "Draft",
-              structureLocked:
-                updateData.structureLocked ?? Boolean(examData.structureLocked),
-              questionCount: updateData.num_items ?? examData.num_items ?? 0,
-              updatedAt: new Date(),
-              version: newVersion,
-              choicesPerItem:
-                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
-              title: updateData.title ?? examData.title ?? "Untitled Exam",
-              subject: examData.subject || examData.className || "No Subject",
-              className: examData.className || "",
-              classId: examData.classId || "",
-              papersCount: examData.scanned_papers || 0,
-              answerKey: existingCachedExam?.answerKey || "",
-              createdBy: examData.createdBy || currentUser.uid,
-              createdAt: examData.createdAt?.toDate?.() || new Date(),
-              instructorId: examData.instructorId || "",
-              examCode: examData.examCode || examData.room || "",
-            },
-            Realm.UpdateMode.Modified,
-          );
-        });
-
-        return newVersion;
-      } catch (updateError: any) {
-        // Handle network errors specifically
-        if (this.isNetworkRelatedError(updateError)) {
-          throw new Error(
-            "Network error: Unable to save changes. Please check your internet connection.",
-          );
+        // Update local cache
+        if (cachedExam) {
+          cacheRealm.write(() => {
+            if (updateData.title) cachedExam.title = updateData.title;
+            if (updateData.subject) cachedExam.subject = updateData.subject;
+            if (updateData.num_items) cachedExam.questionCount = updateData.num_items;
+            if (updateData.choices_per_item) cachedExam.choicesPerItem = updateData.choices_per_item;
+            if (updateData.isArchived !== undefined) cachedExam.status = updateData.isArchived ? "Archived" : "Draft";
+            cachedExam.version = newVersion;
+            cachedExam.updatedAt = new Date();
+          });
         }
-        throw updateError;
+        return;
       }
-    } catch (error: any) {
+
+      // Online Path
+      const examRef = doc(db, "exams", examId);
+      const { updateDoc, serverTimestamp } = await import("firebase/firestore");
+      
+      await updateDoc(examRef, {
+        ...updateData,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Update local cache
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+      if (cachedExam) {
+        cacheRealm.write(() => {
+          if (updateData.title) cachedExam.title = updateData.title;
+          if (updateData.subject) cachedExam.subject = updateData.subject;
+          if (updateData.num_items) cachedExam.questionCount = updateData.num_items;
+          if (updateData.choices_per_item) cachedExam.choicesPerItem = updateData.choices_per_item;
+          if (updateData.isArchived !== undefined) cachedExam.status = updateData.isArchived ? "Archived" : "Draft";
+          cachedExam.updatedAt = new Date();
+        });
+      }
+    } catch (error) {
       console.error("Error updating exam:", error);
+      throw error;
+    }
+  }
 
-      // Re-throw with more context
-      if (this.isNetworkRelatedError(error)) {
-        throw new Error("Network error: " + error.message);
+  /**
+   * Archive an exam (Offline-aware)
+   */
+  static async archiveExam(examId: string): Promise<void> {
+    await this.updateExam(examId, { isArchived: true });
+    await AuditLogService.logAction("exam", "archive", examId, { archived: true });
+  }
+
+  /**
+   * Unarchive an exam (Offline-aware)
+   */
+  static async unarchiveExam(examId: string): Promise<void> {
+    await this.updateExam(examId, { isArchived: false });
+    await AuditLogService.logAction("exam", "unarchive", examId, { archived: false });
+  }
+
+  /**
+   * Delete an exam (Offline-aware)
+   */
+  static async deleteExam(examId: string): Promise<void> {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) throw new Error("User not authenticated");
+
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      // Handle Staging Exams
+      if (examId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sQuiz) {
+          stagingRealm.write(() => {
+            stagingRealm.delete(sQuiz);
+          });
+          return;
+        }
       }
 
+      // Offline Support
+      if (!isOnline) {
+        console.log("[ExamService] Offline. Queueing exam deletion...");
+        const { OfflineStorageService } = await import("./offlineStorageService");
+        await OfflineStorageService.queueUpdate(examId, "delete", {});
+
+        // Remove from local cache
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+        if (cachedExam) {
+          cacheRealm.write(() => {
+            cacheRealm.delete(cachedExam);
+          });
+        }
+        return;
+      }
+
+      // Online Path
+      const { deleteDoc } = await import("firebase/firestore");
+      await deleteDoc(doc(db, "exams", examId));
+
+      // Remove from local cache
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cachedExam = cacheRealm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+      if (cachedExam) {
+        cacheRealm.write(() => {
+          cacheRealm.delete(cachedExam);
+        });
+      }
+
+      await AuditLogService.logAction("exam", "delete", examId);
+    } catch (error) {
+      console.error("Error deleting exam:", error);
       throw error;
     }
   }
