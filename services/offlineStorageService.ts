@@ -1,4 +1,9 @@
-import { RealmService, QuizCache, OfflinePendingUpdate, SystemKV } from "./realmService";
+import {
+  OfflinePendingUpdate,
+  QuizCache,
+  RealmService,
+  SystemKV,
+} from "./realmService";
 
 // Storage keys for SystemKV
 const STORAGE_KEYS = {
@@ -52,7 +57,7 @@ export class OfflineStorageService {
     try {
       const realm = await RealmService.getCacheRealm();
       const cached = realm.objects<QuizCache>("QuizCache");
-      
+
       return Array.from(cached).map((q) => ({
         id: q.id,
         title: q.title,
@@ -120,7 +125,7 @@ export class OfflineStorageService {
   static async deleteDownloadedExam(examId: string): Promise<void> {
     try {
       // Deleting from cache is handled by sync updates.
-      console.log("✅ Downloaded exam mapped to Realm Cache:", examId);
+      console.log("Downloaded exam mapped to Realm Cache:", examId);
     } catch (error) {
       console.error("Error deleting downloaded exam:", error);
       throw error;
@@ -147,7 +152,7 @@ export class OfflineStorageService {
           retryCount: 0,
         });
       });
-      console.log("✅ Update queued for sync in Realm");
+      console.log("Update queued for sync in Realm");
     } catch (error) {
       console.error("Error queuing update:", error);
       throw error;
@@ -160,8 +165,10 @@ export class OfflineStorageService {
   static async getPendingUpdates(): Promise<PendingUpdate[]> {
     try {
       const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
-      
+      const updates = realm.objects<OfflinePendingUpdate>(
+        "OfflinePendingUpdate",
+      );
+
       return Array.from(updates).map((u) => ({
         id: u.updateId,
         examId: u.examId,
@@ -182,9 +189,11 @@ export class OfflineStorageService {
   static async removePendingUpdate(updateId: string): Promise<void> {
     try {
       const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
+      const updates = realm.objects<OfflinePendingUpdate>(
+        "OfflinePendingUpdate",
+      );
       const target = updates.filtered("updateId == $0", updateId)[0];
-      
+
       if (target) {
         realm.write(() => {
           realm.delete(target);
@@ -202,12 +211,14 @@ export class OfflineStorageService {
   static async clearPendingUpdates(): Promise<void> {
     try {
       const realm = await RealmService.getStagingRealm();
-      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
-      
+      const updates = realm.objects<OfflinePendingUpdate>(
+        "OfflinePendingUpdate",
+      );
+
       realm.write(() => {
         realm.delete(updates);
       });
-      console.log("✅ Pending updates cleared");
+      console.log("Pending updates cleared");
     } catch (error) {
       console.error("Error clearing pending updates:", error);
       throw error;
@@ -220,8 +231,11 @@ export class OfflineStorageService {
   static async updateLastSync(): Promise<void> {
     try {
       const realm = await RealmService.getStagingRealm();
-      const existing = realm.objectForPrimaryKey<SystemKV>("SystemKV", STORAGE_KEYS.LAST_SYNC);
-      
+      const existing = realm.objectForPrimaryKey<SystemKV>(
+        "SystemKV",
+        STORAGE_KEYS.LAST_SYNC,
+      );
+
       realm.write(() => {
         if (existing) {
           existing.value = new Date().toISOString();
@@ -243,7 +257,10 @@ export class OfflineStorageService {
   static async getLastSync(): Promise<Date | null> {
     try {
       const realm = await RealmService.getStagingRealm();
-      const entry = realm.objectForPrimaryKey<SystemKV>("SystemKV", STORAGE_KEYS.LAST_SYNC);
+      const entry = realm.objectForPrimaryKey<SystemKV>(
+        "SystemKV",
+        STORAGE_KEYS.LAST_SYNC,
+      );
       return entry ? new Date(entry.value) : null;
     } catch (error) {
       console.error("Error getting last sync:", error);
@@ -287,9 +304,26 @@ export class OfflineStorageService {
       // Clearing Cache and Staging is fully handled by RealmService.clearAll()
       // We just call that to ensure full cleanup.
       await RealmService.clearAll();
-      console.log("✅ All offline data cleared via Realm");
+      console.log("All offline data cleared via Realm");
     } catch (error) {
       console.error("Error clearing offline data:", error);
+      throw error;
+    }
+  }
+  /**
+   * Emergency clear all app data
+   */
+  static async emergencyClear(): Promise<void> {
+    try {
+      await RealmService.clearAll();
+      const AsyncStorage = (
+        await import("@react-native-async-storage/async-storage")
+      ).default;
+      const keys = await AsyncStorage.getAllKeys();
+      await AsyncStorage.multiRemove(keys);
+      console.log("Emergency clear complete");
+    } catch (error) {
+      console.error("Error in emergency clear:", error);
       throw error;
     }
   }
