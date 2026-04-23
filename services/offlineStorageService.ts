@@ -4,9 +4,12 @@ import {
   RealmService,
   SystemKV,
 } from "./realmService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Storage keys for SystemKV
+// Storage keys
 const STORAGE_KEYS = {
+  DOWNLOADED_EXAMS: "@downloaded_exams",
+  PENDING_UPDATES: "@pending_updates",
   LAST_SYNC: "@last_sync",
   OFFLINE_MODE: "@offline_mode",
 };
@@ -28,7 +31,8 @@ export interface DownloadedExam {
 export interface PendingUpdate {
   id: string;
   examId: string;
-  action: "create" | "update" | "delete" | "audit_log" | "update-answer-key";
+  action: "create" | "update" | "delete";
+  collection?: "exams" | "classes";
   data: any;
   timestamp: Date;
   retryCount: number;
@@ -37,13 +41,40 @@ export interface PendingUpdate {
 export class OfflineStorageService {
   /**
    * Download exam for offline access
-   * Migrated to RealmDB: We now rely on the QuizCache populated by SyncService.
    */
   static async downloadExam(exam: any): Promise<void> {
     try {
-      // Exams are automatically cached in Realm via examService / syncService.
-      // This is left as a no-op to maintain the interface without duplicating data.
-      console.log("✅ Exam download mapped to Realm Cache:", exam.id);
+      const downloadedExams = await this.getDownloadedExams();
+
+      const downloadedExam: DownloadedExam = {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        questions: exam.questions || [],
+        answerKey: exam.answerKey || null,
+        createdBy: exam.createdBy,
+        createdAt: exam.createdAt,
+        updatedAt: exam.updatedAt,
+        version: exam.version || 1,
+        downloadedAt: new Date(),
+        lastSyncedAt: new Date(),
+      };
+
+      // Check if already downloaded
+      const existingIndex = downloadedExams.findIndex((e) => e.id === exam.id);
+
+      if (existingIndex >= 0) {
+        downloadedExams[existingIndex] = downloadedExam;
+      } else {
+        downloadedExams.push(downloadedExam);
+      }
+
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.DOWNLOADED_EXAMS,
+        JSON.stringify(downloadedExams),
+      );
+
+      console.log("✅ Exam downloaded for offline access:", exam.id);
     } catch (error) {
       console.error("Error downloading exam:", error);
       throw error;
@@ -84,23 +115,8 @@ export class OfflineStorageService {
     examId: string,
   ): Promise<DownloadedExam | null> {
     try {
-      const realm = await RealmService.getCacheRealm();
-      const q = realm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
-      if (!q) return null;
-
-      return {
-        id: q.id,
-        title: q.title,
-        description: q.subject || q.className || "",
-        questions: [],
-        answerKey: q.answerKey ? JSON.parse(q.answerKey) : null,
-        createdBy: q.createdBy,
-        createdAt: q.createdAt,
-        updatedAt: q.updatedAt,
-        version: q.version || 1,
-        downloadedAt: q.createdAt,
-        lastSyncedAt: q.updatedAt,
-      };
+      const exams = await this.getDownloadedExams();
+      return exams.find((e) => e.id === examId) || null;
     } catch (error) {
       console.error("Error getting downloaded exam:", error);
       return null;
@@ -112,8 +128,8 @@ export class OfflineStorageService {
    */
   static async isExamDownloaded(examId: string): Promise<boolean> {
     try {
-      const realm = await RealmService.getCacheRealm();
-      return !!realm.objectForPrimaryKey<QuizCache>("QuizCache", examId);
+      const exam = await this.getDownloadedExam(examId);
+      return exam !== null;
     } catch (error) {
       return false;
     }
@@ -137,8 +153,9 @@ export class OfflineStorageService {
    */
   static async queueUpdate(
     examId: string,
-    action: "create" | "update" | "delete" | "audit_log" | "update-answer-key",
+    action: "create" | "update" | "delete",
     data: any,
+    collection: "exams" | "classes" = "exams",
   ): Promise<void> {
     try {
       const realm = await RealmService.getStagingRealm();

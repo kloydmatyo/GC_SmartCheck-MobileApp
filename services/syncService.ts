@@ -15,7 +15,12 @@ import {
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
-import { OfflineClass, OfflinePendingUpdate, OfflineQuiz, RealmService } from "./realmService";
+import {
+  OfflineClass,
+  OfflinePendingUpdate,
+  OfflineQuiz,
+  RealmService,
+} from "./realmService";
 
 export interface SyncResult {
   success: boolean;
@@ -52,7 +57,17 @@ export class SyncService {
     NetworkService.addListener((isConnected) => {
       if (isConnected) {
         console.log("Network restored, triggering auto-sync...");
-        this.syncPendingUpdates();
+        // Wait for auth to be ready before syncing
+        if (auth.currentUser) {
+          this.syncPendingUpdates();
+        } else {
+          const unsubscribe = auth.onAuthStateChanged((user) => {
+            unsubscribe();
+            if (user) {
+              this.syncPendingUpdates();
+            }
+          });
+        }
       }
     });
   }
@@ -115,12 +130,53 @@ export class SyncService {
         failedCount++;
       }
 
-      // 4. Flush Pending Updates (RealmDB)
+      // 4. Flush queued document updates
       try {
-        await this.processPendingUpdates();
-        syncedCount++;
+        const pendingUpdates = await OfflineStorageService.getPendingUpdates();
+        for (const update of pendingUpdates) {
+          try {
+            const conflict = await this.syncUpdate(update);
+            if (conflict) {
+              conflicts.push(conflict);
+              failedCount++;
+              continue;
+            }
+            await OfflineStorageService.removePendingUpdate(update.id);
+            syncedCount++;
+          } catch (updateError: any) {
+            console.error(
+              `Failed to sync update ${update.id} for exam ${update.examId}:`,
+              updateError,
+            );
+            const errorCode = updateError?.code || updateError?.errorInfo?.code;
+            const isPermissionError =
+              errorCode === "permission-denied" ||
+              errorCode === "PERMISSION_DENIED" ||
+              updateError?.message?.includes(
+                "Missing or insufficient permissions",
+              );
+
+            if (isPermissionError) {
+              // Permission errors are unrecoverable — drop immediately
+              console.warn(
+                `[SyncService] Removing unauthorized pending update ${update.id}`,
+              );
+              await OfflineStorageService.removePendingUpdate(update.id);
+            } else {
+              // Increment retry count and drop after 5 failures
+              await OfflineStorageService.incrementRetryCount(update.id);
+              if ((update.retryCount || 0) >= 5) {
+                console.warn(
+                  `[SyncService] Dropping update ${update.id} after max retries`,
+                );
+                await OfflineStorageService.removePendingUpdate(update.id);
+              }
+            }
+            failedCount++;
+          }
+        }
       } catch (e) {
-        console.error("Process Updates Error", e);
+        console.error("Pending update sync error", e);
         failedCount++;
       }
 
@@ -137,7 +193,7 @@ export class SyncService {
         success: failedCount === 0,
         syncedCount,
         failedCount,
-        conflicts: [],
+        conflicts,
       };
 
       console.log(
@@ -212,9 +268,11 @@ export class SyncService {
 
     // 4. Fetch pending updates to ensure we don't overwrite local work
     const stagingRealm = await RealmService.getStagingRealm();
-    const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
+    const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>(
+      "OfflinePendingUpdate",
+    );
     const updateMap = new Map<string, any>();
-    pendingUpdates.forEach(u => {
+    pendingUpdates.forEach((u) => {
       if (u.action === "update" || u.action === "update-answer-key") {
         updateMap.set(u.examId, JSON.parse(u.data));
       }
@@ -234,7 +292,9 @@ export class SyncService {
           class_name: data.class_name,
           course_subject: data.course_subject,
           room: data.room || "",
+          year: data.year || "",
           section_block: data.section_block || "",
+          isArchived: data.isArchived || false,
           students: JSON.stringify(data.students || []),
           createdBy: data.createdBy,
           updatedAt: data.updatedAt?.toDate?.() || new Date(),
@@ -244,25 +304,38 @@ export class SyncService {
       // Insert fresh exams
       examsWithAK.forEach((item) => {
         const pendingData = updateMap.get(item.id);
-        
+
         realm.create("QuizCache", {
           id: item.id,
           title: pendingData?.title || item.data.title,
-          subject: pendingData?.subject || item.data.subject || item.data.className || "",
-          status: pendingData?.isArchived !== undefined 
-            ? (pendingData.isArchived ? "Archived" : "Draft") 
-            : (item.data.status || "Draft"),
+          subject:
+            pendingData?.subject ||
+            item.data.subject ||
+            item.data.className ||
+            "",
+          status:
+            pendingData?.isArchived !== undefined
+              ? pendingData.isArchived
+                ? "Archived"
+                : "Draft"
+              : item.data.status || "Draft",
           papersCount: item.data.scanned_papers || 0,
           questionCount: pendingData?.num_items || item.data.num_items || 0,
-          answerKey: pendingData?.answers 
-            ? JSON.stringify({ ...JSON.parse(item.answerKey || '{}'), answers: pendingData.answers })
-            : (pendingData?.answerKey ? JSON.stringify(pendingData.answerKey) : item.answerKey),
+          answerKey: pendingData?.answers
+            ? JSON.stringify({
+                ...JSON.parse(item.answerKey || "{}"),
+                answers: pendingData.answers,
+              })
+            : pendingData?.answerKey
+              ? JSON.stringify(pendingData.answerKey)
+              : item.answerKey,
           createdBy: item.data.createdBy,
           createdAt: item.data.createdAt?.toDate?.() || new Date(),
           updatedAt: item.data.updatedAt?.toDate?.() || new Date(),
           instructorId: item.data.instructorId || "",
           examCode: item.data.examCode || item.data.room || "",
-          choicesPerItem: pendingData?.choices_per_item || item.data.choices_per_item || 4,
+          choicesPerItem:
+            pendingData?.choices_per_item || item.data.choices_per_item || 4,
           version: pendingData?.version || item.data.version || 1,
         });
       });
@@ -421,11 +494,12 @@ export class SyncService {
       throw new Error("User not authenticated");
     }
 
-    const examRef = doc(db, "exams", update.examId);
+    const collectionName = update.collection ?? "exams";
+    const targetRef = doc(db, collectionName, update.examId);
 
     try {
       if (update.action === "create") {
-        await setDoc(examRef, {
+        await setDoc(targetRef, {
           ...update.data,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -434,15 +508,48 @@ export class SyncService {
       }
 
       if (update.action === "update") {
-        // Check for conflicts
-        const serverDoc = await getDoc(examRef);
+        if (collectionName === "classes") {
+          // Verify ownership before writing
+          const classDoc = await getDoc(targetRef);
+          if (
+            classDoc.exists() &&
+            classDoc.data().createdBy !== currentUser.uid
+          ) {
+            throw Object.assign(new Error("Permission denied: not the owner"), {
+              code: "permission-denied",
+            });
+          }
+          await updateDoc(targetRef, {
+            ...update.data,
+            updatedAt: serverTimestamp(),
+          });
+          return null;
+        }
+
+        // For exams: Check for conflicts
+        const serverDoc = await getDoc(targetRef);
 
         if (serverDoc.exists()) {
           const serverData = serverDoc.data();
-          const serverVersion = serverData.version || 1;
-          const localVersion = update.data.version || 1;
 
-          // Conflict detected
+          // Verify ownership — check both createdBy and instructorId
+          if (
+            serverData.createdBy !== currentUser.uid &&
+            serverData.instructorId !== currentUser.uid
+          ) {
+            console.warn(
+              `[SyncService] Ownership mismatch for exam ${update.examId}: ` +
+                `createdBy="${serverData.createdBy}", instructorId="${serverData.instructorId}", ` +
+                `currentUser="${currentUser.uid}"`,
+            );
+            throw Object.assign(new Error("Permission denied: not the owner"), {
+              code: "permission-denied",
+            });
+          }
+
+          const serverVersion = serverData.version || 1;
+          const localVersion = update.data.version || serverVersion;
+
           if (serverVersion > localVersion) {
             return {
               examId: update.examId,
@@ -454,8 +561,9 @@ export class SyncService {
           }
         }
 
-        await updateDoc(examRef, {
+        await updateDoc(targetRef, {
           ...update.data,
+          createdBy: currentUser.uid,
           updatedAt: serverTimestamp(),
           version: update.data.version || 1,
         });
@@ -503,7 +611,7 @@ export class SyncService {
       }
 
       if (update.action === "delete") {
-        await deleteDoc(examRef);
+        await deleteDoc(targetRef);
         return null;
       }
 

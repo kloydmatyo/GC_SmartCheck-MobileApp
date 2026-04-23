@@ -4,7 +4,13 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   ActivityIndicator,
@@ -18,27 +24,23 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 
 import Toast from "react-native-toast-message";
 import * as XLSX from "xlsx";
 
 import { StudentImportModal } from "@/components/student/StudentImportModal";
-import { auth, db } from "@/config/firebase";
+import { auth } from "@/config/firebase";
+import { ExamService } from "@/services/examService";
+import { NetworkService } from "@/services/networkService";
 
 import { DashboardService } from "@/services/dashboardService";
 import { ImportResult } from "@/types/student";
 
-import {
-  deleteDoc,
-  doc,
-  updateDoc
-} from "firebase/firestore";
 
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
-import { ExamService } from "../../services/examService";
 import { StudentImportService } from "../../services/studentImportService";
 import { Class } from "../../types/class";
 
@@ -133,7 +135,8 @@ export default function ClassDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>(
-    requestedTab && ["students", "exams", "scan", "stats"].includes(requestedTab)
+    requestedTab &&
+      ["students", "exams", "scan", "stats"].includes(requestedTab)
       ? requestedTab
       : "students",
   );
@@ -146,7 +149,9 @@ export default function ClassDetailsScreen() {
     studentName: string;
   } | null>(null);
   const [importing, setImporting] = useState(false);
-  const [sortBy, setSortBy] = useState<'id_asc' | 'id_desc' | 'fname_asc' | 'fname_desc'>('id_asc');
+  const [sortBy, setSortBy] = useState<
+    "id_asc" | "id_desc" | "fname_asc" | "fname_desc"
+  >("id_asc");
   const [sortModalVisible, setSortModalVisible] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -174,8 +179,10 @@ export default function ClassDetailsScreen() {
   const [examRowsLoading, setExamRowsLoading] = useState(false);
   const examLoadRequestRef = useRef(0);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
-  const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] = useState(false);
-  const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] = useState(false);
+  const [archiveClassConfirmVisible, setArchiveClassConfirmVisible] =
+    useState(false);
+  const [deleteClassConfirmVisible, setDeleteClassConfirmVisible] =
+    useState(false);
   const [editClassModalVisible, setEditClassModalVisible] = useState(false);
   const [yearPickerVisible, setYearPickerVisible] = useState(false);
   const [discardEditClassConfirmVisible, setDiscardEditClassConfirmVisible] =
@@ -183,7 +190,8 @@ export default function ClassDetailsScreen() {
   const [examMenuVisible, setExamMenuVisible] = useState(false);
   const [examMenuPosition, setExamMenuPosition] = useState({ top: 0, left: 0 });
   const [selectedExam, setSelectedExam] = useState<ExamRow | null>(null);
-  const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] = useState(false);
+  const [archiveExamConfirmVisible, setArchiveExamConfirmVisible] =
+    useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [addingStudent, setAddingStudent] = useState(false);
   const [savingClassEdit, setSavingClassEdit] = useState(false);
@@ -245,7 +253,9 @@ export default function ClassDetailsScreen() {
   }, [classId]);
 
   const classDataRef = useRef<Class | null>(null);
-  useEffect(() => { classDataRef.current = classData; }, [classData]);
+  useEffect(() => {
+    classDataRef.current = classData;
+  }, [classData]);
 
   const trimmedClassForm = {
     class_name: classForm.class_name.trim(),
@@ -256,14 +266,15 @@ export default function ClassDetailsScreen() {
     trimmedClassForm.class_name.length >= 4 &&
     trimmedClassForm.course_subject.length >= 5 &&
     Boolean(classForm.year) &&
-    (trimmedClassForm.room.length === 0 || /^\d{3}$/.test(trimmedClassForm.room)) &&
+    (trimmedClassForm.room.length === 0 ||
+      /^\d{3}$/.test(trimmedClassForm.room)) &&
     !savingClassEdit;
   const hasEditClassChanges = Boolean(
     classData &&
-      (trimmedClassForm.class_name !== (classData.class_name ?? "") ||
-        trimmedClassForm.course_subject !== (classData.course_subject ?? "") ||
-        trimmedClassForm.room !== (classData.room ?? "") ||
-        classForm.year !== (classData.year ?? "")),
+    (trimmedClassForm.class_name !== (classData.class_name ?? "") ||
+      trimmedClassForm.course_subject !== (classData.course_subject ?? "") ||
+      trimmedClassForm.room !== (classData.room ?? "") ||
+      classForm.year !== (classData.year ?? "")),
   );
 
   const openEditClassModal = useCallback(() => {
@@ -296,27 +307,54 @@ export default function ClassDetailsScreen() {
     if (!classData) return;
 
     if (!trimmedClassForm.class_name) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Program is required",
+      });
       return;
     }
     if (trimmedClassForm.class_name.length < 4) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Program must be at least 4 characters" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Program must be at least 4 characters",
+      });
       return;
     }
     if (!trimmedClassForm.course_subject) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Course is required" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course is required",
+      });
       return;
     }
     if (trimmedClassForm.course_subject.length < 5) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Course must be at least 5 characters" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course must be at least 5 characters",
+      });
       return;
     }
     if (!classForm.year) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Year is required" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Year is required",
+      });
       return;
     }
-    if (trimmedClassForm.room.length > 0 && !/^\d{3}$/.test(trimmedClassForm.room)) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Room must be exactly 3 digits" });
+    if (
+      trimmedClassForm.room.length > 0 &&
+      !/^\d{3}$/.test(trimmedClassForm.room)
+    ) {
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Room must be exactly 3 digits",
+      });
       return;
     }
 
@@ -367,23 +405,29 @@ export default function ClassDetailsScreen() {
         .filter((exam) => {
           if (exam.isArchived) return false;
           const className = currentClassData.class_name.trim().toLowerCase();
-          const matchesId = exam.classId && exam.classId === currentClassData.id;
-          const matchesName = exam.className && exam.className.trim().toLowerCase() === className;
-          const matchesLegacyClass = exam.class && exam.class.trim().toLowerCase() === className;
+          const matchesId =
+            exam.classId && exam.classId === currentClassData.id;
+          const matchesName =
+            exam.className && exam.className.trim().toLowerCase() === className;
+          const matchesLegacyClass =
+            exam.class && exam.class.trim().toLowerCase() === className;
           return matchesId || matchesName || matchesLegacyClass;
         })
-        .map((exam) => ({
-          id: exam.id,
-          title: exam.title || "Untitled Exam",
-          questions: exam.num_items || exam.totalQuestions || 0,
-          scans: exam.papers || 0,
-          average: 0,
-          subject: exam.class || exam.subject || "General",
-          createdDate: exam.date || "No date",
-          examCode: exam.examCode || "",
-          classId: exam.classId,
-          className: exam.className,
-        } as ExamRow));
+        .map(
+          (exam) =>
+            ({
+              id: exam.id,
+              title: exam.title || "Untitled Exam",
+              questions: exam.num_items || exam.totalQuestions || 0,
+              scans: exam.papers || 0,
+              average: 0,
+              subject: exam.class || exam.subject || "General",
+              createdDate: exam.date || "No date",
+              examCode: exam.examCode || "",
+              classId: exam.classId,
+              className: exam.className,
+            }) as ExamRow,
+        );
 
       setExamRows(linkedExams);
 
@@ -391,11 +435,14 @@ export default function ClassDetailsScreen() {
       const examsWithStats = await Promise.all(
         linkedExams.map(async (exam) => {
           try {
-            const { NetworkService } = await import("@/services/networkService");
             const isOnline = await NetworkService.isOnline();
             if (!isOnline) return exam;
             const stats = await DashboardService.getExamStats(exam.id);
-            return { ...exam, scans: stats.totalGraded, average: stats.classAverage };
+            return {
+              ...exam,
+              scans: stats.totalGraded,
+              average: stats.classAverage,
+            };
           } catch {
             return exam;
           }
@@ -441,9 +488,12 @@ export default function ClassDetailsScreen() {
         text1: "Archived",
         text2: `${classData.class_name} moved to Archived`,
       });
-      router.push("/(tabs)/batch-history");
+      goToClasses();
     } catch (error) {
-      console.error("Error archiving class:", error);
+      console.warn(
+        "Archive class failed:",
+        error instanceof Error ? error.message : String(error),
+      );
       Toast.show({
         type: "error",
         text1: "Error",
@@ -471,7 +521,8 @@ export default function ClassDetailsScreen() {
       const average = buildStudentAverage(student.student_id, index);
       return {
         id: student.student_id,
-        initials: `${student.first_name.charAt(0)}${student.last_name.charAt(0)}`.toUpperCase(),
+        initials:
+          `${student.first_name.charAt(0)}${student.last_name.charAt(0)}`.toUpperCase(),
         name: `${student.first_name} ${student.last_name}`,
         average,
         scans: 1,
@@ -496,20 +547,26 @@ export default function ClassDetailsScreen() {
     );
   }, [examRows, searchQuery]);
 
-  const openExamMenu = useCallback((exam: ExamRow, pageX?: number, pageY?: number) => {
-    const menuWidth = 164;
-    const screenWidth = Dimensions.get("window").width;
-    const fallbackLeft = Math.max(16, screenWidth - menuWidth - 20);
-    const left =
-      typeof pageX === "number"
-        ? Math.min(Math.max(16, pageX - menuWidth + 24), screenWidth - menuWidth - 16)
-        : fallbackLeft;
-    const top = typeof pageY === "number" ? Math.max(96, pageY - 72) : 140;
+  const openExamMenu = useCallback(
+    (exam: ExamRow, pageX?: number, pageY?: number) => {
+      const menuWidth = 164;
+      const screenWidth = Dimensions.get("window").width;
+      const fallbackLeft = Math.max(16, screenWidth - menuWidth - 20);
+      const left =
+        typeof pageX === "number"
+          ? Math.min(
+              Math.max(16, pageX - menuWidth + 24),
+              screenWidth - menuWidth - 16,
+            )
+          : fallbackLeft;
+      const top = typeof pageY === "number" ? Math.max(96, pageY - 72) : 140;
 
-    setSelectedExam(exam);
-    setExamMenuPosition({ top, left });
-    setExamMenuVisible(true);
-  }, []);
+      setSelectedExam(exam);
+      setExamMenuPosition({ top, left });
+      setExamMenuVisible(true);
+    },
+    [],
+  );
 
   const closeExamMenu = useCallback(() => {
     setExamMenuVisible(false);
@@ -567,9 +624,7 @@ export default function ClassDetailsScreen() {
     try {
       const examId = selectedExam.id;
       const examTitle = selectedExam.title;
-      
-      await ExamService.archiveExam(examId);
-
+      await ExamService.updateExam(selectedExam.id, { isArchived: true });
       closeExamMenu();
       clearExamSelection();
       Toast.show({
@@ -579,7 +634,10 @@ export default function ClassDetailsScreen() {
       });
       loadExams();
     } catch (error) {
-      console.error("Error archiving exam:", error);
+      console.log("[ClassDetails] Archive exam failed:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : "",
+      });
       Toast.show({
         type: "error",
         text1: "Error",
@@ -592,7 +650,7 @@ export default function ClassDetailsScreen() {
     if (!selectedExam) return;
     try {
       const examId = selectedExam.id;
-      
+
       await ExamService.deleteExam(examId);
 
       closeExamMenu();
@@ -618,20 +676,28 @@ export default function ClassDetailsScreen() {
     try {
       await ClassService.deleteClass(classData.id);
       setDeleteClassConfirmVisible(false);
-      Toast.show({ type: "delete_result", text1: "Deleted", text2: `${classData.class_name} has been deleted` });
+      Toast.show({
+        type: "delete_result",
+        text1: "Deleted",
+        text2: `${classData.class_name} has been deleted`,
+      });
       router.replace("/(tabs)/classes");
     } catch (error) {
       console.error("Error deleting class:", error);
-      Toast.show({ type: "error", text1: "Error", text2: "Failed to delete class" });
+      Toast.show({
+        type: "error",
+        text1: "Error",
+        text2: "Failed to delete class",
+      });
     }
   };
 
   const handleExportStudents = async () => {
     if (!classData || classData.students.length === 0) {
       Toast.show({
-        type: 'info',
-        text1: 'No Students',
-        text2: 'There are no students to export',
+        type: "info",
+        text1: "No Students",
+        text2: "There are no students to export",
       });
       return;
     }
@@ -641,11 +707,11 @@ export default function ClassDetailsScreen() {
 
       // Prepare data for Excel
       const exportData = classData.students.map((student, index) => ({
-        'No.': index + 1,
-        'Student ID': student.student_id,
-        'First Name': student.first_name,
-        'Last Name': student.last_name,
-        'Email': student.email || '',
+        "No.": index + 1,
+        "Student ID": student.student_id,
+        "First Name": student.first_name,
+        "Last Name": student.last_name,
+        Email: student.email || "",
       }));
 
       // Create workbook and worksheet
@@ -653,94 +719,104 @@ export default function ClassDetailsScreen() {
       const ws = XLSX.utils.json_to_sheet(exportData);
 
       // Set column widths
-      ws['!cols'] = [
-        { wch: 5 },  // No.
+      ws["!cols"] = [
+        { wch: 5 }, // No.
         { wch: 15 }, // Student ID
         { wch: 20 }, // First Name
         { wch: 20 }, // Last Name
         { wch: 30 }, // Email
       ];
 
-      XLSX.utils.book_append_sheet(wb, ws, 'Students');
+      XLSX.utils.book_append_sheet(wb, ws, "Students");
 
       // Generate filename
-      const className = classData.class_name.replace(/[^a-z0-9]/gi, '_');
-      const timestamp = new Date().toISOString().split('T')[0];
+      const className = classData.class_name.replace(/[^a-z0-9]/gi, "_");
+      const timestamp = new Date().toISOString().split("T")[0];
       const filename = `${className}_Students_${timestamp}.xlsx`;
 
       // Write file
-      const wbout = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+      const wbout = XLSX.write(wb, { type: "base64", bookType: "xlsx" });
 
       // Save file
-      if (Platform.OS === 'web') {
+      if (Platform.OS === "web") {
         // Web: trigger download
-        const blob = await (await fetch(`data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${wbout}`)).blob();
+        const blob = await (
+          await fetch(
+            `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${wbout}`,
+          )
+        ).blob();
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
+        const a = document.createElement("a");
         a.href = url;
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-        
+
         Toast.show({
-          type: 'success',
-          text1: 'Export Successful',
+          type: "success",
+          text1: "Export Successful",
           text2: `Downloaded ${classData.students.length} students`,
         });
       } else {
         // Native: Let user choose save location
         try {
-          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-          
+          const permissions =
+            await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+
           if (!permissions.granted) {
             Toast.show({
-              type: 'error',
-              text1: 'Permission Denied',
-              text2: 'Storage access is required to save the file',
+              type: "error",
+              text1: "Permission Denied",
+              text2: "Storage access is required to save the file",
             });
             return;
           }
 
-          const fileUri = await FileSystem.StorageAccessFramework.createFileAsync(
-            permissions.directoryUri,
-            filename,
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          );
+          const fileUri =
+            await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              filename,
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            );
 
           await FileSystem.writeAsStringAsync(fileUri, wbout, {
             encoding: FileSystem.EncodingType.Base64,
           });
 
           Toast.show({
-            type: 'success',
-            text1: 'File Downloaded',
+            type: "success",
+            text1: "File Downloaded",
             text2: `${classData.students.length} students saved to ${filename}`,
             visibilityTime: 4000,
           });
         } catch (permError) {
           // Fallback to app directory if permission issues
-          console.log('Permission error, falling back to app directory:', permError);
+          console.log(
+            "Permission error, falling back to app directory:",
+            permError,
+          );
           const fileUri = `${FileSystem.documentDirectory}${filename}`;
           await FileSystem.writeAsStringAsync(fileUri, wbout, {
             encoding: FileSystem.EncodingType.Base64,
           });
 
           Toast.show({
-            type: 'success',
-            text1: 'File Saved',
-            text2: Platform.OS === 'ios' 
-              ? `Open Files app > On My ${Platform.OS === 'ios' ? 'iPhone/iPad' : 'Device'} > ${filename}`
-              : `File saved to app folder: ${filename}`,
+            type: "success",
+            text1: "File Saved",
+            text2:
+              Platform.OS === "ios"
+                ? `Open Files app > On My ${Platform.OS === "ios" ? "iPhone/iPad" : "Device"} > ${filename}`
+                : `File saved to app folder: ${filename}`,
             visibilityTime: 5000,
           });
         }
       }
     } catch (error) {
-      console.error('Export error:', error);
+      console.error("Export error:", error);
       Toast.show({
-        type: 'error',
-        text1: 'Export Failed',
-        text2: 'Could not export student list',
+        type: "error",
+        text1: "Export Failed",
+        text2: "Could not export student list",
       });
     } finally {
       setExporting(false);
@@ -797,7 +873,7 @@ export default function ClassDetailsScreen() {
       }
 
       const existingStudentIds = new Set(
-        (classData?.students ?? []).map((s) => s.student_id)
+        (classData?.students ?? []).map((s) => s.student_id),
       );
 
       const duplicateInClassErrors = validStudents
@@ -830,7 +906,9 @@ export default function ClassDetailsScreen() {
             field: "student_id",
             value: student.student_id,
             error: cleanMessage,
-            severity: cleanMessage.toLowerCase().includes("already exists") ? "warning" as const : "error" as const,
+            severity: cleanMessage.toLowerCase().includes("already exists")
+              ? ("warning" as const)
+              : ("error" as const),
           });
         }
       }
@@ -899,10 +977,22 @@ export default function ClassDetailsScreen() {
 
     const averages = students.map((student) => student.average);
     const distribution = [
-      { label: "90-100", count: averages.filter((value) => value >= 90).length },
-      { label: "80-89", count: averages.filter((value) => value >= 80 && value < 90).length },
-      { label: "70-79", count: averages.filter((value) => value >= 70 && value < 80).length },
-      { label: "60-69", count: averages.filter((value) => value >= 60 && value < 70).length },
+      {
+        label: "90-100",
+        count: averages.filter((value) => value >= 90).length,
+      },
+      {
+        label: "80-89",
+        count: averages.filter((value) => value >= 80 && value < 90).length,
+      },
+      {
+        label: "70-79",
+        count: averages.filter((value) => value >= 70 && value < 80).length,
+      },
+      {
+        label: "60-69",
+        count: averages.filter((value) => value >= 60 && value < 70).length,
+      },
       { label: "< 60", count: averages.filter((value) => value < 60).length },
     ];
 
@@ -940,11 +1030,16 @@ export default function ClassDetailsScreen() {
   const sortedStudents = useMemo(() => {
     const arr = [...filteredStudents];
     switch (sortBy) {
-      case 'id_asc': return arr.sort((a, b) => a.id.localeCompare(b.id));
-      case 'id_desc': return arr.sort((a, b) => b.id.localeCompare(a.id));
-      case 'fname_asc': return arr.sort((a, b) => a.name.localeCompare(b.name));
-      case 'fname_desc': return arr.sort((a, b) => b.name.localeCompare(a.name));
-      default: return arr;
+      case "id_asc":
+        return arr.sort((a, b) => a.id.localeCompare(b.id));
+      case "id_desc":
+        return arr.sort((a, b) => b.id.localeCompare(a.id));
+      case "fname_asc":
+        return arr.sort((a, b) => a.name.localeCompare(b.name));
+      case "fname_desc":
+        return arr.sort((a, b) => b.name.localeCompare(a.name));
+      default:
+        return arr;
     }
   }, [filteredStudents, sortBy]);
 
@@ -965,14 +1060,31 @@ export default function ClassDetailsScreen() {
               />
             </View>
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.sortButton} onPress={() => setSortModalVisible(true)}>
-                <Ionicons name="swap-vertical-outline" size={14} color="#20BE7B" />
+              <TouchableOpacity
+                style={styles.sortButton}
+                onPress={() => setSortModalVisible(true)}
+              >
+                <Ionicons
+                  name="swap-vertical-outline"
+                  size={14}
+                  color="#20BE7B"
+                />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.exportButtonSmall} onPress={handleExportStudents}>
+              <TouchableOpacity
+                style={styles.exportButtonSmall}
+                onPress={handleExportStudents}
+              >
                 <Ionicons name="download-outline" size={14} color="#20BE7B" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.importButton} onPress={() => setShowImportModal(true)}>
-                <Ionicons name="cloud-upload-outline" size={14} color="#20BE7B" />
+              <TouchableOpacity
+                style={styles.importButton}
+                onPress={() => setShowImportModal(true)}
+              >
+                <Ionicons
+                  name="cloud-upload-outline"
+                  size={14}
+                  color="#20BE7B"
+                />
               </TouchableOpacity>
             </View>
           </View>
@@ -982,7 +1094,9 @@ export default function ClassDetailsScreen() {
                 <Ionicons name="people-outline" size={26} color="#20BE7B" />
               </View>
               <Text style={styles.emptyStateTitle}>No Students Yet</Text>
-              <Text style={styles.emptyStateText}>Add students to get started.</Text>
+              <Text style={styles.emptyStateText}>
+                Add students to get started.
+              </Text>
             </View>
           ) : (
             sortedStudents.map((student) => (
@@ -990,19 +1104,34 @@ export default function ClassDetailsScreen() {
                 key={student.id}
                 style={styles.studentCard}
                 onPress={() => {
-                  setStudentToRemove({ studentId: student.id, studentName: student.name });
+                  setStudentToRemove({
+                    studentId: student.id,
+                    studentName: student.name,
+                  });
                   setRemoveStudentConfirmVisible(true);
                 }}
               >
-                <View style={[styles.studentAvatar, { backgroundColor: student.color }]}>
-                  <Text style={styles.studentAvatarText}>{student.initials}</Text>
+                <View
+                  style={[
+                    styles.studentAvatar,
+                    { backgroundColor: student.color },
+                  ]}
+                >
+                  <Text style={styles.studentAvatarText}>
+                    {student.initials}
+                  </Text>
                 </View>
                 <View style={styles.studentBody}>
                   <Text style={styles.studentName}>{student.name}</Text>
                   <Text style={styles.studentSubtext}>ID: {student.id}</Text>
                 </View>
                 <View style={styles.studentScoreWrap}>
-                  <Text style={[styles.studentScore, { color: scoreColor(student.average) }]}>
+                  <Text
+                    style={[
+                      styles.studentScore,
+                      { color: scoreColor(student.average) },
+                    ]}
+                  >
                     {student.average}%
                   </Text>
                   <Text style={styles.studentAvgLabel}>avg</Text>
@@ -1031,46 +1160,71 @@ export default function ClassDetailsScreen() {
           </View>
           <TouchableOpacity
             style={styles.createExamButton}
-            onPress={() => router.push(`/(tabs)/create-quiz?classId=${classId}`)}
+            onPress={() =>
+              router.push(`/(tabs)/create-quiz?classId=${classId}`)
+            }
           >
             <Ionicons name="add-circle-outline" size={18} color="#20BE7B" />
             <Text style={styles.createExamText}>Create New Exam</Text>
           </TouchableOpacity>
           {examRowsLoading ? (
-            <ActivityIndicator size="small" color="#20BE7B" style={{ marginTop: 20 }} />
+            <ActivityIndicator
+              size="small"
+              color="#20BE7B"
+              style={{ marginTop: 20 }}
+            />
           ) : filteredExams.length === 0 ? (
             <View style={styles.emptyStateCard}>
               <View style={styles.emptyStateIconWrap}>
-                <Ionicons name="document-text-outline" size={26} color="#20BE7B" />
+                <Ionicons
+                  name="document-text-outline"
+                  size={26}
+                  color="#20BE7B"
+                />
               </View>
               <Text style={styles.emptyStateTitle}>No Exams Yet</Text>
-              <Text style={styles.emptyStateText}>Create an exam to get started.</Text>
+              <Text style={styles.emptyStateText}>
+                Create an exam to get started.
+              </Text>
             </View>
           ) : (
             filteredExams.map((exam) => (
               <View key={exam.id} style={styles.examCard}>
                 <TouchableOpacity
                   style={styles.examCardPressable}
-                    onPress={() => router.push(`/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`)}
-                  >
-                    <View style={styles.examBody}>
-                      <Text style={styles.examTitle}>{exam.title}</Text>
-                      <Text style={styles.examMeta}>{exam.questions} items</Text>
-                      {exam.examCode ? <Text style={styles.examCodeMeta}>Code: {exam.examCode}</Text> : null}
-                      {exam.createdDate ? (
-                        <View style={styles.examDateRow}>
-                          <Ionicons
-                            name="calendar-outline"
-                            size={12}
-                            color="#7E8798"
-                            style={styles.examDateIcon}
-                          />
-                          <Text style={styles.examMeta}>{exam.createdDate}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                    <View style={styles.examRight}>
-                      <Text style={[styles.examAverage, { color: scoreColor(exam.average) }]}>
+                  onPress={() =>
+                    router.push(
+                      `/(tabs)/exam-preview?examId=${exam.id}&classId=${classId}`,
+                    )
+                  }
+                >
+                  <View style={styles.examBody}>
+                    <Text style={styles.examTitle}>{exam.title}</Text>
+                    <Text style={styles.examMeta}>{exam.questions} items</Text>
+                    {exam.examCode ? (
+                      <Text style={styles.examCodeMeta}>
+                        Code: {exam.examCode}
+                      </Text>
+                    ) : null}
+                    {exam.createdDate ? (
+                      <View style={styles.examDateRow}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={12}
+                          color="#7E8798"
+                          style={styles.examDateIcon}
+                        />
+                        <Text style={styles.examMeta}>{exam.createdDate}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={styles.examRight}>
+                    <Text
+                      style={[
+                        styles.examAverage,
+                        { color: scoreColor(exam.average) },
+                      ]}
+                    >
                       {exam.average > 0 ? `${exam.average}%` : "—"}
                     </Text>
                   </View>
@@ -1083,7 +1237,11 @@ export default function ClassDetailsScreen() {
                     });
                   }}
                 >
-                  <Ionicons name="ellipsis-vertical" size={18} color="#8E97A6" />
+                  <Ionicons
+                    name="ellipsis-vertical"
+                    size={18}
+                    color="#8E97A6"
+                  />
                 </TouchableOpacity>
               </View>
             ))
@@ -1129,11 +1287,15 @@ export default function ClassDetailsScreen() {
           <View style={styles.statsGrid}>
             <View style={styles.statsSmallCard}>
               <Text style={styles.statsSmallLabel}>Highest</Text>
-              <Text style={[styles.statsSmallValue, { color: "#20BE7B" }]}>{stats.highest}%</Text>
+              <Text style={[styles.statsSmallValue, { color: "#20BE7B" }]}>
+                {stats.highest}%
+              </Text>
             </View>
             <View style={styles.statsSmallCard}>
               <Text style={styles.statsSmallLabel}>Lowest</Text>
-              <Text style={[styles.statsSmallValue, { color: "#EF4444" }]}>{stats.lowest}%</Text>
+              <Text style={[styles.statsSmallValue, { color: "#EF4444" }]}>
+                {stats.lowest}%
+              </Text>
             </View>
             <View style={styles.statsSmallCard}>
               <Text style={styles.statsSmallLabel}>Students</Text>
@@ -1147,7 +1309,11 @@ export default function ClassDetailsScreen() {
                 <Text style={styles.distributionLabel}>{item.label}</Text>
                 <View style={styles.distributionTrack}>
                   <AnimatedStatBar
-                    progress={stats.totalScanned > 0 ? item.count / stats.totalScanned : 0}
+                    progress={
+                      stats.totalScanned > 0
+                        ? item.count / stats.totalScanned
+                        : 0
+                    }
                   />
                 </View>
                 <Text style={styles.distributionCount}>{item.count}</Text>
@@ -1185,7 +1351,10 @@ export default function ClassDetailsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconButton} onPress={() => router.replace("/(tabs)/classes")}>
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={() => router.replace("/(tabs)/classes")}
+        >
           <Ionicons name="arrow-back" size={22} color="#5C6575" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{classData.class_name}</Text>
@@ -1208,7 +1377,10 @@ export default function ClassDetailsScreen() {
             }}
           >
             <Text
-              style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}
+              style={[
+                styles.tabLabel,
+                activeTab === tab && styles.tabLabelActive,
+              ]}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </Text>
@@ -1217,7 +1389,10 @@ export default function ClassDetailsScreen() {
         ))}
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         {renderTab()}
       </ScrollView>
 
@@ -1280,46 +1455,45 @@ export default function ClassDetailsScreen() {
                 Archive Class
               </Text>
             </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.menuItem}
-                onPress={() => {
-                  openEditClassModal();
-                }}
-              >
-                <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
-                  Edit Class
-                </Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                openEditClassModal();
+              }}
+            >
+              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                Edit Class
+              </Text>
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
 
+      <ConfirmationModal
+        visible={archiveClassConfirmVisible}
+        title="Archive Item"
+        message={`Are you sure you want to archive ${
+          classData?.class_name ?? "this class"
+        }? You can still view it later in the archived section.`}
+        cancelText="Cancel"
+        confirmText="Archive"
+        destructive
+        onCancel={() => setArchiveClassConfirmVisible(false)}
+        onConfirm={handleArchiveClass}
+      />
 
-<ConfirmationModal
-  visible={archiveClassConfirmVisible}
-  title="Archive Item"
-  message={`Are you sure you want to archive ${
-    classData?.class_name ?? "this class"
-  }? You can still view it later in the archived section.`}
-  cancelText="Cancel"
-  confirmText="Archive"
-  destructive
-  onCancel={() => setArchiveClassConfirmVisible(false)}
-  onConfirm={handleArchiveClass}
-/>
-
-<ConfirmationModal
-  visible={deleteClassConfirmVisible}
-  title="Delete Item"
-  message={`Are you sure you want to delete ${
-    classData?.class_name ?? "this class"
-  }? This action cannot be undone.`}
-  cancelText="Cancel"
-  confirmText="Delete"
-  destructive
-  onCancel={() => setDeleteClassConfirmVisible(false)}
-  onConfirm={handleDeleteClass}
-/>
+      <ConfirmationModal
+        visible={deleteClassConfirmVisible}
+        title="Delete Item"
+        message={`Are you sure you want to delete ${
+          classData?.class_name ?? "this class"
+        }? This action cannot be undone.`}
+        cancelText="Cancel"
+        confirmText="Delete"
+        destructive
+        onCancel={() => setDeleteClassConfirmVisible(false)}
+        onConfirm={handleDeleteClass}
+      />
 
       <Modal
         visible={examMenuVisible}
@@ -1356,24 +1530,35 @@ export default function ClassDetailsScreen() {
               style={styles.menuItem}
               onPress={() => {
                 closeExamMenu();
-                router.push(`/(tabs)/scanner?classId=${classId}&examId=${selectedExam?.id}`);
+                router.push(
+                  `/(tabs)/scanner?classId=${classId}&examId=${selectedExam?.id}`,
+                );
               }}
             >
               <Text style={styles.menuItemText}>Scan answer sheet</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={requestArchiveExam}>
-              <Text style={[styles.menuItemText, styles.menuArchiveText]}>Archive Exam</Text>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={requestArchiveExam}
+            >
+              <Text style={[styles.menuItemText, styles.menuArchiveText]}>
+                Archive Exam
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 closeExamMenu();
                 if (selectedExam) {
-                  router.push(`/(tabs)/edit-exam?examId=${selectedExam.id}&classId=${classId}`);
+                  router.push(
+                    `/(tabs)/edit-exam?examId=${selectedExam.id}&classId=${classId}`,
+                  );
                 }
               }}
             >
-              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>Edit Exam</Text>
+              <Text style={[styles.menuItemText, { color: "#20BE7B" }]}>
+                Edit Exam
+              </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -1391,44 +1576,141 @@ export default function ClassDetailsScreen() {
           activeOpacity={1}
           onPress={() => setSortModalVisible(false)}
         >
-          <View style={[styles.sortModalContent, darkModeEnabled && { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Text style={[styles.sortModalTitle, darkModeEnabled && { color: colors.text }]}>Sort Students</Text>
+          <View
+            style={[
+              styles.sortModalContent,
+              darkModeEnabled && {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.sortModalTitle,
+                darkModeEnabled && { color: colors.text },
+              ]}
+            >
+              Sort Students
+            </Text>
 
-            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY STUDENT ID</Text>
-            {(['id_asc', 'id_desc'] as const).map((option) => (
+            <Text
+              style={[
+                styles.sortModalGroupLabel,
+                darkModeEnabled && { color: colors.textMuted },
+              ]}
+            >
+              BY STUDENT ID
+            </Text>
+            {(["id_asc", "id_desc"] as const).map((option) => (
               <TouchableOpacity
                 key={option}
-                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
-                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
+                style={[
+                  styles.sortOption,
+                  sortBy === option && styles.sortOptionActive,
+                  darkModeEnabled &&
+                    sortBy === option && { backgroundColor: colors.badgeBg },
+                ]}
+                onPress={() => {
+                  setSortBy(option);
+                  setSortModalVisible(false);
+                }}
               >
                 <Ionicons
-                  name={option === 'id_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  name={
+                    option === "id_asc"
+                      ? "arrow-up-outline"
+                      : "arrow-down-outline"
+                  }
                   size={16}
-                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                  color={
+                    sortBy === option
+                      ? COLORS.primary
+                      : darkModeEnabled
+                        ? colors.textSecondary
+                        : "#555"
+                  }
                 />
-                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
-                  {option === 'id_asc' ? 'Ascending (0 → 9)' : 'Descending (9 → 0)'}
+                <Text
+                  style={[
+                    styles.sortOptionText,
+                    sortBy === option && styles.sortOptionTextActive,
+                    darkModeEnabled && {
+                      color: sortBy === option ? COLORS.primary : colors.text,
+                    },
+                  ]}
+                >
+                  {option === "id_asc"
+                    ? "Ascending (0 → 9)"
+                    : "Descending (9 → 0)"}
                 </Text>
-                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
+                {sortBy === option && (
+                  <Ionicons
+                    name="checkmark"
+                    size={16}
+                    color={COLORS.primary}
+                    style={{ marginLeft: "auto" }}
+                  />
+                )}
               </TouchableOpacity>
             ))}
 
-            <Text style={[styles.sortModalGroupLabel, darkModeEnabled && { color: colors.textMuted }]}>BY FIRST NAME</Text>
-            {(['fname_asc', 'fname_desc'] as const).map((option) => (
+            <Text
+              style={[
+                styles.sortModalGroupLabel,
+                darkModeEnabled && { color: colors.textMuted },
+              ]}
+            >
+              BY FIRST NAME
+            </Text>
+            {(["fname_asc", "fname_desc"] as const).map((option) => (
               <TouchableOpacity
                 key={option}
-                style={[styles.sortOption, sortBy === option && styles.sortOptionActive, darkModeEnabled && sortBy === option && { backgroundColor: colors.badgeBg }]}
-                onPress={() => { setSortBy(option); setSortModalVisible(false); }}
+                style={[
+                  styles.sortOption,
+                  sortBy === option && styles.sortOptionActive,
+                  darkModeEnabled &&
+                    sortBy === option && { backgroundColor: colors.badgeBg },
+                ]}
+                onPress={() => {
+                  setSortBy(option);
+                  setSortModalVisible(false);
+                }}
               >
                 <Ionicons
-                  name={option === 'fname_asc' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                  name={
+                    option === "fname_asc"
+                      ? "arrow-up-outline"
+                      : "arrow-down-outline"
+                  }
                   size={16}
-                  color={sortBy === option ? COLORS.primary : (darkModeEnabled ? colors.textSecondary : '#555')}
+                  color={
+                    sortBy === option
+                      ? COLORS.primary
+                      : darkModeEnabled
+                        ? colors.textSecondary
+                        : "#555"
+                  }
                 />
-                <Text style={[styles.sortOptionText, sortBy === option && styles.sortOptionTextActive, darkModeEnabled && { color: sortBy === option ? COLORS.primary : colors.text }]}>
-                  {option === 'fname_asc' ? 'A → Z' : 'Z → A'}
+                <Text
+                  style={[
+                    styles.sortOptionText,
+                    sortBy === option && styles.sortOptionTextActive,
+                    darkModeEnabled && {
+                      color: sortBy === option ? COLORS.primary : colors.text,
+                    },
+                  ]}
+                >
+                  {option === "fname_asc" ? "A → Z" : "Z → A"}
                 </Text>
-                {sortBy === option && <Ionicons name="checkmark" size={16} color={COLORS.primary} style={{ marginLeft: 'auto' }} />}
+                {sortBy === option && (
+                  <Ionicons
+                    name="checkmark"
+                    size={16}
+                    color={COLORS.primary}
+                    style={{ marginLeft: "auto" }}
+                  />
+                )}
               </TouchableOpacity>
             ))}
           </View>
@@ -1456,18 +1738,32 @@ export default function ClassDetailsScreen() {
         }}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.importErrorModal, { backgroundColor: colors.surface }]}>
+          <View
+            style={[
+              styles.importErrorModal,
+              { backgroundColor: colors.surface },
+            ]}
+          >
             <View style={styles.importErrorHeader}>
-              <Ionicons 
-                name={importErrors.successCount > 0 ? "warning" : "close-circle"} 
-                size={48} 
-                color={importErrors.successCount > 0 ? "#ff9800" : "#e74c3c"} 
+              <Ionicons
+                name={
+                  importErrors.successCount > 0 ? "warning" : "close-circle"
+                }
+                size={48}
+                color={importErrors.successCount > 0 ? "#ff9800" : "#e74c3c"}
               />
               <Text style={[styles.importErrorTitle, { color: colors.text }]}>
-                {importErrors.successCount > 0 ? "Import Completed with Issues" : "Import Failed"}
+                {importErrors.successCount > 0
+                  ? "Import Completed with Issues"
+                  : "Import Failed"}
               </Text>
-              <Text style={[styles.importErrorSubtitle, { color: colors.textSecondary }]}>
-                {importErrors.successCount > 0 
+              <Text
+                style={[
+                  styles.importErrorSubtitle,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {importErrors.successCount > 0
                   ? `${importErrors.successCount} students added, ${importErrors.errors.length} skipped`
                   : `${importErrors.errors.length} errors found`}
               </Text>
@@ -1475,11 +1771,22 @@ export default function ClassDetailsScreen() {
 
             <ScrollView style={styles.importErrorList}>
               {importErrors.errors.map((err, index) => (
-                <View key={index} style={[styles.importErrorItem, { borderLeftColor: "#ff9800" }]}>
+                <View
+                  key={index}
+                  style={[
+                    styles.importErrorItem,
+                    { borderLeftColor: "#ff9800" },
+                  ]}
+                >
                   <Text style={[styles.importErrorId, { color: colors.text }]}>
                     {err.student_id}
                   </Text>
-                  <Text style={[styles.importErrorMessage, { color: colors.textSecondary }]}>
+                  <Text
+                    style={[
+                      styles.importErrorMessage,
+                      { color: colors.textSecondary },
+                    ]}
+                  >
                     {err.error}
                   </Text>
                 </View>
@@ -1487,9 +1794,16 @@ export default function ClassDetailsScreen() {
             </ScrollView>
 
             <TouchableOpacity
-              style={[styles.importErrorButton, { backgroundColor: COLORS.primary }]}
+              style={[
+                styles.importErrorButton,
+                { backgroundColor: COLORS.primary },
+              ]}
               onPress={() => {
-                setImportErrors({ visible: false, successCount: 0, errors: [] });
+                setImportErrors({
+                  visible: false,
+                  successCount: 0,
+                  errors: [],
+                });
               }}
             >
               <Text style={styles.importErrorButtonText}>OK</Text>
@@ -1528,7 +1842,10 @@ export default function ClassDetailsScreen() {
           setRemoveStudentConfirmVisible(false);
 
           try {
-            await ClassService.removeStudent(classId, studentToRemove.studentId);
+            await ClassService.removeStudent(
+              classId,
+              studentToRemove.studentId,
+            );
 
             Toast.show({
               type: "success",
@@ -1603,7 +1920,9 @@ export default function ClassDetailsScreen() {
             />
             {trimmedClassForm.class_name.length > 0 &&
             trimmedClassForm.class_name.length < 4 ? (
-              <Text style={styles.fieldHint}>At least 4 characters required</Text>
+              <Text style={styles.fieldHint}>
+                At least 4 characters required
+              </Text>
             ) : null}
 
             <Text style={styles.sheetLabel}>
@@ -1621,7 +1940,9 @@ export default function ClassDetailsScreen() {
             />
             {trimmedClassForm.course_subject.length > 0 &&
             trimmedClassForm.course_subject.length < 5 ? (
-              <Text style={styles.fieldHint}>At least 5 characters required</Text>
+              <Text style={styles.fieldHint}>
+                At least 5 characters required
+              </Text>
             ) : null}
 
             <Text style={styles.sheetLabel}>
@@ -1715,7 +2036,8 @@ export default function ClassDetailsScreen() {
                 <Text
                   style={[
                     styles.yearPickerItemText,
-                    classForm.year === option && styles.yearPickerItemTextSelected,
+                    classForm.year === option &&
+                      styles.yearPickerItemTextSelected,
                   ]}
                 >
                   {option}
@@ -1739,8 +2061,6 @@ export default function ClassDetailsScreen() {
           closeEditClassModal();
         }}
       />
-
-
     </View>
   );
 }
@@ -2544,5 +2864,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-})
-
+});

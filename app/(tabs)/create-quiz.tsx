@@ -32,7 +32,7 @@ import {
   View,
 } from "react-native";
 
-const NUM_QUESTIONS_OPTIONS = [20, 50, 100];
+const NUM_QUESTIONS_OPTIONS = [20, 50, 100, 150, 200];
 const MAX_FIELD_LENGTH = 50;
 
 interface ClassOption {
@@ -810,13 +810,13 @@ const styles = StyleSheet.create({
   },
   questionOptionRow: {
     flexDirection: "row",
-    gap: 12,
+    justifyContent: "space-between",
   },
   questionOption: {
-    flex: 1,
-    height: 78,
+    width: "19%",
+    height: 56,
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E8EBF0",
     alignItems: "center",
@@ -832,7 +832,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   questionOptionText: {
-    fontSize: 18,
+    fontSize: 13,
     fontWeight: "700",
     color: "#31394A",
   },

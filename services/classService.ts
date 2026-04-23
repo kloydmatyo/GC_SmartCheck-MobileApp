@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { Class, CreateClassData, Student } from "../types/class";
 import { NetworkService } from "./networkService";
+import { OfflineStorageService } from "./offlineStorageService";
 import { ClassCache, OfflineClass, RealmService } from "./realmService";
 import { UserService } from "./userService";
 
@@ -505,6 +506,45 @@ export class ClassService {
     updates: Partial<CreateClassData>,
   ): Promise<void> {
     try {
+      const isOnline = await NetworkService.isOnline();
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
+        "ClassCache",
+        classId,
+      );
+
+      if (!isOnline) {
+        await OfflineStorageService.queueUpdate(
+          classId,
+          "update",
+          {
+            ...updates,
+            ...(updates.year !== undefined && { year: yearToShort(updates.year) }),
+          },
+          "classes",
+        );
+
+        if (cached) {
+          cacheRealm.write(() => {
+            if (updates.class_name !== undefined)
+              cached.class_name = updates.class_name;
+            if (updates.course_subject !== undefined)
+              cached.course_subject = updates.course_subject;
+            if (updates.room !== undefined) cached.room = updates.room ?? "";
+            if (updates.year !== undefined)
+              cached.year = normalizeYear(updates.year) ?? "";
+            if (updates.section_block !== undefined)
+              cached.section_block = updates.section_block ?? "";
+            if (updates.isArchived !== undefined)
+              cached.isArchived = updates.isArchived;
+            if (updates.students !== undefined)
+              cached.students = JSON.stringify(updates.students);
+            cached.updatedAt = toRealmDate(new Date());
+          });
+        }
+        return;
+      }
+
       const docRef = doc(db, this.COLLECTION, classId);
       await updateDoc(docRef, {
         ...updates,
@@ -513,11 +553,6 @@ export class ClassService {
         updatedAt: Timestamp.now(),
       });
 
-      const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
-        "ClassCache",
-        classId,
-      );
       if (cached) {
         cacheRealm.write(() => {
           if (updates.class_name !== undefined)

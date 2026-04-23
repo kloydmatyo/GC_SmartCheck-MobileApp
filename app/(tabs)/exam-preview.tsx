@@ -9,10 +9,10 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { doc, updateDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Clipboard,
     Platform,
     SafeAreaView,
@@ -24,7 +24,7 @@ import {
     View,
 } from "react-native";
 import Toast from "react-native-toast-message";
-import { auth, db } from "../../config/firebase";
+import { auth } from "../../config/firebase";
 import { ExamPreviewData } from "../../types/exam";
 
 export default function ExamPreviewScreen() {
@@ -219,6 +219,16 @@ export default function ExamPreviewScreen() {
 
   const handleArchiveExam = async () => {
     try {
+      const errorLog: string[] = [];
+      errorLog.push(`[START] Archive Exam: ${examId}`);
+      errorLog.push(`Title: ${exam?.metadata.title}`);
+      errorLog.push(`Timestamp: ${new Date().toISOString()}`);
+
+      await ExamApi.updateExam(examId, { isArchived: true });
+
+      errorLog.push("[SUCCESS] Archive completed");
+      console.log(errorLog.join("\n"));
+
       await ExamApi.archiveExam(examId);
       setArchiveConfirmVisible(false);
       setSettingsMenuVisible(false);
@@ -229,11 +239,55 @@ export default function ExamPreviewScreen() {
       });
       goToQuizzes();
     } catch (error) {
-      console.error("Error archiving exam:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : "No stack trace";
+
+      const fullErrorReport = [
+        "═══════════════════════════════════════════",
+        "❌ ARCHIVE EXAM FAILED",
+        "═══════════════════════════════════════════",
+        `Exam ID: ${examId}`,
+        `Exam Title: ${exam?.metadata.title}`,
+        `Timestamp: ${new Date().toISOString()}`,
+        "",
+        "ERROR MESSAGE:",
+        errorMessage,
+        "",
+        "STACK TRACE:",
+        errorStack,
+        "═══════════════════════════════════════════",
+      ].join("\n");
+
+      // Log to console/PowerShell
+      console.error(fullErrorReport);
+
+      // Show on Android phone screen with alert
+      Alert.alert(
+        "Archive Failed",
+        `Error: ${errorMessage}\n\nCheck PowerShell for full details.`,
+        [
+          {
+            text: "Copy Error",
+            onPress: () => {
+              Clipboard.setString(fullErrorReport);
+              Toast.show({
+                type: "success",
+                text1: "Copied",
+                text2: "Error details copied to clipboard",
+              });
+            },
+          },
+          {
+            text: "OK",
+            onPress: () => {},
+          },
+        ],
+      );
+
       Toast.show({
         type: "error",
         text1: "Error",
-        text2: "Failed to archive exam",
+        text2: `Failed to archive: ${errorMessage}`,
       });
     }
   };
