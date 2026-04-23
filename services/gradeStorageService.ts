@@ -189,25 +189,43 @@ export class GradeStorageService {
     uid: string,
   ): Promise<boolean> {
     try {
+      // 1. Check local storage (Staging and Cache)
+      try {
+        const { RealmService } = await import("./realmService");
+        const stagingRealm = await RealmService.getStagingRealm();
+        const pending = stagingRealm.objects("OfflineGrade").filtered(
+          "studentId == $0 AND examId == $1",
+          studentId,
+          examId,
+        );
+        if (pending.length > 0) return true;
+
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cached = cacheRealm.objects("GradeCache").filtered(
+          "studentId == $0 AND examId == $1",
+          studentId,
+          examId,
+        );
+        if (cached.length > 0) return true;
+      } catch (e) {
+        console.warn("[GradeStorageService] Local duplicate check failed:", e);
+      }
+
+      // 2. Check Firestore (If online)
       const netState = await NetInfo.fetch();
       const isOnline = !!(netState.isConnected && netState.isInternetReachable);
 
-      if (!isOnline) {
-        return false; // Skip duplicate check if offline to avoid hanging
+      if (isOnline) {
+        const q = query(
+          collection(db, GRADE_RESULTS_COLLECTION),
+          where("examId", "==", examId),
+          where("studentId", "==", studentId),
+        );
+        const snap = await getDocs(q);
+        return !snap.empty;
       }
 
-      // Only check Firestore as source of truth — staging records are unconfirmed
-      // and should not permanently block re-scans
-      const q = query(
-        collection(db, GRADE_RESULTS_COLLECTION),
-        where("examId", "==", examId),
-      );
-      const snap = await getDocs(q);
-
-      return snap.docs.some((docSnap) => {
-        const data = docSnap.data();
-        return data.studentId === studentId && data.scannedBy === uid;
-      });
+      return false;
     } catch (error) {
       LogService.error("SAVE_FAILED", "Duplicate check query failed", {
         studentId,
@@ -557,14 +575,22 @@ export class GradeStorageService {
 
   static async syncOfflineQueue(): Promise<void> {
     try {
-      // ── Wait for Firebase Auth State To Restore ──
       const { auth } = await import("../config/firebase");
-      await new Promise<void>((resolve) => {
-        const unsubscribe = auth.onAuthStateChanged((user: any) => {
-          unsubscribe();
-          resolve();
+
+      // Only wait if auth is not already initialized
+      if (!auth.currentUser) {
+        await new Promise<void>((resolve) => {
+          const unsubscribe = auth.onAuthStateChanged(() => {
+            unsubscribe();
+            resolve();
+          });
+          // Safety timeout to prevent hanging if state never changes
+          setTimeout(() => {
+            unsubscribe();
+            resolve();
+          }, 3000);
         });
-      });
+      }
 
       // If user is still not logged in after restore, we can't sync
       if (!auth.currentUser) {
