@@ -404,7 +404,12 @@ export default function CreateQuizScreen() {
         // Attempt to create answer key with timeout
         await Promise.race([
           setDoc(doc(db, "answerKeys", answerKeyId), answerKeyData),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Answer key creation timed out")), 5000))
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Answer key creation timed out")),
+              5000,
+            ),
+          ),
         ]);
 
         // Attempt to create template with timeout
@@ -421,7 +426,12 @@ export default function CreateQuizScreen() {
           };
           await Promise.race([
             addDoc(collection(db, "templates"), templateData),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Template creation timed out")), 5000))
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Template creation timed out")),
+                5000,
+              ),
+            ),
           ]);
         } catch (templateErr) {
           console.warn("Template creation failed or timed out:", templateErr);
@@ -460,10 +470,10 @@ export default function CreateQuizScreen() {
   );
   const hasUnsavedExamDraft = Boolean(
     quizName.trim() ||
-      numQuestions ||
-      subject.trim() ||
-      choicesPerItem !== 4 ||
-      reviewVisible,
+    numQuestions ||
+    subject.trim() ||
+    choicesPerItem !== 4 ||
+    reviewVisible,
   );
 
   const handleAttemptClose = () => {
@@ -595,7 +605,6 @@ export default function CreateQuizScreen() {
             </TouchableOpacity>
           </View>
         </View>
-
       </ScrollView>
 
       <View style={styles.lightFooter}>
@@ -633,7 +642,9 @@ export default function CreateQuizScreen() {
               </View>
               <View style={styles.reviewHeaderText}>
                 <Text style={styles.reviewTitle}>Review Exam Details</Text>
-                <Text style={styles.reviewSubtitle}>Confirm before creating</Text>
+                <Text style={styles.reviewSubtitle}>
+                  Confirm before creating
+                </Text>
               </View>
             </View>
 

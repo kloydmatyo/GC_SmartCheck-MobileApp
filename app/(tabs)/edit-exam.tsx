@@ -39,8 +39,8 @@ export default function EditExamScreen() {
           }${returnTab ? `&tab=${returnTab}` : ""}&refresh=${Date.now()}`,
         )
       : classId
-      ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
-      : router.back();
+        ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
+        : router.back();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -67,7 +67,8 @@ export default function EditExamScreen() {
 
   // Confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [showFinalizeConfirmModal, setShowFinalizeConfirmModal] = useState(false);
+  const [showFinalizeConfirmModal, setShowFinalizeConfirmModal] =
+    useState(false);
   const [showDiscardConfirmModal, setShowDiscardConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
@@ -132,7 +133,14 @@ export default function EditExamScreen() {
       totalQuestions !== initialTotalQuestions ||
       choicesPerItem !== initialChoicesPerItem;
     setHasChanges(changed);
-  }, [title, totalQuestions, choicesPerItem, originalMetadata, initialTotalQuestions, initialChoicesPerItem]);
+  }, [
+    title,
+    totalQuestions,
+    choicesPerItem,
+    originalMetadata,
+    initialTotalQuestions,
+    initialChoicesPerItem,
+  ]);
 
   const loadExamData = async () => {
     try {
@@ -209,7 +217,6 @@ export default function EditExamScreen() {
       setInitialTotalQuestions(examData.totalQuestions);
       setInitialChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
       setVersion(examData.metadata.version);
-
     } catch (error) {
       console.error("Error loading exam:", error);
       Toast.show({
@@ -400,13 +407,21 @@ export default function EditExamScreen() {
 
         // Update template if it exists
         try {
-          const { collection, query, where, getDocs, updateDoc, doc, serverTimestamp } = await import("firebase/firestore");
+          const {
+            collection,
+            query,
+            where,
+            getDocs,
+            updateDoc,
+            doc,
+            serverTimestamp,
+          } = await import("firebase/firestore");
           const templatesQuery = query(
             collection(db, "templates"),
-            where("examId", "==", examId)
+            where("examId", "==", examId),
           );
           const templatesSnapshot = await getDocs(templatesQuery);
-          
+
           if (!templatesSnapshot.empty) {
             const templateDoc = templatesSnapshot.docs[0];
             const templateUpdateData: any = {
@@ -416,14 +431,17 @@ export default function EditExamScreen() {
               updatedAt: serverTimestamp(),
               updatedBy: currentUser.uid,
             };
-            
+
             // Update template name if exam title changed
             if (changes.title) {
               templateUpdateData.name = `${updateData.title}_Template`;
               templateUpdateData.description = `Answer sheet template for ${updateData.title}`;
             }
-            
-            await updateDoc(doc(db, "templates", templateDoc.id), templateUpdateData);
+
+            await updateDoc(
+              doc(db, "templates", templateDoc.id),
+              templateUpdateData,
+            );
             console.log("Template updated successfully");
           }
         } catch (templateError) {
@@ -467,11 +485,12 @@ export default function EditExamScreen() {
             choices_per_item: initialChoicesPerItem,
           };
 
-          const rolledBackVersion = await ExamService.updateExamWithVersionCheck(
-            examId,
-            rollbackData,
-            persistedVersion,
-          );
+          const rolledBackVersion =
+            await ExamService.updateExamWithVersionCheck(
+              examId,
+              rollbackData,
+              persistedVersion,
+            );
 
           setVersion(rolledBackVersion);
           setTitle(originalMetadata.title);
@@ -581,9 +600,7 @@ export default function EditExamScreen() {
             }
           : prev,
       );
-      setHasChanges(
-        title !== (originalMetadata?.title ?? ""),
-      );
+      setHasChanges(title !== (originalMetadata?.title ?? ""));
 
       Toast.show({
         type: "success",
@@ -619,7 +636,9 @@ export default function EditExamScreen() {
         >
           <View style={styles.createScreenHeaderSpacer} />
           <View style={styles.headerTitleGroup}>
-            <Text style={[styles.createSheetTitle, { color: colors.title }]}>Edit Exam</Text>
+            <Text style={[styles.createSheetTitle, { color: colors.title }]}>
+              Edit Exam
+            </Text>
             <View
               style={[
                 styles.headerStatusBadge,
@@ -658,161 +677,203 @@ export default function EditExamScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-        <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
-          Exam Name <Text style={styles.requiredStar}>*</Text>
-        </Text>
-        <TextInput
-          style={[
-            styles.sheetInput,
-            { backgroundColor: colors.inputBg, borderColor: colors.border, color: darkModeEnabled ? colors.title : "#111827" },
-            title.trim().length >= 3 && styles.sheetInputValid,
-            titleError ? styles.sheetInputError : null,
-          ]}
-          value={title}
-          onChangeText={setTitle}
-          placeholder="Enter exam name"
-          placeholderTextColor="#B5BCC8"
-          maxLength={100}
-        />
-        {titleError ? <Text style={styles.fieldHint}>{titleError}</Text> : null}
+          <Text
+            style={[
+              styles.sheetLabel,
+              { color: darkModeEnabled ? colors.title : "#374151" },
+            ]}
+          >
+            Exam Name <Text style={styles.requiredStar}>*</Text>
+          </Text>
+          <TextInput
+            style={[
+              styles.sheetInput,
+              {
+                backgroundColor: colors.inputBg,
+                borderColor: colors.border,
+                color: darkModeEnabled ? colors.title : "#111827",
+              },
+              title.trim().length >= 3 && styles.sheetInputValid,
+              titleError ? styles.sheetInputError : null,
+            ]}
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Enter exam name"
+            placeholderTextColor="#B5BCC8"
+            maxLength={100}
+          />
+          {titleError ? (
+            <Text style={styles.fieldHint}>{titleError}</Text>
+          ) : null}
 
-        {!structureLocked && (
-          <>
-            <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
-              Total Questions
-            </Text>
-            <View style={styles.questionOptionRow}>
-              {NUM_QUESTIONS_OPTIONS.map((option) => (
+          {!structureLocked && (
+            <>
+              <Text
+                style={[
+                  styles.sheetLabel,
+                  { color: darkModeEnabled ? colors.title : "#374151" },
+                ]}
+              >
+                Total Questions
+              </Text>
+              <View style={styles.questionOptionRow}>
+                {NUM_QUESTIONS_OPTIONS.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={[
+                      styles.questionOption,
+                      totalQuestions === option && styles.questionOptionActive,
+                    ]}
+                    onPress={() => setTotalQuestions(option)}
+                  >
+                    <Text
+                      style={[
+                        styles.questionOptionText,
+                        totalQuestions === option &&
+                          styles.questionOptionTextActive,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text
+                style={[
+                  styles.sheetLabel,
+                  { color: darkModeEnabled ? colors.title : "#374151" },
+                ]}
+              >
+                Number of Answer Choices
+              </Text>
+              <View style={styles.questionOptionRow}>
                 <TouchableOpacity
-                  key={option}
                   style={[
-                    styles.questionOption,
-                    totalQuestions === option && styles.questionOptionActive,
+                    styles.choiceOption,
+                    choicesPerItem === 4 && styles.choiceOptionActive,
                   ]}
-                  onPress={() => setTotalQuestions(option)}
+                  onPress={() => setChoicesPerItem(4)}
                 >
                   <Text
                     style={[
-                      styles.questionOptionText,
-                      totalQuestions === option && styles.questionOptionTextActive,
+                      styles.choiceOptionTitle,
+                      choicesPerItem === 4 && styles.choiceOptionTitleActive,
                     ]}
                   >
-                    {option}
+                    A, B, C, D
+                  </Text>
+                  <Text
+                    style={[
+                      styles.choiceOptionSub,
+                      choicesPerItem === 4 && styles.choiceOptionSubActive,
+                    ]}
+                  >
+                    4 Choices
                   </Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+                <TouchableOpacity
+                  style={[
+                    styles.choiceOption,
+                    choicesPerItem === 5 && styles.choiceOptionActive,
+                  ]}
+                  onPress={() => setChoicesPerItem(5)}
+                >
+                  <Text
+                    style={[
+                      styles.choiceOptionTitle,
+                      choicesPerItem === 5 && styles.choiceOptionTitleActive,
+                    ]}
+                  >
+                    A, B, C, D, E
+                  </Text>
+                  <Text
+                    style={[
+                      styles.choiceOptionSub,
+                      choicesPerItem === 5 && styles.choiceOptionSubActive,
+                    ]}
+                  >
+                    5 Choices
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
 
-            <Text style={[styles.sheetLabel, { color: darkModeEnabled ? colors.title : "#374151" }]}>
-              Number of Answer Choices
-            </Text>
-            <View style={styles.questionOptionRow}>
-              <TouchableOpacity
+          <View
+            style={[
+              styles.lockedCard,
+              { backgroundColor: colors.cardBg, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.lockedCardHeader}>
+              <Text
                 style={[
-                  styles.choiceOption,
-                  choicesPerItem === 4 && styles.choiceOptionActive,
+                  styles.lockedCardTitle,
+                  { color: darkModeEnabled ? colors.title : "#111827" },
                 ]}
-                onPress={() => setChoicesPerItem(4)}
               >
-                <Text
-                  style={[
-                    styles.choiceOptionTitle,
-                    choicesPerItem === 4 && styles.choiceOptionTitleActive,
-                  ]}
-                >
-                  A, B, C, D
-                </Text>
-                <Text
-                  style={[
-                    styles.choiceOptionSub,
-                    choicesPerItem === 4 && styles.choiceOptionSubActive,
-                  ]}
-                >
-                  4 Choices
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.choiceOption,
-                  choicesPerItem === 5 && styles.choiceOptionActive,
-                ]}
-                onPress={() => setChoicesPerItem(5)}
-              >
-                <Text
-                  style={[
-                    styles.choiceOptionTitle,
-                    choicesPerItem === 5 && styles.choiceOptionTitleActive,
-                  ]}
-                >
-                  A, B, C, D, E
-                </Text>
-                <Text
-                  style={[
-                    styles.choiceOptionSub,
-                    choicesPerItem === 5 && styles.choiceOptionSubActive,
-                  ]}
-                >
-                  5 Choices
-                </Text>
-              </TouchableOpacity>
+                Locked Fields
+              </Text>
+              <View style={styles.lockedBadge}>
+                <Ionicons name="lock-closed" size={12} color="#fff" />
+                <Text style={styles.lockedText}>Read-only</Text>
+              </View>
             </View>
-          </>
-        )}
 
-        <View style={[styles.lockedCard, { backgroundColor: colors.cardBg, borderColor: colors.border }]}>
-          <View style={styles.lockedCardHeader}>
-            <Text style={[styles.lockedCardTitle, { color: darkModeEnabled ? colors.title : "#111827" }]}>Locked Fields</Text>
-            <View style={styles.lockedBadge}>
-              <Ionicons name="lock-closed" size={12} color="#fff" />
-              <Text style={styles.lockedText}>Read-only</Text>
+            <View style={styles.lockedField}>
+              <Text style={styles.lockedLabel}>Exam Code</Text>
+              <Text style={styles.lockedValue}>{examCode}</Text>
+            </View>
+
+            <View style={styles.lockedDivider} />
+
+            <View style={styles.lockedField}>
+              <Text style={styles.lockedLabel}>Status</Text>
+              <Text style={styles.lockedValue}>{displayStatus}</Text>
+            </View>
+
+            <View style={styles.lockedDivider} />
+
+            <View style={styles.lockedField}>
+              <Text style={styles.lockedLabel}>Total Questions</Text>
+              <Text style={styles.lockedValue}>
+                {structureLocked ? totalQuestions : "Not finalized"}
+              </Text>
+            </View>
+
+            <View style={styles.lockedDivider} />
+
+            <View style={styles.lockedField}>
+              <Text style={styles.lockedLabel}>Answer Choices</Text>
+              <Text style={styles.lockedValue}>
+                {structureLocked
+                  ? choicesPerItem === 4
+                    ? "A-D"
+                    : "A-E"
+                  : "Not finalized"}
+              </Text>
+            </View>
+
+            <View style={styles.lockedDivider} />
+
+            <View style={styles.lockedField}>
+              <Text style={styles.lockedLabel}>Version</Text>
+              <Text style={styles.lockedValue}>v{version}</Text>
             </View>
           </View>
-
-          <View style={styles.lockedField}>
-            <Text style={styles.lockedLabel}>Exam Code</Text>
-            <Text style={styles.lockedValue}>{examCode}</Text>
-          </View>
-
-          <View style={styles.lockedDivider} />
-
-          <View style={styles.lockedField}>
-            <Text style={styles.lockedLabel}>Status</Text>
-            <Text style={styles.lockedValue}>{displayStatus}</Text>
-          </View>
-
-          <View style={styles.lockedDivider} />
-
-          <View style={styles.lockedField}>
-            <Text style={styles.lockedLabel}>Total Questions</Text>
-            <Text style={styles.lockedValue}>
-              {structureLocked ? totalQuestions : "Not finalized"}
-            </Text>
-          </View>
-
-          <View style={styles.lockedDivider} />
-
-          <View style={styles.lockedField}>
-            <Text style={styles.lockedLabel}>Answer Choices</Text>
-            <Text style={styles.lockedValue}>
-              {structureLocked ? (choicesPerItem === 4 ? "A-D" : "A-E") : "Not finalized"}
-            </Text>
-          </View>
-
-          <View style={styles.lockedDivider} />
-
-          <View style={styles.lockedField}>
-            <Text style={styles.lockedLabel}>Version</Text>
-            <Text style={styles.lockedValue}>v{version}</Text>
-          </View>
-        </View>
-
         </ScrollView>
 
         <View style={styles.createScreenFooter}>
-          {!hasChanges && <Text style={styles.validationText}>No changes detected.</Text>}
+          {!hasChanges && (
+            <Text style={styles.validationText}>No changes detected.</Text>
+          )}
           {!structureLocked && (
             <TouchableOpacity
-              style={[styles.secondaryActionButton, saving && styles.createButtonDisabled]}
+              style={[
+                styles.secondaryActionButton,
+                saving && styles.createButtonDisabled,
+              ]}
               onPress={() => setShowFinalizeConfirmModal(true)}
               disabled={saving}
             >
@@ -835,106 +896,104 @@ export default function EditExamScreen() {
           </TouchableOpacity>
         </View>
 
-      {/* Confirmation Modal */}
-      <Modal
-        visible={showConfirmModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowConfirmModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
-            <Text style={styles.modalTitle}>Confirm Changes</Text>
-            <Text style={styles.modalMessage}>
-              Are you sure you want to save these changes? This will update the
-              exam version.
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowConfirmModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={confirmSave}
-              >
-                <Text style={styles.modalConfirmText}>Save</Text>
-              </TouchableOpacity>
+        {/* Confirmation Modal */}
+        <Modal
+          visible={showConfirmModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowConfirmModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Ionicons name="alert-circle-outline" size={48} color="#ff9800" />
+              <Text style={styles.modalTitle}>Confirm Changes</Text>
+              <Text style={styles.modalMessage}>
+                Are you sure you want to save these changes? This will update
+                the exam version.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowConfirmModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalConfirmButton}
+                  onPress={confirmSave}
+                >
+                  <Text style={styles.modalConfirmText}>Save</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      <Modal
-        visible={showFinalizeConfirmModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowFinalizeConfirmModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Ionicons name="lock-closed-outline" size={48} color="#ff9800" />
-            <Text style={styles.modalTitle}>Finalize Exam</Text>
-            <Text style={styles.modalMessage}>
-              Once you click finalize, you will no longer be able to change the
-              total questions and number of answer choices.
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowFinalizeConfirmModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={confirmFinalize}
-              >
-                <Text style={styles.modalConfirmText}>Accept</Text>
-              </TouchableOpacity>
+        <Modal
+          visible={showFinalizeConfirmModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowFinalizeConfirmModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Ionicons name="lock-closed-outline" size={48} color="#ff9800" />
+              <Text style={styles.modalTitle}>Finalize Exam</Text>
+              <Text style={styles.modalMessage}>
+                Once you click finalize, you will no longer be able to change
+                the total questions and number of answer choices.
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowFinalizeConfirmModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalConfirmButton}
+                  onPress={confirmFinalize}
+                >
+                  <Text style={styles.modalConfirmText}>Accept</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      <Modal
-        visible={showDiscardConfirmModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowDiscardConfirmModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Ionicons name="warning-outline" size={48} color="#ff9800" />
-            <Text style={styles.modalTitle}>Discard Changes</Text>
-            <Text style={styles.modalMessage}>
-              You have unsaved exam changes. Leave without saving?
-            </Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowDiscardConfirmModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Stay</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalConfirmButton}
-                onPress={() => {
-                  setShowDiscardConfirmModal(false);
-                  closeEditExam();
-                }}
-              >
-                <Text style={styles.modalConfirmText}>Discard</Text>
-              </TouchableOpacity>
+        <Modal
+          visible={showDiscardConfirmModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowDiscardConfirmModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Ionicons name="warning-outline" size={48} color="#ff9800" />
+              <Text style={styles.modalTitle}>Discard Changes</Text>
+              <Text style={styles.modalMessage}>
+                You have unsaved exam changes. Leave without saving?
+              </Text>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => setShowDiscardConfirmModal(false)}
+                >
+                  <Text style={styles.modalCancelText}>Stay</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalConfirmButton}
+                  onPress={() => {
+                    setShowDiscardConfirmModal(false);
+                    closeEditExam();
+                  }}
+                >
+                  <Text style={styles.modalConfirmText}>Discard</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
-
-
+        </Modal>
       </SafeAreaView>
     </KeyboardAvoidingView>
   );

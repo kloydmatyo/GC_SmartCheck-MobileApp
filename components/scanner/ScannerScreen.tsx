@@ -60,6 +60,7 @@ export default function ScannerScreen({
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
+  const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(5);
 
   // class/exam dropdown state
   const [classesList, setClassesList] = useState<
@@ -82,6 +83,7 @@ export default function ScannerScreen({
     if (resetFlag) {
       setActiveExamId("");
       setExamQuestionCount(20);
+      setExamChoicesPerQuestion(5);
       setSelectedClass(null);
       setSelectedExam(null);
       // Reset 2-stage state
@@ -104,6 +106,7 @@ export default function ScannerScreen({
     null,
   );
   const [scanCount, setScanCount] = useState(0);
+  const [cachedAnswerKey, setCachedAnswerKey] = useState<string[] | null>(null);
 
   // ── 2-Stage scanning state for 200-item exams ───────────────────────────
   const [twoStageData, setTwoStageData] = useState<{
@@ -189,9 +192,38 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
+      setExamChoicesPerQuestion(selectedExam.choiceFormat === "A-E" ? 5 : 4);
+      setCachedAnswerKey(
+        Array.isArray(selectedExam.answerKey?.answers)
+          ? selectedExam.answerKey.answers
+          : null,
+      );
       // stay in camera mode with exam selected
     }
   }, [selectedExam]);
+
+  React.useEffect(() => {
+    if (!activeExamId) return;
+
+    let cancelled = false;
+    const prefetchAnswerKey = async () => {
+      try {
+        const { ExamService } = await import("../../services/examService");
+        const examData = await ExamService.getExamById(activeExamId);
+        if (cancelled) return;
+        if (Array.isArray(examData?.answerKey?.answers)) {
+          setCachedAnswerKey(examData.answerKey.answers);
+        }
+      } catch (error) {
+        console.warn("[ScannerScreen] answer key prefetch skipped:", error);
+      }
+    };
+
+    prefetchAnswerKey();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeExamId]);
 
   const handleScanComplete = async (
     scanResult: ScanResult,
@@ -231,26 +263,8 @@ export default function ScannerScreen({
             collection(db, "students"),
             where("studentId", "==", studentId),
           );
-          const snap = await withTimeout(getDocs(q), 2000);
+          const snap = await withTimeout(getDocs(q), 1200);
           isValidId = !snap.empty;
-
-          if (!isValidId) {
-            // Fallback to class check
-            const classesSnapshot = await withTimeout(
-              getDocs(collection(db, "classes")),
-              2500,
-            );
-            for (const classDoc of classesSnapshot.docs) {
-              if (
-                classDoc
-                  .data()
-                  .students?.some((s: any) => s.student_id === studentId)
-              ) {
-                isValidId = true;
-                break;
-              }
-            }
-          }
         } catch (err) {
           console.warn(
             "[ScannerScreen] Student verification timed out. Assuming valid.",
@@ -271,26 +285,29 @@ export default function ScannerScreen({
 
       // ── 2. Fetch Answer Key (Fast Timeout) ──
       const rawCount = scanResult.answers?.length || 20;
-      let answerKey: string[] = [];
+      let answerKey: string[] = cachedAnswerKey ?? [];
 
-      try {
-        const { ExamService } = await import("../../services/examService");
-        const examData = await withTimeout(
-          ExamService.getExamById(activeExamId),
-          2500,
-        );
-        if (examData?.answerKey?.answers) {
-          answerKey = examData.answerKey.answers;
-        } else {
-          throw new Error("Missing key");
+      if (answerKey.length === 0) {
+        try {
+          const { ExamService } = await import("../../services/examService");
+          const examData = await withTimeout(
+            ExamService.getExamById(activeExamId),
+            2500,
+          );
+          if (examData?.answerKey?.answers) {
+            answerKey = examData.answerKey.answers;
+            setCachedAnswerKey(answerKey);
+          } else {
+            throw new Error("Missing key");
+          }
+        } catch (error) {
+          console.warn(
+            "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
+          );
+          answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
+            (ak) => ak.correctAnswer,
+          );
         }
-      } catch (error) {
-        console.warn(
-          "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
-        );
-        answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
-          (ak) => ak.correctAnswer,
-        );
       }
 
       const answerKeyFormatted = answerKey.map((answer, index) => ({
@@ -313,7 +330,7 @@ export default function ScannerScreen({
             result,
             activeExamId,
           ),
-          2000,
+          900,
         );
       } catch (err) {
         /* proceed if check hangs */
@@ -375,7 +392,10 @@ export default function ScannerScreen({
         page1Result: scanResult,
         page1Image: imageUri,
       });
-      setShowPage1Confirmation(true);
+      // Speed optimization: jump directly to page 2 capture.
+      setShowPage1Confirmation(false);
+      setTwoStageCurrent(2);
+      setScanCount((prev) => prev + 1);
     } else {
       // Stage 2: Merge with Page 1 data
       if (!twoStageData?.page1Result) {
@@ -494,6 +514,7 @@ export default function ScannerScreen({
 
       let foundExamId: string | null = null;
       let questionCount = 20;
+      let choicesPerQuestion: 4 | 5 = 5;
 
       // 1. Check Staging Realm (Offline creations)
       const { RealmService, OfflineQuiz, QuizCache } =
@@ -506,6 +527,7 @@ export default function ScannerScreen({
         const sQuiz = sQuizzes[0];
         foundExamId = `staging_${sQuiz._id.toHexString()}`;
         questionCount = sQuiz.questionCount || 20;
+        choicesPerQuestion = sQuiz.choiceFormat === "A-E" ? 5 : 4;
       }
 
       // 2. Check Cache Realm (Downloaded/Synced exams)
@@ -518,6 +540,7 @@ export default function ScannerScreen({
           const cQuiz = cQuizzes[0];
           foundExamId = cQuiz.id;
           questionCount = cQuiz.questionCount || 20;
+          choicesPerQuestion = cQuiz.choiceFormat === "A-E" ? 5 : 4;
         }
       }
 
@@ -535,6 +558,7 @@ export default function ScannerScreen({
               const data = snap.docs[0].data();
               foundExamId = snap.docs[0].id;
               questionCount = data.num_items || 20;
+              choicesPerQuestion = data.choiceFormat === "A-E" ? 5 : 4;
             }
           } catch (firestoreErr) {
             console.warn(
@@ -549,6 +573,7 @@ export default function ScannerScreen({
       // Setup scanner or show error
       if (foundExamId) {
         setExamQuestionCount(questionCount);
+        setExamChoicesPerQuestion(choicesPerQuestion);
         setActiveExamId(foundExamId);
         setCurrentState("camera");
       } else {
@@ -585,6 +610,8 @@ export default function ScannerScreen({
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
+    setExamChoicesPerQuestion(5);
+    setCachedAnswerKey(null);
     // clear selection so reopening starts fresh
     setSelectedClass(null);
     setSelectedExam(null);
@@ -632,6 +659,7 @@ export default function ScannerScreen({
         <CameraScanner
           key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
+          choicesPerQuestion={examChoicesPerQuestion}
           scanStage={
             examQuestionCount === 200
               ? { current: twoStageCurrent, total: 2 }
