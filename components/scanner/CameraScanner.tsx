@@ -8,7 +8,6 @@ import {
   Text,
   TouchableOpacity,
   View,
-  useWindowDimensions,
 } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
@@ -27,12 +26,9 @@ export default function CameraScanner({
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showHistory, setShowHistory] = useState(false); // controls history overlay
   const cameraRef = useRef<CameraView>(null);
 
   if (!permission) {
@@ -106,13 +102,13 @@ export default function CameraScanner({
     // Custom dimensions for each template to fit phone screen
     // These dimensions create the green guide frame overlay
     if (questionCount <= 20) {
-      // 20-item: 105mm × 148.5mm (aspect ~0.707)
+      // 20-item: 105mm x 148.5mm (aspect ~0.707)
       return { width: 300, height: 400 };
     } else if (questionCount <= 50) {
-      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
+      // 50-item: 105mm x 297mm (aspect ~0.354, very tall/narrow)
       return { width: 215, height: 500 };
     } else if (questionCount <= 200) {
-      // 100-item / 200-item: 210mm × 297mm (aspect ~0.707, A4 paper)
+      // 100-item / 200-item: 210mm x 297mm (aspect ~0.707, A4 paper)
       // Both pages use the same physical layout
       return { width: 320, height: 450 };
     } else {
@@ -154,10 +150,17 @@ export default function CameraScanner({
         return;
       }
 
-      // Validate Zipgrade sheet quality first
-      const qualityCheck = await ZipgradeScanner.validateZipgradeSheet(
-        photo.uri,
-      );
+      // 200-item pages use a dedicated fast path that validates all corner boxes.
+      // Running the generic OpenCV blur check here adds avoidable latency.
+      const qualityCheck =
+        questionCount === 200
+          ? {
+              isValid: true,
+              issues: [],
+              confidence: 0.95,
+              detectedTemplate: undefined,
+            }
+          : await ZipgradeScanner.validateZipgradeSheet(photo.uri);
 
       if (!qualityCheck.isValid) {
         Alert.alert(
@@ -293,8 +296,8 @@ export default function CameraScanner({
               </Text>
               <Text style={styles.stageSubtext}>
                 {scanStage.current === 1
-                  ? "Scan Page 1 (Q1–100)"
-                  : "Scan Page 2 (Q101–200)"}
+                  ? "Scan Page 1 (Q1-100)"
+                  : "Scan Page 2 (Q101-200)"}
               </Text>
               <View style={styles.checklistCard}>
                 <Text style={styles.checklistTitle}>200-item checklist</Text>
@@ -350,6 +353,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
+  },
+  torchButton: {
+    flex: 1,
   },
   scanFrame: {
     borderWidth: 2,

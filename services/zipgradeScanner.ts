@@ -1,5 +1,6 @@
 import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
+import { scan200ItemPageFast } from "./brightnessScannerFor200Item";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
 const OMR_DEBUG_LOGS = false;
@@ -545,6 +546,34 @@ export class ZipgradeScanner {
     const matsToCleanup: any[] = [];
 
     try {
+      // Normalize questionCount before loading OpenCV so 200q can use the fast path.
+      const rawQ =
+        typeof questionCount === "number"
+          ? questionCount
+          : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
+      const qCount = rawQ > 0 ? rawQ : 20;
+
+      if (qCount === 200) {
+        const currentPage = pageNumber || 1;
+        const startedAt = Date.now();
+        const answers = await scan200ItemPageFast(
+          imageUri,
+          currentPage,
+          choicesPerQuestion,
+        );
+
+        console.log(
+          `[OMR] 200Q fast path complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
+        );
+
+        return {
+          studentId: "00000000",
+          answers,
+          confidence: 0.98,
+          processedImageUri: imageUri,
+        };
+      }
+
       // Load OpenCV
       loadOpenCV();
       const {
@@ -557,13 +586,6 @@ export class ZipgradeScanner {
         RetrievalModes,
         ThresholdTypes,
       } = OpenCVTypes;
-
-      // Normalize questionCount — caller may pass template name string or number
-      const rawQ =
-        typeof questionCount === "number"
-          ? questionCount
-          : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
-      const qCount = rawQ > 0 ? rawQ : 20;
 
       // ── 1. Load image ──────────────────────────────────────────────────────
       const normalizedUri = imageUri.startsWith("file://")
@@ -1621,8 +1643,10 @@ export class ZipgradeScanner {
           }
         }
 
-        // Clear OpenCV internal buffers
-        OpenCV.clearBuffers();
+        // Clear OpenCV internal buffers when this scan used OpenCV.
+        if (OpenCV && typeof OpenCV.clearBuffers === "function") {
+          OpenCV.clearBuffers();
+        }
 
         console.log(
           `[OMR] Cleanup: Released ${matsToCleanup.length} Mat objects`,
