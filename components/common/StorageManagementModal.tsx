@@ -122,7 +122,7 @@ export default function StorageManagementModal({
         `Max item size: ${StorageMonitorService.formatBytes(result.maxItemSize)}\n` +
         `Estimated limit: ${StorageMonitorService.formatBytes(result.estimatedLimit)}`,
       );
-    } catch (error) {
+    } catch {
       Alert.alert("Error", "Failed to test storage limits");
     } finally {
       setLoading(false);
@@ -299,6 +299,16 @@ export default function StorageManagementModal({
             >
               <Ionicons name="flask-outline" size={20} color="#007AFF" />
               <Text style={styles.actionButtonText}>Test Storage Limits</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={handleEmergencyClear}
+            >
+              <Ionicons name="alert-circle" size={20} color="#FF3B30" />
+              <Text style={[styles.actionButtonText, { color: "#FF3B30" }]}>
+                Emergency Clear (Deep Reset)
+              </Text>
             </TouchableOpacity>
           </View>
 

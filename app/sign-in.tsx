@@ -12,20 +12,20 @@ import {
   signInWithCredential,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import {
-    Alert,
-    Image,
-    ImageBackground,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { auth, db } from "@/config/firebase";
@@ -65,7 +65,7 @@ export default function SignInScreen() {
         await GoogleSignin.signOut();
         Alert.alert(
           "Access Restricted",
-          `Only @${GC_DOMAIN} accounts are allowed.\n\nPlease sign in with your Gordon College email.`
+          `Only @${GC_DOMAIN} accounts are allowed.\n\nPlease sign in with your Gordon College email.`,
         );
         setIsLoading(false);
         return;
@@ -78,16 +78,25 @@ export default function SignInScreen() {
       } else if (error.code === statusCodes.IN_PROGRESS) {
         // sign-in already in progress
       } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-        Alert.alert("Error", "Google Play Services is not available on this device.");
+        Alert.alert(
+          "Error",
+          "Google Play Services is not available on this device.",
+        );
       } else {
         console.error("Google sign-in error:", error);
-        Alert.alert("Google Sign-In Failed", error.message ?? "Please try again.");
+        Alert.alert(
+          "Google Sign-In Failed",
+          error.message ?? "Please try again.",
+        );
       }
       setIsLoading(false);
     }
   };
 
-  const handleGoogleCredential = async (idToken: string, googleEmail: string) => {
+  const handleGoogleCredential = async (
+    idToken: string,
+    googleEmail: string,
+  ) => {
     try {
       const credential = GoogleAuthProvider.credential(idToken);
       const userCredential = await signInWithCredential(auth, credential);
@@ -99,7 +108,7 @@ export default function SignInScreen() {
         await GoogleSignin.signOut();
         Alert.alert(
           "Access Restricted",
-          `Only @${GC_DOMAIN} accounts are allowed.`
+          `Only @${GC_DOMAIN} accounts are allowed.`,
         );
         setIsLoading(false);
         return;
@@ -119,7 +128,7 @@ export default function SignInScreen() {
           [
             { text: "Cancel", style: "cancel" },
             { text: "Sign Up", onPress: () => router.push("/sign-up") },
-          ]
+          ],
         );
         setIsLoading(false);
         return;
@@ -190,13 +199,19 @@ export default function SignInScreen() {
                 onPress: async () => {
                   try {
                     await sendEmailVerification(userCredential.user);
-                    Alert.alert("Sent", "Verification email resent. Please check your inbox and spam/junk folder.");
+                    Alert.alert(
+                      "Sent",
+                      "Verification email resent. Please check your inbox and spam/junk folder.",
+                    );
                   } catch {
-                    Alert.alert("Error", "Could not resend verification email. Please try again.");
+                    Alert.alert(
+                      "Error",
+                      "Could not resend verification email. Please try again.",
+                    );
                   }
                 },
               },
-            ]
+            ],
           );
           return;
         }
@@ -249,7 +264,7 @@ export default function SignInScreen() {
             [
               { text: "Cancel", style: "cancel" },
               { text: "Sign Up", onPress: () => router.push("/sign-up") },
-            ]
+            ],
           );
           return;
         }
@@ -268,7 +283,7 @@ export default function SignInScreen() {
             [
               { text: "Try Again", style: "cancel" },
               { text: "Sign Up", onPress: () => router.push("/sign-up") },
-            ]
+            ],
           );
           return;
         }
@@ -292,11 +307,6 @@ export default function SignInScreen() {
       `Use these accounts for testing:\n\n${accountList}\n\nNote: These are dummy accounts. Use Sign Up to create a real account.`,
       [{ text: "OK" }],
     );
-  };
-
-  // Debug function to go directly to camera test
-  const goToCameraTest = () => {
-    router.push("/dashboard");
   };
 
   return (
@@ -445,21 +455,6 @@ export default function SignInScreen() {
                   style={{ marginRight: 8 }}
                 />
                 <Text style={styles.testAccountsText}>View Test Accounts</Text>
-              </TouchableOpacity>
-
-              {/* DEBUG BUTTON - Camera Test (Always Visible) */}
-              <TouchableOpacity
-                style={styles.debugButton}
-                onPress={goToCameraTest}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="camera"
-                  size={18}
-                  color="#fff"
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={styles.debugButtonText}>Debug: Camera Test</Text>
               </TouchableOpacity>
 
               {/* Sign Up Link */}
