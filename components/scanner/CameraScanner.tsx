@@ -21,7 +21,7 @@ interface CameraScannerProps {
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
-  choicesPerQuestion = 5,
+  choicesPerQuestion = 4,
   scanStage,
   onScanComplete,
   onCancel,
@@ -173,7 +173,9 @@ export default function CameraScanner({
 
       // Process the Zipgrade answer sheet
       const templateName = qualityCheck.detectedTemplate || "standard20";
-      console.log(`[CameraScanner] Processing with ${questionCount} questions`);
+      console.log(
+        `[CameraScanner] Processing with ${questionCount} questions, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+      );
 
       const scanResult = await ZipgradeScanner.processZipgradeSheet(
         photo.uri,

@@ -11,6 +11,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { StudentAnswer } from "../types/scanning";
 
 const DEBUG_LOGS = false;
+const SCANNER_200Q_VERSION = "200Q-anchor-orientation-v4";
 
 interface Markers {
   topLeft: { x: number; y: number };
@@ -56,6 +57,26 @@ interface GridCalibration {
   dy: number;
   scaleX: number;
   scaleY: number;
+  score: number;
+}
+
+type PageOrientation = "normal" | "rotated180";
+
+interface OrientationScores {
+  normal: number;
+  rotated180: number;
+  orientation: PageOrientation;
+}
+
+interface BubbleInteriorSample {
+  choice: string;
+  brightness: number;
+  minLuma: number;
+  darkRatio: number;
+  paperMean: number;
+  contrast: number;
+  p25: number;
+  score: number;
 }
 
 interface AnswerBlock {
@@ -63,6 +84,8 @@ interface AnswerBlock {
   endQ: number;
   firstBubbleNX: number;
   firstBubbleNY: number;
+  markerNX: number;
+  markerNY: number;
   bubbleSpacingNX: number;
   rowSpacingNY: number;
 }
@@ -71,6 +94,54 @@ interface TemplateLayout {
   answerBlocks: AnswerBlock[];
   bubbleDiameterNX: number;
   bubbleDiameterNY: number;
+  physicalChoices: 4 | 5;
+}
+
+interface LumaStats {
+  mean: number;
+  min: number;
+  max: number;
+  p10: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  darkRatio: number;
+  count: number;
+}
+
+interface BubbleMarkSample {
+  mean: number;
+  minLuma: number;
+  p25: number;
+  paperMean: number;
+  darkRatio: number;
+  contrast: number;
+}
+
+interface AnswerBandCalibration {
+  rowDy: number[];
+  colDx: number[];
+  blockDy: number[];
+  score: number;
+}
+
+interface BlockMarkerOffset {
+  dx: number;
+  dy: number;
+  score: number;
+}
+
+interface BlockAnchor extends BlockMarkerOffset {
+  reliable: boolean;
+}
+
+interface PageCalibration {
+  layout: TemplateLayout;
+  physicalChoices: 4 | 5;
+  orientation: PageOrientation;
+  grid: GridCalibration;
+  score: number;
 }
 
 interface ImagePixels {
@@ -84,18 +155,79 @@ function mapToPixel(
   nx: number,
   ny: number,
 ): { px: number; py: number } {
-  const topX =
-    markers.topLeft.x + nx * (markers.topRight.x - markers.topLeft.x);
-  const topY =
-    markers.topLeft.y + nx * (markers.topRight.y - markers.topLeft.y);
-  const botX =
-    markers.bottomLeft.x + nx * (markers.bottomRight.x - markers.bottomLeft.x);
-  const botY =
-    markers.bottomLeft.y + nx * (markers.bottomRight.y - markers.bottomLeft.y);
+  const x00 = markers.topLeft.x;
+  const y00 = markers.topLeft.y;
+  const x10 = markers.topRight.x;
+  const y10 = markers.topRight.y;
+  const x01 = markers.bottomLeft.x;
+  const y01 = markers.bottomLeft.y;
+  const x11 = markers.bottomRight.x;
+  const y11 = markers.bottomRight.y;
+
+  // Projective homography from template coordinates to the photographed page.
+  // This is materially more accurate than bilinear interpolation for camera
+  // captures, where the sheet is a planar surface under perspective projection.
+  const dx1 = x10 - x11;
+  const dx2 = x01 - x11;
+  const dx3 = x00 - x10 + x11 - x01;
+  const dy1 = y10 - y11;
+  const dy2 = y01 - y11;
+  const dy3 = y00 - y10 + y11 - y01;
+  const det = dx1 * dy2 - dx2 * dy1;
+
+  if (Math.abs(det) < 1e-6) {
+    const topX = x00 + nx * (x10 - x00);
+    const topY = y00 + nx * (y10 - y00);
+    const botX = x01 + nx * (x11 - x01);
+    const botY = y01 + nx * (y11 - y01);
+    return {
+      px: topX + ny * (botX - topX),
+      py: topY + ny * (botY - topY),
+    };
+  }
+
+  const g = (dx3 * dy2 - dx2 * dy3) / det;
+  const h = (dx1 * dy3 - dx3 * dy1) / det;
+  const a = x10 - x00 + g * x10;
+  const b = x01 - x00 + h * x01;
+  const c = x00;
+  const d = y10 - y00 + g * y10;
+  const e = y01 - y00 + h * y01;
+  const f = y00;
+  const denom = g * nx + h * ny + 1;
 
   return {
-    px: topX + ny * (botX - topX),
-    py: topY + ny * (botY - topY),
+    px: (a * nx + b * ny + c) / denom,
+    py: (d * nx + e * ny + f) / denom,
+  };
+}
+
+function mapTemplatePointToPixel(
+  markers: Markers,
+  nx: number,
+  ny: number,
+  orientation: PageOrientation,
+): { px: number; py: number } {
+  if (orientation === "rotated180") {
+    return mapToPixel(markers, 1 - nx, 1 - ny);
+  }
+
+  return mapToPixel(markers, nx, ny);
+}
+
+function distance(a: PixelPoint, b: PixelPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function getAverageFrameSize(markers: Markers): { width: number; height: number } {
+  const top = distance(markers.topLeft, markers.topRight);
+  const bottom = distance(markers.bottomLeft, markers.bottomRight);
+  const left = distance(markers.topLeft, markers.bottomLeft);
+  const right = distance(markers.topRight, markers.bottomRight);
+
+  return {
+    width: (top + bottom) / 2,
+    height: (left + right) / 2,
   };
 }
 
@@ -185,11 +317,99 @@ function sampleBubbleAtOffsets(
   return count === 0 ? 255 : sumLuma / (count * 256);
 }
 
+function percentileFromSorted(values: number[], percentile: number): number {
+  if (values.length === 0) return 255;
+  const idx = Math.min(
+    values.length - 1,
+    Math.max(0, Math.floor((values.length - 1) * percentile)),
+  );
+  return values[idx];
+}
+
+function sampleLumaStatsAtOffsets(
+  pixels: Uint8Array,
+  imgW: number,
+  imgH: number,
+  cx: number,
+  cy: number,
+  offsets: readonly PixelOffset[],
+  darkThreshold?: number,
+): LumaStats {
+  const values: number[] = [];
+  let sumLuma = 0;
+  let darkCount = 0;
+  const baseX = Math.round(cx);
+  const baseY = Math.round(cy);
+
+  for (const { dx, dy } of offsets) {
+    const px = baseX + dx;
+    const py = baseY + dy;
+    if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
+      const luma = lumaAt(pixels, imgW, px, py);
+      values.push(luma);
+      sumLuma += luma;
+      if (darkThreshold !== undefined && luma <= darkThreshold) darkCount++;
+    }
+  }
+
+  if (values.length === 0) {
+    return {
+      mean: 255,
+      min: 255,
+      max: 255,
+      p10: 255,
+      p25: 255,
+      p50: 255,
+      p75: 255,
+      p90: 255,
+      darkRatio: 0,
+      count: 0,
+    };
+  }
+
+  values.sort((a, b) => a - b);
+  return {
+    mean: sumLuma / values.length,
+    min: values[0],
+    max: values[values.length - 1],
+    p10: percentileFromSorted(values, 0.1),
+    p25: percentileFromSorted(values, 0.25),
+    p50: percentileFromSorted(values, 0.5),
+    p75: percentileFromSorted(values, 0.75),
+    p90: percentileFromSorted(values, 0.9),
+    darkRatio:
+      darkThreshold === undefined ? 0 : darkCount / Math.max(1, values.length),
+    count: values.length,
+  };
+}
+
 function buildRingOffsets(radiusX: number, radiusY: number): PixelOffset[] {
   const offsets: PixelOffset[] = [];
   const seen = new Set<string>();
   const rings = [0.82, 1.0, 1.14];
   const angles = 16;
+
+  for (const ring of rings) {
+    for (let i = 0; i < angles; i++) {
+      const angle = (Math.PI * 2 * i) / angles;
+      const dx = Math.round(Math.cos(angle) * radiusX * ring);
+      const dy = Math.round(Math.sin(angle) * radiusY * ring);
+      const key = `${dx},${dy}`;
+      if (!seen.has(key)) {
+        offsets.push({ dx, dy });
+        seen.add(key);
+      }
+    }
+  }
+
+  return offsets.length > 0 ? offsets : [{ dx: 0, dy: 0 }];
+}
+
+function buildBackgroundOffsets(radiusX: number, radiusY: number): PixelOffset[] {
+  const offsets: PixelOffset[] = [];
+  const seen = new Set<string>();
+  const rings = [1.45, 1.75];
+  const angles = 20;
 
   for (const ring of rings) {
     for (let i = 0; i < angles; i++) {
@@ -235,33 +455,43 @@ function applyGridCalibration(
   };
 }
 
-function sampleBestBubbleCenterBrightness(
+function sampleBubbleMarkRaw(
   pixels: Uint8Array,
   width: number,
   height: number,
   cx: number,
   cy: number,
   centerOffsets: readonly PixelOffset[],
-  searchRadius: number,
-): number {
-  let best = Number.POSITIVE_INFINITY;
-  const step = Math.max(1, Math.round(searchRadius / 2));
+  backgroundOffsets: readonly PixelOffset[],
+): BubbleMarkSample {
+  const background = sampleLumaStatsAtOffsets(
+    pixels,
+    width,
+    height,
+    cx,
+    cy,
+    backgroundOffsets,
+  );
+  const paperMean = Math.max(background.mean, background.p75);
+  const darkThreshold = Math.max(35, paperMean - Math.max(18, paperMean * 0.1));
+  const center = sampleLumaStatsAtOffsets(
+    pixels,
+    width,
+    height,
+    cx,
+    cy,
+    centerOffsets,
+    darkThreshold,
+  );
 
-  for (let dy = -searchRadius; dy <= searchRadius; dy += step) {
-    for (let dx = -searchRadius; dx <= searchRadius; dx += step) {
-      const brightness = sampleBubbleAtOffsets(
-        pixels,
-        width,
-        height,
-        cx + dx,
-        cy + dy,
-        centerOffsets,
-      );
-      best = Math.min(best, brightness);
-    }
-  }
-
-  return best;
+  return {
+    mean: center.mean,
+    minLuma: center.min,
+    p25: center.p25,
+    paperMean,
+    darkRatio: center.darkRatio,
+    contrast: Math.max(0, paperMean - center.mean),
+  };
 }
 
 function buildOffsetCandidates(radius: number, step: number): number[] {
@@ -272,28 +502,38 @@ function buildOffsetCandidates(radius: number, step: number): number[] {
   return result.sort((a, b) => a - b);
 }
 
-function get200ItemPageLayout(): TemplateLayout {
-  // Measured from the provided 200_Answer_Sheet.pdf.
+function get200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
+  // Measured from the provided 5-choice 200_Answer_Sheet.pdf.
   // Coordinates are normalized against the four 8mm corner-marker centers.
-  const firstBubbleNX = [
-    0.081228956,
-    0.271043771,
-    0.460858586,
-    0.650673401,
-    0.840488215,
-  ];
+  // The app can generate 4-choice sheets too; those use the same first block
+  // and bubble spacing, but every following block shifts left by one choice.
+  const firstBlockNX = 0.081228956;
+  const fiveChoiceBlockSpacingNX = 0.189814815;
+  const bubbleSpacingNX = 0.027777778;
+  const blockMarkerOffsetNX = 0.045454542;
+  const blockMarkerOffsetNY = 0.014035081;
+  const blockSpacingNX =
+    physicalChoices === 4
+      ? fiveChoiceBlockSpacingNX - bubbleSpacingNX
+      : fiveChoiceBlockSpacingNX;
+  const firstBubbleNX = Array.from(
+    { length: 5 },
+    (_, idx) => firstBlockNX + idx * blockSpacingNX,
+  );
   const topFirstNY = 0.280701672;
   const bottomFirstNY = 0.498246014;
-  const bubbleSpacingNX = 0.027777778;
   const rowSpacingNY = 0.018245609;
 
   return {
+    physicalChoices,
     answerBlocks: [
       {
         startQ: 1,
         endQ: 10,
         firstBubbleNX: firstBubbleNX[0],
         firstBubbleNY: topFirstNY,
+        markerNX: firstBubbleNX[0] - blockMarkerOffsetNX,
+        markerNY: topFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -302,6 +542,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 30,
         firstBubbleNX: firstBubbleNX[1],
         firstBubbleNY: topFirstNY,
+        markerNX: firstBubbleNX[1] - blockMarkerOffsetNX,
+        markerNY: topFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -310,6 +552,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 50,
         firstBubbleNX: firstBubbleNX[2],
         firstBubbleNY: topFirstNY,
+        markerNX: firstBubbleNX[2] - blockMarkerOffsetNX,
+        markerNY: topFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -318,6 +562,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 70,
         firstBubbleNX: firstBubbleNX[3],
         firstBubbleNY: topFirstNY,
+        markerNX: firstBubbleNX[3] - blockMarkerOffsetNX,
+        markerNY: topFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -326,6 +572,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 90,
         firstBubbleNX: firstBubbleNX[4],
         firstBubbleNY: topFirstNY,
+        markerNX: firstBubbleNX[4] - blockMarkerOffsetNX,
+        markerNY: topFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -334,6 +582,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 20,
         firstBubbleNX: firstBubbleNX[0],
         firstBubbleNY: bottomFirstNY,
+        markerNX: firstBubbleNX[0] - blockMarkerOffsetNX,
+        markerNY: bottomFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -342,6 +592,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 40,
         firstBubbleNX: firstBubbleNX[1],
         firstBubbleNY: bottomFirstNY,
+        markerNX: firstBubbleNX[1] - blockMarkerOffsetNX,
+        markerNY: bottomFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -350,6 +602,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 60,
         firstBubbleNX: firstBubbleNX[2],
         firstBubbleNY: bottomFirstNY,
+        markerNX: firstBubbleNX[2] - blockMarkerOffsetNX,
+        markerNY: bottomFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -358,6 +612,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 80,
         firstBubbleNX: firstBubbleNX[3],
         firstBubbleNY: bottomFirstNY,
+        markerNX: firstBubbleNX[3] - blockMarkerOffsetNX,
+        markerNY: bottomFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -366,6 +622,8 @@ function get200ItemPageLayout(): TemplateLayout {
         endQ: 100,
         firstBubbleNX: firstBubbleNX[4],
         firstBubbleNY: bottomFirstNY,
+        markerNX: firstBubbleNX[4] - blockMarkerOffsetNX,
+        markerNY: bottomFirstNY - blockMarkerOffsetNY,
         bubbleSpacingNX,
         rowSpacingNY,
       },
@@ -379,6 +637,7 @@ function getExpectedGridPoints(
   markers: Markers,
   layout: TemplateLayout,
   choicesPerQuestion: number,
+  orientation: PageOrientation,
 ): PixelPoint[] {
   const points: PixelPoint[] = [];
 
@@ -387,7 +646,12 @@ function getExpectedGridPoints(
       for (let choice = 0; choice < choicesPerQuestion; choice++) {
         const nx = block.firstBubbleNX + choice * block.bubbleSpacingNX;
         const ny = block.firstBubbleNY + row * block.rowSpacingNY;
-        const { px, py } = mapToPixel(markers, nx, ny);
+        const { px, py } = mapTemplatePointToPixel(
+          markers,
+          nx,
+          ny,
+          orientation,
+        );
         points.push({ x: px, y: py });
       }
     }
@@ -406,8 +670,14 @@ function findGridCalibration(
   bubbleRX: number,
   bubbleRY: number,
   ringOffsets: readonly PixelOffset[],
+  orientation: PageOrientation,
 ): GridCalibration {
-  const allPoints = getExpectedGridPoints(markers, layout, choicesPerQuestion);
+  const allPoints = getExpectedGridPoints(
+    markers,
+    layout,
+    choicesPerQuestion,
+    orientation,
+  );
   const centerX =
     allPoints.reduce((sum, point) => sum + point.x, 0) / allPoints.length;
   const centerY =
@@ -418,14 +688,28 @@ function findGridCalibration(
   const calibrationPoints = allPoints.filter((_, idx) => {
     const choice = idx % choicesPerQuestion;
     const row = Math.floor(idx / choicesPerQuestion) % 10;
-    return (choice === 0 || choice === 2 || choice === 4) && row % 3 === 0;
+    const middleChoice = Math.floor((choicesPerQuestion - 1) / 2);
+    return (
+      (choice === 0 ||
+        choice === middleChoice ||
+        choice === choicesPerQuestion - 1) &&
+      row % 3 === 0
+    );
   });
 
   const shiftRadius = Math.max(8, Math.round(Math.max(bubbleRX, bubbleRY) * 1.8));
   const shiftStep = Math.max(2, Math.round(shiftRadius / 3));
   const shifts = buildOffsetCandidates(shiftRadius, shiftStep);
-  const scales = [0.94, 0.97, 1, 1.03, 1.06];
-  let best: GridCalibration = { centerX, centerY, dx: 0, dy: 0, scaleX: 1, scaleY: 1 };
+  const scales = [0.96, 1, 1.04, 1.08];
+  let best: GridCalibration = {
+    centerX,
+    centerY,
+    dx: 0,
+    dy: 0,
+    scaleX: 1,
+    scaleY: 1,
+    score: Number.NEGATIVE_INFINITY,
+  };
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const scaleY of scales) {
@@ -442,6 +726,7 @@ function findGridCalibration(
               dy,
               scaleX,
               scaleY,
+              score: 0,
             });
             score += sampleBubbleInkScore(
               pixels,
@@ -456,7 +741,7 @@ function findGridCalibration(
           score /= calibrationPoints.length;
           if (score > bestScore) {
             bestScore = score;
-            best = { centerX, centerY, dx, dy, scaleX, scaleY };
+            best = { centerX, centerY, dx, dy, scaleX, scaleY, score };
           }
         }
       }
@@ -464,10 +749,761 @@ function findGridCalibration(
   }
 
   console.log(
-    `[200Q-FAST] Grid calibration: dx=${best.dx}, dy=${best.dy}, scaleX=${best.scaleX.toFixed(2)}, scaleY=${best.scaleY.toFixed(2)}, score=${bestScore.toFixed(1)}`,
+    `[200Q-FAST] Grid calibration (${choicesPerQuestion} choices, ${orientation}): dx=${best.dx}, dy=${best.dy}, scaleX=${best.scaleX.toFixed(2)}, scaleY=${best.scaleY.toFixed(2)}, score=${bestScore.toFixed(1)}`,
   );
 
   return best;
+}
+
+function sampleDarkDensityInTemplateRegion(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  orientation: PageOrientation,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): number {
+  let dark = 0;
+  let count = 0;
+  const cols = 16;
+  const rows = 10;
+
+  for (let row = 0; row < rows; row++) {
+    const ny = y0 + ((y1 - y0) * (row + 0.5)) / rows;
+    for (let col = 0; col < cols; col++) {
+      const nx = x0 + ((x1 - x0) * (col + 0.5)) / cols;
+      const { px, py } = mapTemplatePointToPixel(
+        markers,
+        nx,
+        ny,
+        orientation,
+      );
+      const x = Math.round(px);
+      const y = Math.round(py);
+
+      if (x >= 0 && x < width && y >= 0 && y < height) {
+        if (lumaAt(pixels, width, x, y) < 185) dark++;
+        count++;
+      }
+    }
+  }
+
+  return count === 0 ? 0 : dark / count;
+}
+
+function estimatePageOrientationByHeader(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+): OrientationScores {
+  const scoreOrientation = (orientation: PageOrientation): number => {
+    const headerDensity = sampleDarkDensityInTemplateRegion(
+      pixels,
+      width,
+      height,
+      markers,
+      orientation,
+      0.08,
+      0.04,
+      0.92,
+      0.25,
+    );
+    const footerDensity = sampleDarkDensityInTemplateRegion(
+      pixels,
+      width,
+      height,
+      markers,
+      orientation,
+      0.08,
+      0.72,
+      0.92,
+      0.92,
+    );
+
+    return headerDensity - footerDensity * 0.45;
+  };
+
+  const normalScore = scoreOrientation("normal");
+  const rotatedScore = scoreOrientation("rotated180");
+  const orientation: PageOrientation =
+    rotatedScore > normalScore * 1.08 ? "rotated180" : "normal";
+
+  console.log(
+    `[200Q-FAST] Orientation header score: normal=${normalScore.toFixed(3)}, rotated180=${rotatedScore.toFixed(3)} -> ${orientation}`,
+  );
+
+  return { normal: normalScore, rotated180: rotatedScore, orientation };
+}
+
+function scoreBlockMarkersForOrientation(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  layout: TemplateLayout,
+  orientation: PageOrientation,
+  markerOffsets: readonly PixelOffset[],
+  markerBackgroundOffsets: readonly PixelOffset[],
+  bubbleRX: number,
+  bubbleRY: number,
+): number {
+  const searchRadius = Math.max(8, Math.round(Math.max(bubbleRX, bubbleRY) * 2));
+  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.35));
+  let score = 0;
+
+  for (const block of layout.answerBlocks) {
+    const point = getCalibratedBlockMarkerPoint(markers, block, orientation);
+    const marker = findBestBlockMarkerOffset(
+      pixels,
+      width,
+      height,
+      point,
+      markerOffsets,
+      markerBackgroundOffsets,
+      searchRadius,
+      searchStep,
+    );
+    score += marker.score;
+  }
+
+  return score / Math.max(1, layout.answerBlocks.length);
+}
+
+function estimatePageOrientation(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  layout: TemplateLayout,
+  markerOffsets: readonly PixelOffset[],
+  markerBackgroundOffsets: readonly PixelOffset[],
+  bubbleRX: number,
+  bubbleRY: number,
+): PageOrientation {
+  const normalScore = scoreBlockMarkersForOrientation(
+    pixels,
+    width,
+    height,
+    markers,
+    layout,
+    "normal",
+    markerOffsets,
+    markerBackgroundOffsets,
+    bubbleRX,
+    bubbleRY,
+  );
+  const rotatedScore = scoreBlockMarkersForOrientation(
+    pixels,
+    width,
+    height,
+    markers,
+    layout,
+    "rotated180",
+    markerOffsets,
+    markerBackgroundOffsets,
+    bubbleRX,
+    bubbleRY,
+  );
+  const markerOrientation: PageOrientation =
+    rotatedScore > normalScore * 1.12 ? "rotated180" : "normal";
+  const headerScores = estimatePageOrientationByHeader(
+    pixels,
+    width,
+    height,
+    markers,
+  );
+  const headerOrientation = headerScores.orientation;
+  const headerWinner = Math.max(headerScores.normal, headerScores.rotated180);
+  const headerLoser = Math.min(headerScores.normal, headerScores.rotated180);
+  const headerIsDecisive =
+    headerWinner >= 0.18 &&
+    (headerWinner - headerLoser >= 0.18 ||
+      headerWinner >= Math.max(0.01, headerLoser) * 1.8);
+  const scoresAreWeak = Math.max(normalScore, rotatedScore) < 95;
+  const scoresAreClose = Math.abs(normalScore - rotatedScore) < 12;
+  const orientation =
+    headerIsDecisive || scoresAreWeak || scoresAreClose
+      ? headerOrientation
+      : markerOrientation;
+
+  console.log(
+    `[200Q-FAST] Orientation final: header=${headerOrientation}${headerIsDecisive ? "/decisive" : ""}, marker=${markerOrientation}, markerScore normal=${normalScore.toFixed(1)}, rotated180=${rotatedScore.toFixed(1)} -> ${orientation}`,
+  );
+
+  return orientation;
+}
+
+function findBestPageCalibration(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  requestedChoices: 4 | 5,
+  bubbleRX: number,
+  bubbleRY: number,
+  ringOffsets: readonly PixelOffset[],
+  markerOffsets: readonly PixelOffset[],
+  markerBackgroundOffsets: readonly PixelOffset[],
+): PageCalibration {
+  const layout = get200ItemPageLayout(requestedChoices);
+  const orientation = estimatePageOrientation(
+    pixels,
+    width,
+    height,
+    markers,
+    layout,
+    markerOffsets,
+    markerBackgroundOffsets,
+    bubbleRX,
+    bubbleRY,
+  );
+  const grid = findGridCalibration(
+    pixels,
+    width,
+    height,
+    markers,
+    layout,
+    requestedChoices,
+    bubbleRX,
+    bubbleRY,
+    ringOffsets,
+    orientation,
+  );
+
+  console.log(
+    `[200Q-FAST] Using requested ${requestedChoices}-choice layout, orientation=${orientation}, score=${grid.score.toFixed(1)}`,
+  );
+
+  return {
+    layout,
+    physicalChoices: requestedChoices,
+    orientation,
+    grid,
+    score: grid.score,
+  };
+}
+
+function getCalibratedBubblePoint(
+  markers: Markers,
+  block: AnswerBlock,
+  rowInBlock: number,
+  choiceIndex: number,
+  orientation: PageOrientation,
+  grid: GridCalibration,
+): PixelPoint {
+  const nx = block.firstBubbleNX + choiceIndex * block.bubbleSpacingNX;
+  const ny = block.firstBubbleNY + rowInBlock * block.rowSpacingNY;
+  const { px, py } = mapTemplatePointToPixel(markers, nx, ny, orientation);
+  return applyGridCalibration({ x: px, y: py }, grid);
+}
+
+function getCalibratedBlockMarkerPoint(
+  markers: Markers,
+  block: AnswerBlock,
+  orientation: PageOrientation,
+  grid?: GridCalibration,
+): PixelPoint {
+  const { px, py } = mapTemplatePointToPixel(
+    markers,
+    block.markerNX,
+    block.markerNY,
+    orientation,
+  );
+  const point = { x: px, y: py };
+  return grid ? applyGridCalibration(point, grid) : point;
+}
+
+function getBandBlocks(layout: TemplateLayout, bandIndex: 0 | 1): AnswerBlock[] {
+  return layout.answerBlocks.slice(bandIndex * 5, bandIndex * 5 + 5);
+}
+
+function sampleBlockMarkerScore(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  cx: number,
+  cy: number,
+  markerOffsets: readonly PixelOffset[],
+  backgroundOffsets: readonly PixelOffset[],
+): number {
+  const background = sampleLumaStatsAtOffsets(
+    pixels,
+    width,
+    height,
+    cx,
+    cy,
+    backgroundOffsets,
+  );
+  const paperMean = Math.max(background.mean, background.p75);
+  const darkThreshold = Math.max(45, paperMean - Math.max(28, paperMean * 0.18));
+  const center = sampleLumaStatsAtOffsets(
+    pixels,
+    width,
+    height,
+    cx,
+    cy,
+    markerOffsets,
+    darkThreshold,
+  );
+  const contrast = Math.max(0, paperMean - center.mean);
+
+  // Block header squares are solid black. Text and bubble outlines have lower
+  // dark coverage, so darkRatio strongly separates the intended anchor.
+  return (255 - center.mean) * 0.75 + contrast * 1.35 + center.darkRatio * 95;
+}
+
+function findBestBlockMarkerOffset(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  point: PixelPoint,
+  markerOffsets: readonly PixelOffset[],
+  backgroundOffsets: readonly PixelOffset[],
+  searchRadius: number,
+  searchStep: number,
+): BlockMarkerOffset {
+  const candidates = buildOffsetCandidates(searchRadius, searchStep);
+  let best: BlockMarkerOffset = {
+    dx: 0,
+    dy: 0,
+    score: Number.NEGATIVE_INFINITY,
+  };
+
+  for (const dy of candidates) {
+    for (const dx of candidates) {
+      const score = sampleBlockMarkerScore(
+        pixels,
+        width,
+        height,
+        point.x + dx,
+        point.y + dy,
+        markerOffsets,
+        backgroundOffsets,
+      );
+
+      if (score > best.score) {
+        best = { dx, dy, score };
+      }
+    }
+  }
+
+  return best;
+}
+
+function getRawBubblePoint(
+  markers: Markers,
+  block: AnswerBlock,
+  rowInBlock: number,
+  choiceIndex: number,
+  orientation: PageOrientation,
+): PixelPoint {
+  const nx = block.firstBubbleNX + choiceIndex * block.bubbleSpacingNX;
+  const ny = block.firstBubbleNY + rowInBlock * block.rowSpacingNY;
+  const { px, py } = mapTemplatePointToPixel(markers, nx, ny, orientation);
+  return { x: px, y: py };
+}
+
+function getRawBlockMarkerPoint(
+  markers: Markers,
+  block: AnswerBlock,
+  orientation: PageOrientation,
+): PixelPoint {
+  const { px, py } = mapTemplatePointToPixel(
+    markers,
+    block.markerNX,
+    block.markerNY,
+    orientation,
+  );
+  return { x: px, y: py };
+}
+
+function calibrateBlockAnchors(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  layout: TemplateLayout,
+  orientation: PageOrientation,
+  markerOffsets: readonly PixelOffset[],
+  markerBackgroundOffsets: readonly PixelOffset[],
+  bubbleRX: number,
+  bubbleRY: number,
+): BlockAnchor[] {
+  const searchRadius = Math.max(12, Math.round(Math.max(bubbleRX, bubbleRY) * 3.1));
+  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.28));
+  const anchors = layout.answerBlocks.map((block) => {
+    const markerPoint = getRawBlockMarkerPoint(markers, block, orientation);
+    const marker = findBestBlockMarkerOffset(
+      pixels,
+      width,
+      height,
+      markerPoint,
+      markerOffsets,
+      markerBackgroundOffsets,
+      searchRadius,
+      searchStep,
+    );
+
+    return {
+      ...marker,
+      reliable: marker.score >= 95,
+    };
+  });
+  const reliableCount = anchors.filter((anchor) => anchor.reliable).length;
+  const avgScore =
+    anchors.reduce((sum, anchor) => sum + anchor.score, 0) /
+    Math.max(1, anchors.length);
+  const dxValues = anchors.map((anchor) => anchor.dx);
+  const dyValues = anchors.map((anchor) => anchor.dy);
+
+  console.log(
+    `[200Q-FAST] Block anchors: reliable=${reliableCount}/${anchors.length}, dxRange=${Math.round(Math.min(...dxValues))}..${Math.round(Math.max(...dxValues))}, dyRange=${Math.round(Math.min(...dyValues))}..${Math.round(Math.max(...dyValues))}, score=${avgScore.toFixed(1)}`,
+  );
+
+  return anchors;
+}
+
+function getAnchoredBubblePoint(
+  markers: Markers,
+  block: AnswerBlock,
+  rowInBlock: number,
+  choiceIndex: number,
+  orientation: PageOrientation,
+  anchor: BlockAnchor,
+): PixelPoint {
+  const raw = getRawBubblePoint(
+    markers,
+    block,
+    rowInBlock,
+    choiceIndex,
+    orientation,
+  );
+  return {
+    x: raw.x + anchor.dx,
+    y: raw.y + anchor.dy,
+  };
+}
+
+function findBestQuestionRowOffsetForPoints(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  choicePoints: readonly PixelPoint[],
+  centerOffsets: readonly PixelOffset[],
+  backgroundOffsets: readonly PixelOffset[],
+  bubbleRX: number,
+  bubbleRY: number,
+): PixelOffset {
+  const radius = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.55));
+  const step = Math.max(1, Math.round(radius / 2));
+  const candidates = buildOffsetCandidates(radius, step);
+  let bestOffset: PixelOffset = { dx: 0, dy: 0 };
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const dy of candidates) {
+    for (const dx of candidates) {
+      const samples = choicePoints.map((point) =>
+        sampleBubbleMarkRaw(
+          pixels,
+          width,
+          height,
+          point.x + dx,
+          point.y + dy,
+          centerOffsets,
+          backgroundOffsets,
+        ),
+      );
+      const byBrightness = [...samples].sort((a, b) => a.mean - b.mean);
+      const darkest = byBrightness[0];
+      const secondDark = byBrightness.length > 1 ? byBrightness[1] : darkest;
+      const brightest = byBrightness[byBrightness.length - 1];
+      const spread = brightest.mean - darkest.mean;
+      const gap = secondDark.mean - darkest.mean;
+      const score =
+        spread * 0.8 +
+        gap * 0.5 +
+        darkest.contrast * 1.4 +
+        darkest.darkRatio * 45;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestOffset = { dx, dy };
+      }
+    }
+  }
+
+  return bestOffset;
+}
+
+function getBandBubblePoint(
+  markers: Markers,
+  blocks: readonly AnswerBlock[],
+  rowInBlock: number,
+  colIndex: number,
+  physicalChoices: 4 | 5,
+  orientation: PageOrientation,
+  grid: GridCalibration,
+): PixelPoint {
+  const blockIndex = Math.floor(colIndex / physicalChoices);
+  const choiceIndex = colIndex % physicalChoices;
+  return getCalibratedBubblePoint(
+    markers,
+    blocks[blockIndex],
+    rowInBlock,
+    choiceIndex,
+    orientation,
+    grid,
+  );
+}
+
+function calibrateAnswerBandGrid(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  layout: TemplateLayout,
+  bandIndex: 0 | 1,
+  physicalChoices: 4 | 5,
+  orientation: PageOrientation,
+  grid: GridCalibration,
+  bubbleRX: number,
+  bubbleRY: number,
+  ringOffsets: readonly PixelOffset[],
+  frameSize: { width: number; height: number },
+  markerOffsets: readonly PixelOffset[],
+  markerBackgroundOffsets: readonly PixelOffset[],
+): AnswerBandCalibration {
+  const blocks = getBandBlocks(layout, bandIndex);
+  const totalCols = physicalChoices * blocks.length;
+  const probeRows = [0, 3, 6, 9];
+  const maxBubbleR = Math.max(bubbleRX, bubbleRY);
+  const rowSpacingPx = Math.max(4, layout.answerBlocks[0].rowSpacingNY * frameSize.height);
+  const colSpacingPx = Math.max(4, layout.answerBlocks[0].bubbleSpacingNX * frameSize.width);
+  const baseRadius = Math.max(4, Math.round(maxBubbleR * 1.15));
+  const baseStep = Math.max(1, Math.round(Math.min(bubbleRX, bubbleRY) * 0.35));
+  const baseOffsets = buildOffsetCandidates(baseRadius, baseStep);
+  let baseDx = 0;
+  let baseDy = 0;
+  let baseScore = Number.NEGATIVE_INFINITY;
+
+  for (const dy of baseOffsets) {
+    for (const dx of baseOffsets) {
+      let score = 0;
+      let samples = 0;
+
+      for (const row of probeRows) {
+        for (let col = 0; col < totalCols; col++) {
+          const point = getBandBubblePoint(
+            markers,
+            blocks,
+            row,
+            col,
+            physicalChoices,
+            orientation,
+            grid,
+          );
+          score += sampleBubbleInkScore(
+            pixels,
+            width,
+            height,
+            point.x + dx,
+            point.y + dy,
+            ringOffsets,
+          );
+          samples++;
+        }
+      }
+
+      score /= Math.max(1, samples);
+      if (score > baseScore) {
+        baseScore = score;
+        baseDx = dx;
+        baseDy = dy;
+      }
+    }
+  }
+
+  const rowRadius = Math.max(
+    3,
+    Math.round(Math.min(rowSpacingPx * 0.42, maxBubbleR * 1.6)),
+  );
+  const colRadius = Math.max(
+    3,
+    Math.round(Math.min(colSpacingPx * 0.42, maxBubbleR * 1.6)),
+  );
+  const fineStep = Math.max(1, Math.round(Math.min(bubbleRX, bubbleRY) * 0.25));
+  const rowDy = new Array(10).fill(baseDy);
+  const colDx = new Array(totalCols).fill(baseDx);
+  const blockRadius = Math.max(3, Math.round(Math.min(rowRadius, colRadius)));
+  const blockCandidates = buildOffsetCandidates(blockRadius, fineStep);
+  const blockDy = new Array(blocks.length).fill(baseDy);
+  let score = 0;
+  let dySum = 0;
+  let markerUsed = 0;
+  let markerScoreSum = 0;
+
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+    const firstCol = blockIndex * physicalChoices;
+    let bestBlockDx = baseDx;
+    let bestBlockDy = baseDy;
+    let bestBlockScore = Number.NEGATIVE_INFINITY;
+
+    for (const localDy of blockCandidates) {
+      for (const localDx of blockCandidates) {
+        const candDx = baseDx + localDx;
+        const candDy = baseDy + localDy;
+        let blockScore = 0;
+        let samples = 0;
+
+        for (const row of probeRows) {
+          for (let choice = 0; choice < physicalChoices; choice++) {
+            const point = getCalibratedBubblePoint(
+              markers,
+              blocks[blockIndex],
+              row,
+              choice,
+              orientation,
+              grid,
+            );
+            blockScore += sampleBubbleInkScore(
+              pixels,
+              width,
+              height,
+              point.x + candDx,
+              point.y + candDy,
+              ringOffsets,
+            );
+            samples++;
+          }
+        }
+
+        blockScore /= Math.max(1, samples);
+        if (blockScore > bestBlockScore) {
+          bestBlockScore = blockScore;
+          bestBlockDx = candDx;
+          bestBlockDy = candDy;
+        }
+      }
+    }
+
+    for (let choice = 0; choice < physicalChoices; choice++) {
+      colDx[firstCol + choice] = bestBlockDx;
+    }
+    blockDy[blockIndex] = bestBlockDy;
+
+    const markerPoint = getCalibratedBlockMarkerPoint(
+      markers,
+      blocks[blockIndex],
+      orientation,
+      grid,
+    );
+    const markerAnchor = findBestBlockMarkerOffset(
+      pixels,
+      width,
+      height,
+      markerPoint,
+      markerOffsets,
+      markerBackgroundOffsets,
+      Math.max(baseRadius * 2, Math.round(maxBubbleR * 2.4)),
+      fineStep,
+    );
+    markerScoreSum += markerAnchor.score;
+
+    if (markerAnchor.score >= 95) {
+      for (let choice = 0; choice < physicalChoices; choice++) {
+        colDx[firstCol + choice] = markerAnchor.dx;
+      }
+      blockDy[blockIndex] = markerAnchor.dy;
+      bestBlockScore = Math.max(bestBlockScore, markerAnchor.score);
+      markerUsed++;
+    }
+
+    dySum += blockDy[blockIndex];
+    score += bestBlockScore;
+  }
+
+  rowDy.fill(dySum / blocks.length);
+  score /= blocks.length;
+  console.log(
+    `[200Q-FAST] Band ${bandIndex + 1} grid: baseDx=${baseDx}, baseDy=${baseDy}, rowRange=${Math.round(Math.min(...rowDy))}..${Math.round(Math.max(...rowDy))}, colRange=${Math.round(Math.min(...colDx))}..${Math.round(Math.max(...colDx))}, markerAnchors=${markerUsed}/${blocks.length}, markerScore=${(markerScoreSum / Math.max(1, blocks.length)).toFixed(1)}, score=${score.toFixed(1)}`,
+  );
+
+  return { rowDy, colDx, blockDy, score };
+}
+
+function findBestQuestionRowOffset(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  block: AnswerBlock,
+  rowInBlock: number,
+  physicalChoices: 4 | 5,
+  orientation: PageOrientation,
+  grid: GridCalibration,
+  baseDx: number,
+  baseDy: number,
+  centerOffsets: readonly PixelOffset[],
+  backgroundOffsets: readonly PixelOffset[],
+  bubbleRX: number,
+  bubbleRY: number,
+): PixelOffset {
+  const radius = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.75));
+  const step = Math.max(1, Math.round(radius / 2));
+  const candidates = buildOffsetCandidates(radius, step);
+  let bestOffset: PixelOffset = { dx: 0, dy: 0 };
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const dy of candidates) {
+    for (const dx of candidates) {
+      const samples: BubbleMarkSample[] = [];
+
+      for (let choice = 0; choice < physicalChoices; choice++) {
+        const point = getCalibratedBubblePoint(
+          markers,
+          block,
+          rowInBlock,
+          choice,
+          orientation,
+          grid,
+        );
+        samples.push(
+          sampleBubbleMarkRaw(
+            pixels,
+            width,
+            height,
+            point.x + baseDx + dx,
+            point.y + baseDy + dy,
+            centerOffsets,
+            backgroundOffsets,
+          ),
+        );
+      }
+
+      const byBrightness = [...samples].sort((a, b) => a.mean - b.mean);
+      const darkest = byBrightness[0];
+      const secondDark = byBrightness.length > 1 ? byBrightness[1] : darkest;
+      const brightest = byBrightness[byBrightness.length - 1];
+      const spread = brightest.mean - darkest.mean;
+      const gap = secondDark.mean - darkest.mean;
+      const score =
+        spread * 0.9 +
+        gap * 0.45 +
+        darkest.contrast * 1.6 +
+        darkest.darkRatio * 55;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestOffset = { dx, dy };
+      }
+    }
+  }
+
+  return bestOffset;
 }
 
 function scan200ItemPagePixelsWithBrightness(
@@ -477,144 +1513,256 @@ function scan200ItemPagePixelsWithBrightness(
   markers: Markers,
   choicesPerQuestion: 4 | 5,
 ): StudentAnswer[] {
-  const layout = get200ItemPageLayout();
-  const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
-  const choiceLabels = "ABCDE".slice(0, effectiveChoices).split("");
+  const requestedChoices = choicesPerQuestion === 4 ? 4 : 5;
   const answers: StudentAnswer[] = [];
-  const frameW = markers.topRight.x - markers.topLeft.x;
-  const frameH = markers.bottomLeft.y - markers.topLeft.y;
-  const bubbleRX = (layout.bubbleDiameterNX * frameW) / 2;
-  const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
-  const centerOffsets = buildSampleOffsets(bubbleRX, bubbleRY, 0.42, 5, true);
+  const frameSize = getAverageFrameSize(markers);
+  const referenceLayout = get200ItemPageLayout(5);
+  const bubbleRX = (referenceLayout.bubbleDiameterNX * frameSize.width) / 2;
+  const bubbleRY = (referenceLayout.bubbleDiameterNY * frameSize.height) / 2;
+  const centerOffsets = buildSampleOffsets(bubbleRX, bubbleRY, 0.48, 4, true);
+  const backgroundOffsets = buildBackgroundOffsets(bubbleRX, bubbleRY);
   const ringOffsets = buildRingOffsets(bubbleRX, bubbleRY);
-  const gridCalibration = findGridCalibration(
+  const markerRX = bubbleRX * 0.57;
+  const markerRY = bubbleRY * 0.57;
+  const markerOffsets = buildSampleOffsets(markerRX, markerRY, 0.95, 2, true);
+  const markerBackgroundOffsets = buildBackgroundOffsets(markerRX, markerRY);
+  const pageCalibration = findBestPageCalibration(
+    pixels,
+    width,
+    height,
+    markers,
+    requestedChoices,
+    bubbleRX,
+    bubbleRY,
+    ringOffsets,
+    markerOffsets,
+    markerBackgroundOffsets,
+  );
+  const { layout, physicalChoices, orientation, grid } = pageCalibration;
+  const choiceLabels = "ABCDE".slice(0, physicalChoices).split("");
+  const blockAnchors = calibrateBlockAnchors(
     pixels,
     width,
     height,
     markers,
     layout,
-    effectiveChoices,
+    orientation,
+    markerOffsets,
+    markerBackgroundOffsets,
     bubbleRX,
     bubbleRY,
-    ringOffsets,
   );
-
-  for (const block of layout.answerBlocks) {
-    let blockDx = 0;
-    let blockDy = 0;
-    const probeRows = [0, 3, 6, 9];
-    const localRadius = Math.max(
-      4,
-      Math.round(Math.max(bubbleRX, bubbleRY) * 0.8),
-    );
-    const localStep = Math.max(2, Math.round(localRadius / 2));
-    const localCandidates = buildOffsetCandidates(localRadius, localStep);
-    let bestScore = Number.NEGATIVE_INFINITY;
-
-    for (const localDy of localCandidates) {
-      for (const localDx of localCandidates) {
-        const candDx = localDx;
-        const candDy = localDy;
-        let score = 0;
-        let samples = 0;
-
-        for (const row of probeRows) {
-          for (let c = 0; c < effectiveChoices; c++) {
-            const nx = block.firstBubbleNX + c * block.bubbleSpacingNX;
-            const ny = block.firstBubbleNY + row * block.rowSpacingNY;
-            const { px, py } = mapToPixel(markers, nx, ny);
-            const calibrated = applyGridCalibration(
-              { x: px, y: py },
-              gridCalibration,
-            );
-            score += sampleBubbleInkScore(
-              pixels,
-              width,
-              height,
-              calibrated.x + candDx,
-              calibrated.y + candDy,
-              ringOffsets,
-            );
-            samples++;
-          }
-        }
-
-        if (samples > 0) score /= samples;
-        if (score > bestScore) {
-          bestScore = score;
-          blockDx = candDx;
-          blockDy = candDy;
-        }
-      }
-    }
-
-    for (let q = block.startQ; q <= block.endQ; q++) {
-      const rowInBlock = q - block.startQ;
-      const fills: { choice: string; brightness: number }[] = [];
-
-      for (let c = 0; c < effectiveChoices; c++) {
-        const nx = block.firstBubbleNX + c * block.bubbleSpacingNX;
-        const ny = block.firstBubbleNY + rowInBlock * block.rowSpacingNY;
-        const { px, py } = mapToPixel(markers, nx, ny);
-        const calibrated = applyGridCalibration(
-          { x: px, y: py },
-          gridCalibration,
-        );
-        const brightness = sampleBestBubbleCenterBrightness(
+  const reliableAnchorCount = blockAnchors.filter((anchor) => anchor.reliable).length;
+  const useAnchorGrid = reliableAnchorCount >= 7;
+  const bandCalibrations = useAnchorGrid
+    ? null
+    : [
+        calibrateAnswerBandGrid(
           pixels,
           width,
           height,
-          calibrated.x + blockDx,
-          calibrated.y + blockDy,
-          centerOffsets,
-          Math.max(1, Math.round(Math.min(bubbleRX, bubbleRY) * 0.28)),
+          markers,
+          layout,
+          0,
+          physicalChoices,
+          orientation,
+          grid,
+          bubbleRX,
+          bubbleRY,
+          ringOffsets,
+          frameSize,
+          markerOffsets,
+          markerBackgroundOffsets,
+        ),
+        calibrateAnswerBandGrid(
+          pixels,
+          width,
+          height,
+          markers,
+          layout,
+          1,
+          physicalChoices,
+          orientation,
+          grid,
+          bubbleRX,
+          bubbleRY,
+          ringOffsets,
+          frameSize,
+          markerOffsets,
+          markerBackgroundOffsets,
+        ),
+      ];
+
+  layout.answerBlocks.forEach((block, blockIndex) => {
+    const bandIndex = blockIndex < 5 ? 0 : 1;
+    const blockColumn = blockIndex % 5;
+    const blockAnchor = blockAnchors[blockIndex];
+    const useBlockAnchor = useAnchorGrid || blockAnchor.reliable;
+    const bandCalibration = bandCalibrations?.[bandIndex] ?? null;
+
+    for (let q = block.startQ; q <= block.endQ; q++) {
+      const rowInBlock = q - block.startQ;
+      const fills: BubbleInteriorSample[] = [];
+      const choicePoints = Array.from({ length: physicalChoices }, (_, c) => {
+        if (useBlockAnchor) {
+          return getAnchoredBubblePoint(
+            markers,
+            block,
+            rowInBlock,
+            c,
+            orientation,
+            blockAnchor,
+          );
+        }
+
+        return getCalibratedBubblePoint(
+          markers,
+          block,
+          rowInBlock,
+          c,
+          orientation,
+          grid,
         );
-        fills.push({ choice: choiceLabels[c], brightness });
+      });
+      const baseColIndex = blockColumn * physicalChoices;
+      const rowOffset =
+        useBlockAnchor || !bandCalibration
+          ? findBestQuestionRowOffsetForPoints(
+              pixels,
+              width,
+              height,
+              choicePoints,
+              centerOffsets,
+              backgroundOffsets,
+              bubbleRX,
+              bubbleRY,
+            )
+          : findBestQuestionRowOffset(
+              pixels,
+              width,
+              height,
+              markers,
+              block,
+              rowInBlock,
+              physicalChoices,
+              orientation,
+              grid,
+              bandCalibration.colDx[baseColIndex],
+              bandCalibration.blockDy[blockColumn],
+              centerOffsets,
+              backgroundOffsets,
+              bubbleRX,
+              bubbleRY,
+            );
+
+      for (let c = 0; c < physicalChoices; c++) {
+        const colIndex = blockColumn * physicalChoices + c;
+        const sampleX =
+          useBlockAnchor || !bandCalibration
+            ? choicePoints[c].x + rowOffset.dx
+            : choicePoints[c].x +
+              bandCalibration.colDx[colIndex] +
+              rowOffset.dx;
+        const sampleY =
+          useBlockAnchor || !bandCalibration
+            ? choicePoints[c].y + rowOffset.dy
+            : choicePoints[c].y +
+              bandCalibration.blockDy[blockColumn] +
+              rowOffset.dy;
+        const sample = sampleBubbleMarkRaw(
+          pixels,
+          width,
+          height,
+          sampleX,
+          sampleY,
+          centerOffsets,
+          backgroundOffsets,
+        );
+        fills.push({
+          choice: choiceLabels[c],
+          brightness: sample.mean,
+          minLuma: sample.minLuma,
+          darkRatio: sample.darkRatio,
+          paperMean: sample.paperMean,
+          contrast: sample.contrast,
+          p25: sample.p25,
+          score: 0,
+        });
       }
 
-      const sorted = [...fills].sort((a, b) => a.brightness - b.brightness);
-      const darkest = sorted[0].brightness;
-      const secondDark = sorted.length >= 2 ? sorted[1].brightness : 255;
-      const thirdDark = sorted.length >= 3 ? sorted[2].brightness : 255;
-      const brightest = sorted[sorted.length - 1].brightness;
-      const ref = brightest;
-      const darkRatio = ref > 20 ? darkest / ref : 1;
-      const absoluteGap = secondDark - darkest;
-      const gapFromThird = thirdDark - darkest;
-      const median = sorted[Math.floor(sorted.length / 2)].brightness;
+      const byBrightness = [...fills].sort(
+        (a, b) => a.brightness - b.brightness,
+      );
+      const darkest = byBrightness[0].brightness;
+      const secondDark =
+        byBrightness.length >= 2 ? byBrightness[1].brightness : 255;
+      const brightest = byBrightness[byBrightness.length - 1].brightness;
+      const brightnessSpread = brightest - darkest;
       const mean =
         fills.reduce((sum, item) => sum + item.brightness, 0) / fills.length;
-      const spread = brightest - darkest;
-      const adaptiveGap = Math.max(3, spread * 0.16);
+
+      for (const fill of fills) {
+        const relativeDarkness = Math.max(0, brightest - fill.brightness);
+        const percentileContrast = Math.max(0, fill.paperMean - fill.p25);
+        const minContrast = Math.max(0, fill.paperMean - fill.minLuma);
+        fill.score =
+          relativeDarkness * 0.45 +
+          fill.contrast +
+          percentileContrast * 0.55 +
+          fill.darkRatio * 90 +
+          minContrast * 0.06;
+      }
+
+      const sorted = [...fills].sort((a, b) => b.score - a.score);
+      const best = sorted[0];
+      const second = sorted.length >= 2 ? sorted[1] : null;
+      const worst = sorted[sorted.length - 1];
+      const scoreGap = second ? best.score - second.score : best.score;
+      const absoluteGap = secondDark - darkest;
+      const scoreSpread = best.score - worst.score;
+      const bestIsDarkest = best.choice === byBrightness[0].choice;
       let selectedChoice = "";
 
-      if (darkRatio < 0.82 && absoluteGap >= 3) {
-        selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.9 && absoluteGap >= 5) {
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 8 && gapFromThird >= 5 && darkest < median - 2) {
-        selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.96 && absoluteGap >= 5 && spread >= 8) {
-        selectedChoice = sorted[0].choice;
+      if (best.score >= 7 && scoreGap >= 0.35) {
+        selectedChoice = best.choice;
+      } else if (scoreGap >= 1.75 && best.contrast >= 1.5) {
+        selectedChoice = best.choice;
       } else if (
-        absoluteGap >= adaptiveGap &&
-        darkest <= mean - 3 &&
-        spread >= 5
+        bestIsDarkest &&
+        absoluteGap >= 1.25 &&
+        brightnessSpread >= 1.75 &&
+        best.score >= 2
       ) {
-        selectedChoice = sorted[0].choice;
+        selectedChoice = best.choice;
+      } else if (
+        scoreSpread >= 2.25 &&
+        best.score >= 2.25 &&
+        scoreGap >= 0.12
+      ) {
+        selectedChoice = best.choice;
+      } else if (
+        bestIsDarkest &&
+        brightnessSpread >= 0.8 &&
+        best.brightness <= mean - 0.2 &&
+        best.score >= 1.25
+      ) {
+        selectedChoice = best.choice;
       }
 
       if (DEBUG_LOGS && (q === block.startQ || !selectedChoice)) {
         console.log(
           `[200Q-FAST] Q${q}: ${fills
-            .map((f) => `${f.choice}=${f.brightness.toFixed(0)}`)
+            .map(
+              (f) =>
+                `${f.choice}=${f.brightness.toFixed(0)}/${f.contrast.toFixed(0)}/${f.score.toFixed(0)}`,
+            )
             .join(", ")} -> ${selectedChoice || "?"}`,
         );
       }
 
       answers.push({ questionNumber: q, selectedAnswer: selectedChoice });
     }
-  }
+  });
 
   return answers.sort((a, b) => a.questionNumber - b.questionNumber);
 }
@@ -775,8 +1923,8 @@ function findCornerMarker(
 
     if (compW < minDim || compH < minDim) continue;
     if (compW > maxDim || compH > maxDim) continue;
-    if (aspect < 0.5 || aspect > 2.0) continue;
-    if (density < 0.35) continue;
+    if (aspect < 0.65 || aspect > 1.55) continue;
+    if (density < 0.45) continue;
 
     const centerX = x0 + (minGX + maxGX + 1) * step * 0.5;
     const centerY = y0 + (minGY + maxGY + 1) * step * 0.5;
@@ -784,7 +1932,15 @@ function findCornerMarker(
       Math.hypot(centerX - window.targetX, centerY - window.targetY) /
       Math.hypot(imageW, imageH);
     const squareScore = 1 - Math.min(0.7, Math.abs(Math.log(aspect)));
-    const score = count * density * (0.8 + squareScore) * (1.4 - targetDist);
+    const expectedMarkerDim = Math.min(imageW, imageH) * 0.026;
+    const avgDim = (compW + compH) / 2;
+    const sizeScore = Math.max(
+      0.12,
+      Math.exp(-Math.abs(Math.log(avgDim / Math.max(1, expectedMarkerDim))) * 1.15),
+    );
+    const targetScore = 1 / (1 + targetDist * 7);
+    const score =
+      Math.sqrt(count) * density * (0.8 + squareScore) * sizeScore * targetScore;
 
     if (!best || score > best.score) {
       best = { x: centerX, y: centerY, width: compW, height: compH, score };
@@ -892,15 +2048,30 @@ function offsetPageAnswers(
   }));
 }
 
+function summarizeChoiceCounts(answers: StudentAnswer[]): string {
+  const counts: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0 };
+  let blank = 0;
+
+  for (const answer of answers) {
+    if (answer.selectedAnswer && counts[answer.selectedAnswer] !== undefined) {
+      counts[answer.selectedAnswer]++;
+    } else {
+      blank++;
+    }
+  }
+
+  return `A=${counts.A}, B=${counts.B}, C=${counts.C}, D=${counts.D}, E=${counts.E}, blank=${blank}`;
+}
+
 export async function scan200ItemPageFast(
   imageUri: string,
   pageNumber: 1 | 2,
-  choicesPerQuestion: 4 | 5 = 5,
+  choicesPerQuestion: 4 | 5 = 4,
 ): Promise<StudentAnswer[]> {
   const startedAt = Date.now();
   const questionOffset = pageNumber === 1 ? 0 : 100;
   console.log(
-    `[200Q-FAST] Starting direct pixel scan for Page ${pageNumber} (offset=${questionOffset})`,
+    `[200Q-FAST][${SCANNER_200Q_VERSION}] Starting direct pixel scan for Page ${pageNumber} (offset=${questionOffset}, choices=${choicesPerQuestion}/${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
   );
 
   const { pixels, width, height } = await load200ItemImagePixels(imageUri);
@@ -925,6 +2096,9 @@ export async function scan200ItemPageFast(
   console.log(
     `[200Q-FAST] Page ${pageNumber}: Detected ${detectedCount}/100 answers in ${Date.now() - startedAt}ms (Q${questionOffset + 1}-${questionOffset + 100})`,
   );
+  console.log(
+    `[200Q-FAST] Page ${pageNumber} answer distribution: ${summarizeChoiceCounts(pageAnswers)}`,
+  );
 
   return pageAnswers;
 }
@@ -933,7 +2107,7 @@ export async function scan200ItemPage(
   imageUri: string,
   markers: Markers,
   pageNumber: 1 | 2,
-  choicesPerQuestion: 4 | 5 = 5,
+  choicesPerQuestion: 4 | 5 = 4,
 ): Promise<StudentAnswer[]> {
   const questionOffset = pageNumber === 1 ? 0 : 100;
   console.log(
@@ -955,6 +2129,9 @@ export async function scan200ItemPage(
     const detectedCount = pageAnswers.filter((a) => a.selectedAnswer).length;
     console.log(
       `[200Q-BRIGHTNESS] Page ${pageNumber}: Detected ${detectedCount}/100 answers (Q${questionOffset + 1}-${questionOffset + 100})`,
+    );
+    console.log(
+      `[200Q-BRIGHTNESS] Page ${pageNumber} answer distribution: ${summarizeChoiceCounts(pageAnswers)}`,
     );
 
     return pageAnswers;

@@ -540,7 +540,7 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
     pageNumber?: 1 | 2,
-    choicesPerQuestion: 4 | 5 = 5,
+    choicesPerQuestion: 4 | 5 = 4,
   ): Promise<ScanResult> {
     // Track all Mat objects for cleanup
     const matsToCleanup: any[] = [];
@@ -556,6 +556,9 @@ export class ZipgradeScanner {
       if (qCount === 200) {
         const currentPage = pageNumber || 1;
         const startedAt = Date.now();
+        console.log(
+          `[OMR] 200Q fast path config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+        );
         const answers = await scan200ItemPageFast(
           imageUri,
           currentPage,
