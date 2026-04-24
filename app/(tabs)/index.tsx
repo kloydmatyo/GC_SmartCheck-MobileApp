@@ -1,47 +1,32 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
 import { auth, db } from "@/config/firebase";
-import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
-import { GradeStorageService } from "@/services/gradeStorageService";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
 import { ResultsService } from "@/services/resultsService";
 import { SyncService, type SyncResult } from "@/services/syncService";
 
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import NetInfo from "@react-native-community/netinfo";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { signOut } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  where,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 
 import React, { useCallback, useEffect, useState } from "react";
 
 import {
-  ActivityIndicator,
-  Animated,
-  Image,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import { SafeAreaView } from "react-native-safe-area-context";
 import Toast from "react-native-toast-message";
-
-import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 type SummaryStats = {
   scans: number;
@@ -333,7 +318,7 @@ export default function HomeScreen() {
 
         // Use optimized local-first ClassService
         const { ClassService } = await import("../../services/classService");
-        
+
         const [classDocs, unifiedResults] = await Promise.all([
           ClassService.getClassesByUser(),
           ResultsService.getUnifiedResults(),
@@ -529,10 +514,7 @@ export default function HomeScreen() {
                     )}
                   </View>
                   <Text
-                    style={[
-                      styles.syncText,
-                      { color: syncVisual.textColor },
-                    ]}
+                    style={[styles.syncText, { color: syncVisual.textColor }]}
                   >
                     {syncVisual.text}
                   </Text>
@@ -552,7 +534,14 @@ export default function HomeScreen() {
 
           <View style={styles.greetingBlock}>
             <Text style={styles.dateText}>{formatHeaderDate(new Date())}</Text>
-            <Text style={styles.greetingText}>Good morning, {teacherName}</Text>
+            <Text style={styles.greetingText}>
+              {(() => {
+                const h = new Date().getHours();
+                if (h < 12) return `Good morning, ${teacherName}`;
+                if (h < 18) return `Good afternoon, ${teacherName}`;
+                return `Good evening, ${teacherName}`;
+              })()}
+            </Text>
           </View>
 
           <View style={styles.statsRow}>
@@ -592,15 +581,6 @@ export default function HomeScreen() {
               </TouchableOpacity>
             ))}
           </View>
-
-          <TouchableOpacity
-            style={styles.quickScanButton}
-            onPress={() => router.push(`/scanner?quick=${Date.now()}`)}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="scan-outline" size={20} color="#FFFFFF" />
-            <Text style={styles.quickScanText}>Quick Scan</Text>
-          </TouchableOpacity>
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent Scans</Text>
