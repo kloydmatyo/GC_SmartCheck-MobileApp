@@ -54,10 +54,46 @@ function drawShadingGuide(
     label: string;
     bubbles: Array<{ filled: boolean; partial?: boolean }>;
   }> = [
-    { label: "Correct", bubbles: [{ filled: false }, { filled: true }, { filled: false }, { filled: false }, { filled: false }] },
-    { label: "Wrong", bubbles: [{ filled: false }, { filled: false, partial: true }, { filled: false }, { filled: false }, { filled: false }] },
-    { label: "Wrong", bubbles: [{ filled: true }, { filled: true }, { filled: false }, { filled: false }, { filled: false }] },
-    { label: "Erase OK", bubbles: [{ filled: false }, { filled: false }, { filled: false }, { filled: true }, { filled: false }] },
+    {
+      label: "Correct",
+      bubbles: [
+        { filled: false },
+        { filled: true },
+        { filled: false },
+        { filled: false },
+        { filled: false },
+      ],
+    },
+    {
+      label: "Wrong",
+      bubbles: [
+        { filled: false },
+        { filled: false, partial: true },
+        { filled: false },
+        { filled: false },
+        { filled: false },
+      ],
+    },
+    {
+      label: "Wrong",
+      bubbles: [
+        { filled: true },
+        { filled: true },
+        { filled: false },
+        { filled: false },
+        { filled: false },
+      ],
+    },
+    {
+      label: "Erase OK",
+      bubbles: [
+        { filled: false },
+        { filled: false },
+        { filled: false },
+        { filled: true },
+        { filled: false },
+      ],
+    },
   ];
 
   const reminders = [
@@ -81,7 +117,9 @@ function drawShadingGuide(
   doc.setFontSize(5);
   doc.setFont("helvetica", "bold");
   for (let i = 0; i < 5; i++) {
-    doc.text(colLabels[i], bStartX + i * bSpacing, gy + 1.5, { align: "center" });
+    doc.text(colLabels[i], bStartX + i * bSpacing, gy + 1.5, {
+      align: "center",
+    });
   }
   gy += 3.5;
 
@@ -160,9 +198,14 @@ function drawMiniSheet(
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     const centerX = startX + width / 2;
-    doc.text(template.institutionName || "Gordon College", centerX, currentY + 5, {
-      align: "center",
-    });
+    doc.text(
+      template.institutionName || "Gordon College",
+      centerX,
+      currentY + 5,
+      {
+        align: "center",
+      },
+    );
     currentY += markerSize + 2;
   }
 
@@ -170,7 +213,9 @@ function drawMiniSheet(
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     const centerX = startX + width / 2;
-    doc.text(`Exam Code: ${template.examCode}`, centerX, currentY, { align: "center" });
+    doc.text(`Exam Code: ${template.examCode}`, centerX, currentY, {
+      align: "center",
+    });
     currentY += 4;
   }
 
@@ -264,7 +309,12 @@ function drawMiniSheet(
       const ccLabelW = doc.getTextWidth("Course Code:");
       doc.text("Course Code:", miniGuideX, idTopY + 4);
       doc.setLineWidth(0.2);
-      doc.line(miniGuideX + ccLabelW + 1, idTopY + 4, miniGuideX + miniGuideW, idTopY + 4);
+      doc.line(
+        miniGuideX + ccLabelW + 1,
+        idTopY + 4,
+        miniGuideX + miniGuideW,
+        idTopY + 4,
+      );
       guideStartY = idTopY + 8;
     }
 
@@ -437,7 +487,13 @@ function drawFullSheet(
   const qBlockW = 10 + (numChoices - 1) * bubbleGap + bubbleSize;
 
   doc.setFillColor(0, 0, 0);
-  doc.rect(startX + cornerInset, startY + cornerInset, markerSize, markerSize, "F");
+  doc.rect(
+    startX + cornerInset,
+    startY + cornerInset,
+    markerSize,
+    markerSize,
+    "F",
+  );
   doc.rect(
     startX + width - markerSize - cornerInset,
     startY + cornerInset,
@@ -473,7 +529,9 @@ function drawFullSheet(
   if (template.examCode) {
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
-    doc.text(`Exam Code: ${template.examCode}`, startX + width / 2, currentY, { align: "center" });
+    doc.text(`Exam Code: ${template.examCode}`, startX + width / 2, currentY, {
+      align: "center",
+    });
     currentY += 4;
   }
 
@@ -531,7 +589,13 @@ function drawFullSheet(
 
   const guideX = idBorderX + idBorderW + 4;
   const guideW = rx - guideX;
-  drawShadingGuide(doc, guideX, idTopY + (blocksPerCol === 3 ? 9 : 8), guideW, 3.0);
+  drawShadingGuide(
+    doc,
+    guideX,
+    idTopY + (blocksPerCol === 3 ? 9 : 8),
+    guideW,
+    3.0,
+  );
 
   currentY = idBottomY + 3;
 
@@ -570,11 +634,15 @@ function drawFullSheet(
   );
 }
 
-async function loadLogoBase64(template: AnswerSheetTemplateData): Promise<string> {
+async function loadLogoBase64(
+  template: AnswerSheetTemplateData,
+): Promise<string> {
   if (template.logoBase64) return template.logoBase64;
 
   try {
-    const asset = Asset.fromModule(require("@/assets/images/gordon-college-logo.png"));
+    const asset = Asset.fromModule(
+      require("@/assets/images/gordon-college-logo.png"),
+    );
     await asset.downloadAsync();
     if (!asset.localUri) return "";
     const raw = await FileSystem.readAsStringAsync(asset.localUri, {
@@ -587,7 +655,9 @@ async function loadLogoBase64(template: AnswerSheetTemplateData): Promise<string
   }
 }
 
-async function buildTemplateDoc(template: AnswerSheetTemplateData): Promise<jsPDF> {
+async function buildTemplateDoc(
+  template: AnswerSheetTemplateData,
+): Promise<jsPDF> {
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "mm",
@@ -602,16 +672,52 @@ async function buildTemplateDoc(template: AnswerSheetTemplateData): Promise<jsPD
     const sheetWidth = pageWidth / 2;
     const sheetHeight = pageHeight / 2;
     drawMiniSheet(doc, 0, 0, sheetWidth, sheetHeight, template, 20, logoData);
-    drawMiniSheet(doc, sheetWidth, 0, sheetWidth, sheetHeight, template, 20, logoData);
-    drawMiniSheet(doc, 0, sheetHeight, sheetWidth, sheetHeight, template, 20, logoData);
-    drawMiniSheet(doc, sheetWidth, sheetHeight, sheetWidth, sheetHeight, template, 20, logoData);
+    drawMiniSheet(
+      doc,
+      sheetWidth,
+      0,
+      sheetWidth,
+      sheetHeight,
+      template,
+      20,
+      logoData,
+    );
+    drawMiniSheet(
+      doc,
+      0,
+      sheetHeight,
+      sheetWidth,
+      sheetHeight,
+      template,
+      20,
+      logoData,
+    );
+    drawMiniSheet(
+      doc,
+      sheetWidth,
+      sheetHeight,
+      sheetWidth,
+      sheetHeight,
+      template,
+      20,
+      logoData,
+    );
   } else if (template.numQuestions === 50) {
     const pageWidth = 210;
     const pageHeight = 297;
     const sheetWidth = pageWidth;
     const sheetHeight = pageHeight / 2;
     drawMiniSheet(doc, 0, 0, sheetWidth, sheetHeight, template, 50, logoData);
-    drawMiniSheet(doc, 0, sheetHeight, sheetWidth, sheetHeight, template, 50, logoData);
+    drawMiniSheet(
+      doc,
+      0,
+      sheetHeight,
+      sheetWidth,
+      sheetHeight,
+      template,
+      50,
+      logoData,
+    );
   } else if (template.numQuestions === 100) {
     drawFullSheet(doc, 0, 0, 210, 297, template, logoData, 0, 2);
   } else if (template.numQuestions === 150) {
@@ -722,7 +828,9 @@ function renderQuestionBlockSvg(
   for (let q = startQ; q <= endQ; q++) {
     parts.push(svgText(String(q), x + numW - 3, qY + 1.5, 2.8, "bold", "end"));
     for (let i = 0; i < choices.length; i++) {
-      parts.push(svgCircle(x + numW + i * bubbleSpacing, qY, bubbleRadius, false));
+      parts.push(
+        svgCircle(x + numW + i * bubbleSpacing, qY, bubbleRadius, false),
+      );
     }
     qY += rowH;
   }
@@ -787,13 +895,26 @@ function renderShadingGuideSvg(px: number, py: number, panelW: number): string {
   ];
 
   let gy = py;
-  parts.push(svgText("SHADING GUIDE", px + panelW / 2, gy, 2.3, "bold", "middle"));
+  parts.push(
+    svgText("SHADING GUIDE", px + panelW / 2, gy, 2.3, "bold", "middle"),
+  );
   gy += 4;
-  parts.push(`<line x1="${px}" y1="${gy}" x2="${px + panelW}" y2="${gy}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${px}" y1="${gy}" x2="${px + panelW}" y2="${gy}" stroke="#000" stroke-width="0.2"/>`,
+  );
   gy += 2;
 
   for (let i = 0; i < 5; i++) {
-    parts.push(svgText(colLabels[i], bStartX + i * bSpacing, gy + 1.5, 2.2, "bold", "middle"));
+    parts.push(
+      svgText(
+        colLabels[i],
+        bStartX + i * bSpacing,
+        gy + 1.5,
+        2.2,
+        "bold",
+        "middle",
+      ),
+    );
   }
   gy += 3.5;
 
@@ -816,7 +937,9 @@ function renderShadingGuideSvg(px: number, py: number, panelW: number): string {
   }
 
   gy += 1;
-  parts.push(`<line x1="${px}" y1="${gy}" x2="${px + panelW}" y2="${gy}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${px}" y1="${gy}" x2="${px + panelW}" y2="${gy}" stroke="#000" stroke-width="0.2"/>`,
+  );
   gy += 2;
 
   parts.push(svgText("- Use No. 2 pencil or dark pen.", px, gy, 2.0));
@@ -895,11 +1018,25 @@ function renderMiniSheetSvg(
   const dateEnd50 = nameEnd50 + usableW * 0.22;
 
   parts.push(svgText("Name:", fieldStartX, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${fieldStartX + 11}" y1="${currentY}" x2="${nameEnd50}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${fieldStartX + 11}" y1="${currentY}" x2="${nameEnd50}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
   parts.push(svgText("Date:", nameEnd50 + 3, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${nameEnd50 + 13}" y1="${currentY}" x2="${dateEnd50}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
-  parts.push(svgText(questionsPerSheet === 50 ? "Course Code:" : "Course:", dateEnd50 + 3, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${dateEnd50 + (questionsPerSheet === 50 ? 24 : 15)}" y1="${currentY}" x2="${fieldEndX}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${nameEnd50 + 13}" y1="${currentY}" x2="${dateEnd50}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
+  parts.push(
+    svgText(
+      questionsPerSheet === 50 ? "Course Code:" : "Course:",
+      dateEnd50 + 3,
+      currentY,
+      2.6,
+      "bold",
+    ),
+  );
+  parts.push(
+    `<line x1="${dateEnd50 + (questionsPerSheet === 50 ? 24 : 15)}" y1="${currentY}" x2="${fieldEndX}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
   currentY += 4;
 
   const idTopY = currentY - 1;
@@ -912,7 +1049,15 @@ function renderMiniSheetSvg(
   const idContentXMini = idBorderXMini + idPadMini;
   const idStartX = idContentXMini + idLabelWMini;
 
-  parts.push(svgText("Student ZipGrade ID", idContentXMini + 1, currentY + 2, 2.1, "bold"));
+  parts.push(
+    svgText(
+      "Student ZipGrade ID",
+      idContentXMini + 1,
+      currentY + 2,
+      2.1,
+      "bold",
+    ),
+  );
   currentY += 4.5;
 
   const idBoxWidth = 4.2;
@@ -930,14 +1075,25 @@ function renderMiniSheetSvg(
     for (let row = 0; row < 10; row++) {
       const y = currentY + row * idRowSpacing;
       if (col === 0) {
-        parts.push(svgText(rowLabels[row], idContentXMini + 1.5, y + 1.2, 2.1, "bold"));
+        parts.push(
+          svgText(rowLabels[row], idContentXMini + 1.5, y + 1.2, 2.1, "bold"),
+        );
       }
       parts.push(svgCircle(x, y, idBubbleSize * 0.5, false));
     }
   }
 
   const idBottomYMini = currentY + 10 * idRowSpacing + 1;
-  parts.push(svgRect(idBorderXMini, idTopY, idBorderWMini, idBottomYMini - idTopY + 1, false, 0.5));
+  parts.push(
+    svgRect(
+      idBorderXMini,
+      idTopY,
+      idBorderWMini,
+      idBottomYMini - idTopY + 1,
+      false,
+      0.5,
+    ),
+  );
 
   const miniGuideX = idBorderXMini + idBorderWMini + 4;
   const miniGuideW = originX + width - margin - miniGuideX;
@@ -945,7 +1101,9 @@ function renderMiniSheetSvg(
     let guideStartY = idTopY + 4;
     if (questionsPerSheet !== 50) {
       parts.push(svgText("Course Code:", miniGuideX, idTopY + 4, 2.5, "bold"));
-      parts.push(`<line x1="${miniGuideX + 15}" y1="${idTopY + 4}" x2="${miniGuideX + miniGuideW}" y2="${idTopY + 4}" stroke="#000" stroke-width="0.2"/>`);
+      parts.push(
+        `<line x1="${miniGuideX + 15}" y1="${idTopY + 4}" x2="${miniGuideX + miniGuideW}" y2="${idTopY + 4}" stroke="#000" stroke-width="0.2"/>`,
+      );
       guideStartY = idTopY + 8;
     }
     parts.push(renderShadingGuideSvg(miniGuideX, guideStartY, miniGuideW));
@@ -1005,10 +1163,39 @@ function renderMiniSheetSvg(
 
   const topMarkerY = originY + cornerInset;
   const bottomMarkerY = originY + height - markerSize - cornerInset;
-  parts.push(svgRect(originX + cornerInset, topMarkerY, markerSize, markerSize, true, 0));
-  parts.push(svgRect(originX + width - markerSize - cornerInset, topMarkerY, markerSize, markerSize, true, 0));
-  parts.push(svgRect(originX + cornerInset, bottomMarkerY, markerSize, markerSize, true, 0));
-  parts.push(svgRect(originX + width - markerSize - cornerInset, bottomMarkerY, markerSize, markerSize, true, 0));
+  parts.push(
+    svgRect(originX + cornerInset, topMarkerY, markerSize, markerSize, true, 0),
+  );
+  parts.push(
+    svgRect(
+      originX + width - markerSize - cornerInset,
+      topMarkerY,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
+  parts.push(
+    svgRect(
+      originX + cornerInset,
+      bottomMarkerY,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
+  parts.push(
+    svgRect(
+      originX + width - markerSize - cornerInset,
+      bottomMarkerY,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
 
   parts.push(svgRect(originX, originY, width, height, false, 0.25));
   return parts.join("");
@@ -1043,8 +1230,26 @@ function renderFullSheetSvg(
   const rx = startX + width - margin;
   const usableW = rx - lx;
 
-  parts.push(svgRect(startX + cornerInset, startY + cornerInset, markerSize, markerSize, true, 0));
-  parts.push(svgRect(startX + width - markerSize - cornerInset, startY + cornerInset, markerSize, markerSize, true, 0));
+  parts.push(
+    svgRect(
+      startX + cornerInset,
+      startY + cornerInset,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
+  parts.push(
+    svgRect(
+      startX + width - markerSize - cornerInset,
+      startY + cornerInset,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
 
   if (template.logoBase64) {
     const logoSize = 10;
@@ -1052,24 +1257,56 @@ function renderFullSheetSvg(
     parts.push(
       `<image href="${template.logoBase64}" x="${hx}" y="${currentY}" width="${logoSize}" height="${logoSize}" preserveAspectRatio="xMidYMid meet"/>`,
     );
-    parts.push(svgText(template.institutionName || "Gordon College", hx + logoSize + 3, currentY + 6, 4.2, "bold"));
+    parts.push(
+      svgText(
+        template.institutionName || "Gordon College",
+        hx + logoSize + 3,
+        currentY + 6,
+        4.2,
+        "bold",
+      ),
+    );
     currentY += logoSize + 2;
   } else {
-    parts.push(svgText(template.institutionName || "Gordon College", startX + width / 2, currentY + 5, 4.2, "bold", "middle"));
+    parts.push(
+      svgText(
+        template.institutionName || "Gordon College",
+        startX + width / 2,
+        currentY + 5,
+        4.2,
+        "bold",
+        "middle",
+      ),
+    );
     currentY += markerSize + 2;
   }
 
-  parts.push(svgText(`Exam Code: ${template.examCode || "EX-XXXXXX"}`, startX + width / 2, currentY, 2.5, "normal", "middle"));
+  parts.push(
+    svgText(
+      `Exam Code: ${template.examCode || "EX-XXXXXX"}`,
+      startX + width / 2,
+      currentY,
+      2.5,
+      "normal",
+      "middle",
+    ),
+  );
   currentY += 4;
 
   const nameEnd = lx + usableW * 0.4;
   const dateEnd = nameEnd + usableW * 0.22;
   parts.push(svgText("Name:", lx, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${lx + 11}" y1="${currentY}" x2="${nameEnd}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${lx + 11}" y1="${currentY}" x2="${nameEnd}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
   parts.push(svgText("Date:", nameEnd + 3, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${nameEnd + 13}" y1="${currentY}" x2="${dateEnd}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${nameEnd + 13}" y1="${currentY}" x2="${dateEnd}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
   parts.push(svgText("Course Code:", dateEnd + 3, currentY, 2.6, "bold"));
-  parts.push(`<line x1="${dateEnd + 23}" y1="${currentY}" x2="${rx}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`);
+  parts.push(
+    `<line x1="${dateEnd + 23}" y1="${currentY}" x2="${rx}" y2="${currentY}" stroke="#000" stroke-width="0.2"/>`,
+  );
   currentY += 4;
 
   const idLabelW = 6;
@@ -1081,13 +1318,24 @@ function renderFullSheetSvg(
   const idStartX = idContentX + idLabelW;
 
   const idTopY = currentY;
-  parts.push(svgText("Student ZipGrade ID", idContentX + 1, currentY + 3, 2.2, "bold"));
+  parts.push(
+    svgText("Student ZipGrade ID", idContentX + 1, currentY + 3, 2.2, "bold"),
+  );
   currentY += 5.5;
 
   const idBoxW = 4.2;
   const idBoxH = 4.0;
   for (let i = 0; i < 9; i++) {
-    parts.push(svgRect(idStartX + i * idColGap - idBoxW * 0.5, currentY, idBoxW, idBoxH, false, 0.25));
+    parts.push(
+      svgRect(
+        idStartX + i * idColGap - idBoxW * 0.5,
+        currentY,
+        idBoxW,
+        idBoxH,
+        false,
+        0.25,
+      ),
+    );
   }
   currentY += idBoxH + 2;
 
@@ -1096,16 +1344,33 @@ function renderFullSheetSvg(
     const y = currentY + row * idRowH;
     parts.push(svgText(rowLabels[row], idContentX + 1.5, y + 1, 2.1, "bold"));
     for (let col = 0; col < 9; col++) {
-      parts.push(svgCircle(idStartX + col * idColGap, y, idBubbleSize * 0.5, false));
+      parts.push(
+        svgCircle(idStartX + col * idColGap, y, idBubbleSize * 0.5, false),
+      );
     }
   }
 
   const idBottomY = currentY + 10 * idRowH + 1.5;
-  parts.push(svgRect(idBorderX, idTopY - 1, idBorderW, idBottomY - idTopY + 2, false, 0.4));
+  parts.push(
+    svgRect(
+      idBorderX,
+      idTopY - 1,
+      idBorderW,
+      idBottomY - idTopY + 2,
+      false,
+      0.4,
+    ),
+  );
 
   const guideX = idBorderX + idBorderW + 4;
   const guideW = rx - guideX;
-  parts.push(renderShadingGuideSvg(guideX, idTopY + (blocksPerCol === 3 ? 9 : 8), guideW));
+  parts.push(
+    renderShadingGuideSvg(
+      guideX,
+      idTopY + (blocksPerCol === 3 ? 9 : 8),
+      guideW,
+    ),
+  );
 
   currentY = idBottomY + 3;
   const qBlockW = 10 + (numChoices - 1) * bubbleGap + bubbleSize;
@@ -1137,9 +1402,29 @@ function renderFullSheetSvg(
   }
 
   const bmY = startY + height - markerSize - cornerInset;
-  parts.push(svgRect(startX + cornerInset, bmY, markerSize, markerSize, true, 0));
-  parts.push(svgRect(startX + width - markerSize - cornerInset, bmY, markerSize, markerSize, true, 0));
-  parts.push(svgText("Do not fold, staple, or tear this answer sheet.", startX + width / 2, startY + height - 4, 2.0, "italic", "middle"));
+  parts.push(
+    svgRect(startX + cornerInset, bmY, markerSize, markerSize, true, 0),
+  );
+  parts.push(
+    svgRect(
+      startX + width - markerSize - cornerInset,
+      bmY,
+      markerSize,
+      markerSize,
+      true,
+      0,
+    ),
+  );
+  parts.push(
+    svgText(
+      "Do not fold, staple, or tear this answer sheet.",
+      startX + width / 2,
+      startY + height - 4,
+      2.0,
+      "italic",
+      "middle",
+    ),
+  );
   parts.push(svgRect(startX, startY, width, height, false, 0.25));
 
   return parts.join("");
@@ -1149,7 +1434,9 @@ function renderPageSvg(content: string): string {
   return `<div class="page-wrap"><svg class="sheet" viewBox="0 0 210 297" xmlns="http://www.w3.org/2000/svg">${content}</svg></div>`;
 }
 
-export function buildAnswerSheetHtml(template: AnswerSheetTemplateData): string {
+export function buildAnswerSheetHtml(
+  template: AnswerSheetTemplateData,
+): string {
   const pages: string[] = [];
 
   if (template.numQuestions === 20) {
