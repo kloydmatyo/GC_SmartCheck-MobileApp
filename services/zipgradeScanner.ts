@@ -455,74 +455,74 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     ];
   } else if (questionCount <= 50) {
     // ── 50-question layout ──────────────────────────────────────────────────
-    // Physical frame: 91 × 211 mm
+    // Template: 2 mini-sheets stacked on A4 (210 × 297mm), each sheet 210 × 148.5mm
+    // Each mini-sheet has 5 blocks arranged HORIZONTALLY in a single row:
+    //   Q1-10 | Q11-20 | Q21-30 | Q31-40 | Q41-50
     //
-    // CORRECTED based on detailed bubble density analysis from actual scans:
-    // The sheet has LEFT and RIGHT columns, each with 3 vertical blocks
+    // Physical measurements (per mini-sheet, relative to its own top-left):
+    //   margin = 10mm, width = 210mm → usableW = 190mm
+    //   blockWidth = 190 / 5 = 38mm per block
+    //   Block X positions (mm): 10, 48, 86, 124, 162  (left edge of each block)
+    //   Block X ends   (mm): 48, 86, 124, 162, 200
+    //   As fractions of 210mm:
+    //     Col 0 (Q1-10):  xMin=0.048, xMax=0.229
+    //     Col 1 (Q11-20): xMin=0.229, xMax=0.410
+    //     Col 2 (Q21-30): xMin=0.410, xMax=0.590
+    //     Col 3 (Q31-40): xMin=0.590, xMax=0.771
+    //     Col 4 (Q41-50): xMin=0.771, xMax=0.952
     //
-    // Actual bubble positions from density grid show:
-    // LEFT column (x30-50%):
-    //   y20-30%: 10 bubbles (Q1-Q2, 2 rows)
-    //   y30-40%: 80 bubbles (Q3-Q10, 8 rows)
-    //   y40-50%: 71 bubbles (Q11-Q17, 7 rows)
-    //   y50-60%: 67 bubbles (Q18-Q24, 7 rows)
-    //   y60-70%: 56 bubbles (Q25-Q30, 6 rows)
+    //   Answer Y start: after header (~27mm) + name row (4mm) + ID section (~55mm) ≈ 86mm
+    //   Answer Y end:   86mm + 10 rows × 5.2mm ≈ 138mm
+    //   As fractions of 148.5mm: yMin ≈ 0.55, yMax ≈ 0.95
     //
-    // Therefore regions must be:
-    // - Q1-10:  LEFT,  Y: 20%-40.5% (extends to 40.5% to capture Q10, avoid overlap)
-    // - Q11-20: LEFT,  Y: 40.5%-56% (starts at 40.5% to catch Q11, avoid artifact)
-    // - Q21-30: LEFT,  Y: 55.5%-71% (starts at 55.5% to catch Q21)
-    // - Q31-40: RIGHT, Y: 20%-40.5% (extends to 40.5% to capture Q40)
-    // - Q41-50: RIGHT, Y: 41%-56% (starts at 41%, working perfectly)
-    //
-    // Student ID is at top (Y: 0%-18%), skip it
+    // NOTE: The scanner receives a cropped image of ONE mini-sheet (half the A4 page).
     return [
-      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
+      { xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97, startQ: 1,  numQ: 10 },
+      { xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97, startQ: 11, numQ: 10 },
+      { xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97, startQ: 21, numQ: 10 },
+      { xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97, startQ: 31, numQ: 10 },
+      { xMin: 0.77, xMax: 0.97, yMin: 0.52, yMax: 0.97, startQ: 41, numQ: 10 },
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Gordon College 100q template - 10 blocks in a grid layout
+    // Template: full A4 page (210 × 297mm), drawFullSheet()
     //
-    // From bubble density analysis, the template has:
-    // - 10 blocks total (Q1-10, Q11-20, ..., Q91-100)
-    // - Arranged in 2 rows × 5 columns
-    // - Each block has 10 questions × 5 choices = 50 bubbles
-    // - Block markers (black squares) beside each block
+    // Grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
+    //   Col 0: Q1-10  (row 0), Q11-20  (row 1)
+    //   Col 1: Q21-30 (row 0), Q31-40  (row 1)
+    //   Col 2: Q41-50 (row 0), Q51-60  (row 1)
+    //   Col 3: Q61-70 (row 0), Q71-80  (row 1)
+    //   Col 4: Q81-90 (row 0), Q91-100 (row 1)
     //
-    // Bubble density shows blocks at:
-    // Row 1 (top): y10-40%
-    //   - Column 1: x20-40% (Q41-50 or Q1-10)
-    //   - Column 2: x40-60% (Q51-60 or Q11-20)
-    //   - Column 3: x60-80% (Q61-70 or Q21-30)
-    //   - Column 4: x80-100% (Q71-80 or Q31-40)
+    // Physical measurements (mm, page = 210 × 297):
+    //   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
+    //   qBlockW = 10 + 4×5.5 + 3.5 = 35.5mm
+    //   totalGridW = 5 × 35.5 = 177.5mm
+    //   colGap = (190 - 177.5) / 6 ≈ 2.08mm
+    //   bx[col] = 10 + 2.08 + col × (35.5 + 2.08) = 12.08 + col × 37.58
+    //     Col 0: bx=12.08  → xEnd=47.58  → fracs 0.058–0.227
+    //     Col 1: bx=49.67  → xEnd=85.17  → fracs 0.237–0.406
+    //     Col 2: bx=87.25  → xEnd=122.75 → fracs 0.416–0.585
+    //     Col 3: bx=124.83 → xEnd=160.33 → fracs 0.595–0.763
+    //     Col 4: bx=162.42 → xEnd=197.92 → fracs 0.774–0.942
     //
-    // Row 2 (bottom): y40-90%
-    //   - Column 1: x20-40% (Q1-10 or Q41-50)
-    //   - Column 2: x40-60% (Q11-20 or Q51-60)
-    //   - Column 3: x60-80% (Q21-30 or Q61-70)
-    //   - Column 4: x80-100% (Q31-40 or Q71-80)
-    //
-    // STRATEGY: Define all 10 blocks, let block markers refine positions
+    //   Answer Y start (currentY after header+ID): ≈ 87mm
+    //   blockVGap = 10×5.2 + 10 = 62mm
+    //   Row 0: Y 87–139mm  → fracs 0.293–0.468
+    //   Row 1: Y 149–201mm → fracs 0.502–0.677
     return [
-      // Top row (y: 10-40%)
-      { xMin: 0.18, xMax: 0.42, yMin: 0.1, yMax: 0.4, startQ: 41, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.1, yMax: 0.4, startQ: 51, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.1, yMax: 0.4, startQ: 61, numQ: 10 },
-      { xMin: 0.78, xMax: 0.98, yMin: 0.1, yMax: 0.4, startQ: 71, numQ: 10 },
-
-      // Bottom row (y: 40-90%)
-      { xMin: 0.18, xMax: 0.42, yMin: 0.4, yMax: 0.9, startQ: 1, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.4, yMax: 0.9, startQ: 11, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.4, yMax: 0.9, startQ: 21, numQ: 10 },
-      { xMin: 0.78, xMax: 0.98, yMin: 0.4, yMax: 0.9, startQ: 31, numQ: 10 },
-
-      // Additional blocks (if needed)
-      { xMin: 0.05, xMax: 0.25, yMin: 0.1, yMax: 0.4, startQ: 81, numQ: 10 },
-      { xMin: 0.05, xMax: 0.25, yMin: 0.4, yMax: 0.9, startQ: 91, numQ: 10 },
+      // Row 0 (top blocks)
+      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.50, startQ: 1,  numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.50, startQ: 21, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.50, startQ: 41, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.50, startQ: 61, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.50, startQ: 81, numQ: 10 },
+      // Row 1 (bottom blocks)
+      { xMin: 0.04, xMax: 0.24, yMin: 0.48, yMax: 0.72, startQ: 11, numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.48, yMax: 0.72, startQ: 31, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.48, yMax: 0.72, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.48, yMax: 0.72, startQ: 71, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.48, yMax: 0.72, startQ: 91, numQ: 10 },
     ];
   }
 }

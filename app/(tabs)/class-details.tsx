@@ -38,7 +38,6 @@ import { NetworkService } from "@/services/networkService";
 import { DashboardService } from "@/services/dashboardService";
 import { ImportResult } from "@/types/student";
 
-
 import { COLORS, RADIUS } from "../../constants/theme";
 import { ClassService } from "../../services/classService";
 import { StudentImportService } from "../../services/studentImportService";
@@ -1070,22 +1069,6 @@ export default function ClassDetailsScreen() {
                   color="#20BE7B"
                 />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.exportButtonSmall}
-                onPress={handleExportStudents}
-              >
-                <Ionicons name="download-outline" size={14} color="#20BE7B" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.importButton}
-                onPress={() => setShowImportModal(true)}
-              >
-                <Ionicons
-                  name="cloud-upload-outline"
-                  size={14}
-                  color="#20BE7B"
-                />
-              </TouchableOpacity>
             </View>
           </View>
           {sortedStudents.length === 0 ? (
@@ -1227,6 +1210,7 @@ export default function ClassDetailsScreen() {
                     >
                       {exam.average > 0 ? `${exam.average}%` : "—"}
                     </Text>
+                    <Text style={styles.examAverageLabel}>avg score</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -1436,14 +1420,19 @@ export default function ClassDetailsScreen() {
               style={styles.menuItem}
               onPress={() => {
                 setSettingsMenuVisible(false);
-                Toast.show({
-                  type: "info",
-                  text1: "Export",
-                  text2: "Export Results is not wired yet.",
-                });
+                handleExportStudents();
               }}
             >
-              <Text style={styles.menuItemText}>Export Results</Text>
+              <Text style={styles.menuItemText}>Export Students</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setSettingsMenuVisible(false);
+                setShowImportModal(true);
+              }}
+            >
+              <Text style={styles.menuItemText}>Import Students</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
@@ -2413,6 +2402,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
   },
+  examAverageLabel: {
+    fontSize: 10,
+    color: "#9CA3AF",
+    textAlign: "center",
+    marginTop: 1,
+  },
   scanPanel: {
     alignItems: "center",
     paddingTop: 74,
@@ -2571,7 +2566,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
   },
   menuContent: {
-    width: 172,
+    width: 210,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     paddingTop: 8,
@@ -2591,7 +2586,7 @@ const styles = StyleSheet.create({
   },
   menuTitle: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: "700",
     color: "#273142",
     marginRight: 8,
@@ -2599,16 +2594,12 @@ const styles = StyleSheet.create({
   menuCloseButton: {
     width: 28,
     height: 28,
-    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7F8FA",
-    zIndex: 2,
-    elevation: 2,
   },
   examMenuContent: {
     position: "absolute",
-    width: 164,
+    width: 210,
     backgroundColor: "#FFFFFF",
     borderRadius: 14,
     paddingVertical: 8,
@@ -2628,14 +2619,14 @@ const styles = StyleSheet.create({
   },
   menuItem: {
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
   },
   menuItemText: {
-    fontSize: 14,
+    fontSize: 16,
     color: "#273142",
   },
   menuArchiveText: {
-    color: "#F59E0B",
+    color: "#273142",
   },
   menuDeleteText: {
     color: "#EF4444",
