@@ -23,9 +23,139 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { Asset } from "expo-asset";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
+import {
+  buildAnswerSheetHtml,
+  generateAnswerSheetPDF,
+  type AnswerSheetTemplateData,
+} from "../../utils/answerSheetGenerator";
+import { WebView } from "react-native-webview";
 import Toast from "react-native-toast-message";
 import { auth } from "../../config/firebase";
 import { ExamPreviewData } from "../../types/exam";
+
+function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
+  const total = exam.totalQuestions;
+  const title = exam.metadata.title || "Untitled Exam";
+  const section = exam.metadata.section || exam.metadata.subject || "";
+  const examCode = exam.metadata.examCode || "EX-XXXXXX";
+  const version = exam.metadata.version || 1;
+  const choiceLabels = exam.choiceFormat === "A-D" ? ["A", "B", "C", "D"] : ["A", "B", "C", "D", "E"];
+  const pageCount = Math.max(1, Math.ceil(total / 100));
+
+  const renderQuestions = (start: number, end: number) => {
+    const questionsPerColumn = 10;
+    const columns = 5;
+    const rows = Math.ceil((end - start + 1) / columns);
+    const columnsHtml = Array.from({ length: columns }, (_, columnIndex) => {
+      const colStart = start + columnIndex * rows;
+      const items = Array.from({ length: rows }, (_, rowIndex) => {
+        const questionNumber = colStart + rowIndex;
+        if (questionNumber > end) return "";
+        return `
+          <div class="question-row">
+            <div class="question-number">${questionNumber}</div>
+            ${choiceLabels
+              .map(
+                () =>
+                  `<div class="bubble"></div>`,
+              )
+              .join("")}
+          </div>`;
+      });
+      return `<div class="question-column">${items.join("")}</div>`;
+    });
+    return `<div class="questions-grid">${columnsHtml.join("")}</div>`;
+  };
+
+  const pagesHtml = Array.from({ length: pageCount }, (_, pageIndex) => {
+    const start = pageIndex * 100 + 1;
+    const end = Math.min(total, start + 99);
+    return `
+      <div class="page">
+        <div class="page-header">
+          <div>
+            <div class="exam-label">GC SmartCheck</div>
+            <div class="exam-title">${title}</div>
+            <div class="exam-subtitle">${section}</div>
+          </div>
+          <div class="page-meta">
+            <div class="page-meta-item">Code: ${examCode}</div>
+            <div class="page-meta-item">Version: ${version}</div>
+            <div class="page-meta-item">Page ${pageIndex + 1} of ${pageCount}</div>
+          </div>
+        </div>
+
+        <div class="student-info">
+          <div class="student-field">
+            <span>Name</span>
+            <div class="student-line"></div>
+          </div>
+          <div class="student-field">
+            <span>Date</span>
+            <div class="student-line short"></div>
+          </div>
+          <div class="student-field student-id-block">
+            <span>Student ZipGrade ID</span>
+            <div class="student-id-grid">
+              ${Array.from({ length: 8 }, (_, pos) => `
+                <div class="student-id-column">
+                  <div class="student-id-label">${pos + 1}</div>
+                  ${Array.from({ length: 10 }, () => `<div class="student-id-bubble"></div>`).join("")}
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        </div>
+
+        <div class="questions-section">
+          <div class="questions-title">Answer Bubbles</div>
+          ${renderQuestions(start, end)}
+        </div>
+      </div>`;
+  });
+
+  return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=3,user-scalable=yes"/>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: Arial, sans-serif; background: #f2f4f2; color: #222; padding: 22px; display: flex; justify-content: center; }
+      .page { width: 794px; min-height: 1123px; margin: 0 auto 18px; background: #fff; padding: 22px; border: 1px solid #D1D5DB; border-radius: 18px; box-shadow: 0 18px 40px rgba(0,0,0,0.12); }
+      .page-header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+      .exam-label { font-size: 12px; font-weight: 700; color: #1f4f3c; margin-bottom: 3px; }
+      .exam-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 4px; }
+      .exam-subtitle { font-size: 11px; color: #5f6b65; }
+      .page-meta { display: grid; gap: 5px; text-align: right; font-size: 10px; color: #5f6b65; }
+      .page-meta-item { background: #f7faf7; border: 1px solid #dee5dc; border-radius: 10px; padding: 8px 10px; }
+      .student-info { display: grid; gap: 12px; margin-bottom: 16px; }
+      .student-field { display: flex; flex-direction: column; gap: 6px; font-size: 10px; color: #2f4237; }
+      .student-line { height: 14px; border-bottom: 1px solid #444; width: 100%; }
+      .student-line.short { width: 70%; }
+      .student-id-block { border: 1px solid #d9e2d8; border-radius: 14px; padding: 12px; background: #f8faf7; }
+      .student-id-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+      .student-id-column { display: grid; gap: 4px; align-items: center; }
+      .student-id-label { font-size: 8px; color: #4f6257; font-weight: 700; }
+      .student-id-bubble { width: 14px; height: 14px; border: 1px solid #444; border-radius: 50%; background: #fff; }
+      .questions-section { border: 1px solid #d8e0d9; border-radius: 16px; background: #f8faf7; padding: 14px; }
+      .questions-title { font-size: 12px; font-weight: 800; margin-bottom: 12px; color: #2f4237; }
+      .questions-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+      .question-column { display: grid; gap: 8px; }
+      .question-row { display: flex; align-items: center; gap: 8px; font-size: 9px; }
+      .question-number { width: 20px; text-align: right; color: #4f6257; font-weight: 700; }
+      .bubble { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #4f6257; background: #fff; }
+      @media print { body { background: #fff; padding: 0; } .page { box-shadow: none; margin: 0; border: none; page-break-after: always; } }
+    </style>
+  </head><body>${pagesHtml.join("")}</body></html>`;
+}
+
+async function createPdfFromHtml(html: string, baseName: string): Promise<string> {
+  const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+  const dest = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ""}${baseName}.pdf`;
+  await FileSystem.copyAsync({ from: uri, to: dest });
+  return dest;
+}
 
 export default function ExamPreviewScreen() {
   const router = useRouter();
@@ -33,7 +163,7 @@ export default function ExamPreviewScreen() {
   const examId = params.examId as string;
   const refreshKey = params.refresh as string; // Add refresh trigger
   const classId = params.classId as string | undefined;
-  const requestedTab = params.tab as "answerKey" | "results" | undefined;
+  const requestedTab = params.tab as "answerKey" | "preview" | "results" | undefined;
   const goToQuizzes = () =>
     classId
       ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
@@ -46,15 +176,29 @@ export default function ExamPreviewScreen() {
   const [isOffline, setIsOffline] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [headerTopPadding, setHeaderTopPadding] = useState(56);
-  const [activeTab, setActiveTab] = useState<"answerKey" | "results">(
-    requestedTab === "results" ? "results" : "answerKey",
+  const [activeTab, setActiveTab] = useState<"answerKey" | "preview" | "results">(
+    requestedTab === "results"
+      ? "results"
+      : requestedTab === "preview"
+      ? "preview"
+      : "answerKey",
   );
   const [examResults, setExamResults] = useState<UnifiedResultRow[]>([]);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [viewCodeVisible, setViewCodeVisible] = useState(false);
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
+  const [previewDownloadLoading, setPreviewDownloadLoading] = useState(false);
+  const [webviewLoading, setWebviewLoading] = useState(false);
+  const [previewLogoBase64, setPreviewLogoBase64] = useState<string | undefined>(undefined);
   const loadRequestRef = React.useRef(0);
+  const resultsRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
+
+  const previewHeight = React.useMemo(() => {
+    if (!exam) return 900;
+    const pageCount = Math.max(1, Math.ceil(exam.totalQuestions / 100));
+    return Math.min(1400, 900 + (pageCount - 1) * 260);
+  }, [exam]);
 
   const resolvedAnswers = React.useMemo(() => {
     if (!exam) return [];
@@ -82,6 +226,60 @@ export default function ExamPreviewScreen() {
       return String(match?.correctAnswer || "");
     });
   }, [exam]);
+
+  const previewTemplate = React.useMemo<AnswerSheetTemplateData | null>(() => {
+    if (!exam) return null;
+    const supportedQuestionCounts = [20, 50, 100, 150, 200] as const;
+    const totalQuestions = exam.totalQuestions;
+    if (!supportedQuestionCounts.includes(totalQuestions as any)) {
+      return null;
+    }
+
+    return {
+      name: exam.metadata.title || "Exam",
+      numQuestions: totalQuestions as 20 | 50 | 100 | 150 | 200,
+      choicesPerQuestion: exam.choiceFormat === "A-E" ? 5 : 4,
+      examCode: exam.metadata.examCode,
+      institutionName: "Gordon College",
+      logoBase64: previewLogoBase64,
+      answerKey: undefined,
+    };
+  }, [exam, previewLogoBase64]);
+
+  const previewHtml = React.useMemo(() => {
+    if (previewTemplate) {
+      return buildAnswerSheetHtml(previewTemplate);
+    }
+
+    if (!exam) return null;
+    try {
+      return buildExamPreviewPdfHtml(exam);
+    } catch (err) {
+      console.error("[ExamPreview] Failed to build preview HTML:", err);
+      return null;
+    }
+  }, [exam, previewTemplate]);
+
+  useEffect(() => {
+    const loadLogo = async () => {
+      try {
+        const asset = Asset.fromModule(
+          require("@/assets/images/gordon-college-logo.png"),
+        );
+        await asset.downloadAsync();
+        if (asset.localUri) {
+          const base64 = await FileSystem.readAsStringAsync(asset.localUri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          setPreviewLogoBase64(`data:image/png;base64,${base64}`);
+        }
+      } catch (err) {
+        console.warn("[ExamPreview] Failed to load preview logo:", err);
+      }
+    };
+
+    loadLogo();
+  }, []);
 
   useEffect(() => {
     const top =
@@ -131,8 +329,90 @@ export default function ExamPreviewScreen() {
         accent: "#16A34A",
       };
 
+  const loadExamResults = async (id: string) => {
+    const requestId = ++resultsRequestRef.current;
+    try {
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      setResultsLoading(true);
+      setExamResults([]);
+
+      const resultRows = await Promise.race([
+        ResultsService.getExamResults(id).catch((err) => {
+          console.warn("[ExamPreview] Results fetch failed:", err);
+          return [] as UnifiedResultRow[];
+        }),
+        new Promise<UnifiedResultRow[]>((resolve) =>
+          setTimeout(() => resolve([]), 8000),
+        ),
+      ]);
+
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      setExamResults(resultRows);
+    } catch (err) {
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      console.warn("[ExamPreview] Failed to load results:", err);
+      setExamResults([]);
+    } finally {
+      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      setResultsLoading(false);
+    }
+  };
+
+  const handleDownloadPreviewPdf = async () => {
+    if (previewTemplate) {
+      setPreviewDownloadLoading(true);
+      try {
+        await generateAnswerSheetPDF(previewTemplate);
+      } catch (error: any) {
+        console.error("[ExamPreview] Download PDF failed:", error);
+        Toast.show({
+          type: "error",
+          text1: "Download failed",
+          text2: error?.message ?? "Unable to generate PDF.",
+        });
+      } finally {
+        setPreviewDownloadLoading(false);
+      }
+      return;
+    }
+
+    if (!previewHtml || !exam) return;
+    setPreviewDownloadLoading(true);
+    try {
+      const localUri = await createPdfFromHtml(
+        previewHtml,
+        `exam-preview-${examId}-${Date.now()}`,
+      );
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: "application/pdf",
+          dialogTitle: "Download PDF Preview",
+          UTI: "com.adobe.pdf",
+        });
+      } else {
+        Toast.show({
+          type: "success",
+          text1: "Saved",
+          text2: `PDF saved to: ${localUri}`,
+        });
+      }
+    } catch (error: any) {
+      console.error("[ExamPreview] Download PDF failed:", error);
+      Toast.show({
+        type: "error",
+        text1: "Download failed",
+        text2: error?.message ?? "Unable to generate PDF preview.",
+      });
+    } finally {
+      setPreviewDownloadLoading(false);
+    }
+  };
+
   const loadExamData = async () => {
     const requestId = ++loadRequestRef.current;
+    let resultsStarted = false;
+
     try {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(true);
@@ -160,15 +440,8 @@ export default function ExamPreviewScreen() {
         return;
       }
 
-      // 2. Fetch Exam Data and Results (Local-First in Service)
-      const [examData, resultRows] = await Promise.all([
-        ExamApi.getExamById(examId),
-        ResultsService.getExamResults(examId).catch((err) => {
-          console.warn("Failed to catch results, falling back to empty:", err);
-          return [];
-        }),
-      ]);
-
+      // 2. Fetch Exam Data (Local-First in Service)
+      const examData = await ExamApi.getExamById(examId);
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
 
       if (!examData) {
@@ -179,7 +452,8 @@ export default function ExamPreviewScreen() {
       }
 
       setExam(examData);
-      setExamResults(resultRows);
+      resultsStarted = true;
+      loadExamResults(examId);
     } catch (err) {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setError("Failed to load exam data. Please try again.");
@@ -187,7 +461,9 @@ export default function ExamPreviewScreen() {
     } finally {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
       setLoading(false);
-      setResultsLoading(false);
+      if (!resultsStarted) {
+        setResultsLoading(false);
+      }
     }
   };
 
@@ -203,7 +479,13 @@ export default function ExamPreviewScreen() {
   };
 
   useEffect(() => {
-    setActiveTab(requestedTab === "results" ? "results" : "answerKey");
+    setActiveTab(
+      requestedTab === "results"
+        ? "results"
+        : requestedTab === "preview"
+        ? "preview"
+        : "answerKey",
+    );
   }, [requestedTab]);
 
   useFocusEffect(
@@ -229,7 +511,6 @@ export default function ExamPreviewScreen() {
       errorLog.push("[SUCCESS] Archive completed");
       console.log(errorLog.join("\n"));
 
-      await ExamApi.archiveExam(examId);
       setArchiveConfirmVisible(false);
       setSettingsMenuVisible(false);
       Toast.show({
@@ -463,9 +744,91 @@ export default function ExamPreviewScreen() {
     );
   };
 
+  const renderPreviewSheet = () => {
+    if (!exam || !previewHtml) {
+      return (
+        <View style={styles.emptyPanel}>
+          <Ionicons name="document-text-outline" size={40} color="#6B7280" />
+          <Text style={styles.emptyPanelTitle}>Preview unavailable</Text>
+          <Text style={styles.emptyPanelText}>
+            The printable PDF preview cannot be displayed right now.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <>
+        <View style={styles.previewSectionHeader}>
+          <View style={styles.previewSectionHeaderText}>
+            <Text style={styles.previewViewerTitle}>PDF Answer Sheet Preview</Text>
+          </View>
+          <View style={styles.previewViewerActions}>            
+            <TouchableOpacity
+              style={styles.previewActionButton}
+              onPress={handleDownloadPreviewPdf}
+              disabled={previewDownloadLoading}
+            >
+              {previewDownloadLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.previewActionText}>Download PDF</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.previewViewerCard}>
+          <View style={styles.previewWebviewWrapper}>
+            <WebView
+              source={{ html: previewHtml }}
+              style={[styles.previewWebview, { height: previewHeight }]}
+              javaScriptEnabled
+              domStorageEnabled
+              scalesPageToFit
+              nestedScrollEnabled
+              originWhitelist={["*"]}
+              onLoadStart={() => setWebviewLoading(true)}
+              onLoadEnd={() => setWebviewLoading(false)}
+              onError={(syntheticEvent) => {
+                const { nativeEvent } = syntheticEvent;
+                console.error("[ExamPreview] WebView error:", nativeEvent);
+                setWebviewLoading(false);
+                Toast.show({
+                  type: "error",
+                  text1: "Preview failed",
+                  text2: "Unable to render the PDF preview.",
+                });
+              }}
+            />
+            {webviewLoading ? (
+              <View style={styles.webviewLoader}>
+                <ActivityIndicator size="large" color="#16A34A" />
+                <Text style={styles.loadingText}>Loading preview…</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.previewMetricsRow}>
+          <Text style={styles.previewMetricText}>
+            {exam.totalQuestions} Questions • {exam.choiceFormat}
+          </Text>
+          <Text style={styles.previewMetricText}>
+            {Math.max(1, Math.ceil(exam.totalQuestions / 100))} page(s)
+          </Text>
+        </View>
+      </>
+    );
+  };
+
   if (loading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
+
         <ActivityIndicator size="large" color="#00a550" />
         <Text style={[styles.loadingText, { color: colors.text }]}>
           Loading exam data...
@@ -551,6 +914,23 @@ export default function ExamPreviewScreen() {
             ]}
           >
             Answer Key
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeTab === "preview" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveTab("preview")}
+        >
+          <Text
+            style={[
+              styles.tabButtonText,
+              { color: "#6B7280" },
+              activeTab === "preview" && styles.tabButtonTextActive,
+            ]}
+          >
+            Template
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -642,10 +1022,15 @@ export default function ExamPreviewScreen() {
             </View>
             {renderAnswerKeyGrid()}
           </View>
+        ) : activeTab === "preview" ? (
+          <View style={styles.section}>
+            {renderPreviewSheet()}
+          </View>
         ) : (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.title }]}>
+
                 Results
               </Text>
               {examResults.length > 0 && (
@@ -1087,6 +1472,258 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#4f6b5a",
   },
+  previewSummary: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 16,
+    flexWrap: "wrap",
+  },
+  previewInfoBlock: {
+    flex: 1,
+    minWidth: 100,
+    backgroundColor: "#F3F8F2",
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#DDE8DE",
+  },
+  previewInfoLabel: {
+    fontSize: 11,
+    color: "#6B7B69",
+    marginBottom: 4,
+  },
+  previewInfoValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1F3D2A",
+  },
+  previewGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  previewColumn: {
+    flex: 1,
+    minWidth: 120,
+    maxWidth: 180,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    padding: 10,
+  },
+  previewColumnTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1F2937",
+    marginBottom: 8,
+  },
+  previewHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  previewHeaderSpacer: {
+    width: 24,
+  },
+  previewChoiceHeader: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#F0F5F0",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 6,
+  },
+  previewChoiceHeaderText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4F6B53",
+  },
+  previewQuestionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  previewQuestionNumber: {
+    width: 24,
+    fontSize: 10,
+    color: "#6B7280",
+    fontWeight: "700",
+    marginRight: 4,
+  },
+  previewBubble: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 6,
+    backgroundColor: "#F9FAFB",
+  },
+  previewBubbleFilled: {
+    backgroundColor: "#16A34A",
+    borderColor: "#16A34A",
+  },
+  previewBubbleText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  templateWrapper: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 22,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#E8EBF0",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+  },
+  templateHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 16,
+  },
+  templateHeaderLeft: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  templateSchool: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#1F3D2A",
+    marginBottom: 4,
+  },
+  templateTitleText: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  templateMetaText: {
+    fontSize: 12,
+    color: "#4B5563",
+  },
+  templatePageLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#666F7A",
+  },
+  templateFieldRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 18,
+    gap: 12,
+  },
+  templateFieldItem: {
+    flex: 1,
+  },
+  templateFieldLabel: {
+    fontSize: 11,
+    color: "#6B7280",
+    marginBottom: 6,
+  },
+  templateFieldLine: {
+    height: 1,
+    backgroundColor: "#D1D5DB",
+    borderRadius: 1,
+  },
+  templateTopSection: {
+    flexDirection: "row",
+    gap: 14,
+    marginBottom: 18,
+    flexWrap: "wrap",
+  },
+  studentIdCard: {
+    flex: 1,
+    minWidth: 220,
+    backgroundColor: "#F8FAF8",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EDE8",
+    padding: 14,
+  },
+  shadingGuideCard: {
+    flex: 0.9,
+    minWidth: 180,
+    backgroundColor: "#F8FAF8",
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E8EDE8",
+    padding: 14,
+  },
+  sectionHeaderText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1F2937",
+    marginBottom: 10,
+  },
+  studentIdGrid: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "nowrap",
+  },
+  studentIdColumn: {
+    alignItems: "center",
+  },
+  studentIdColumnLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#6B7280",
+    marginBottom: 6,
+  },
+  studentIdBubble: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#FFFFFF",
+    marginBottom: 4,
+  },
+  shadingGuideRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  shadingGuideLabel: {
+    fontSize: 11,
+    color: "#4B5563",
+    flex: 1,
+  },
+  shadingGuideBubbles: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  shadingBubble: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#FFFFFF",
+  },
+  shadingBubbleFilled: {
+    backgroundColor: "#111827",
+    borderColor: "#111827",
+  },
+  shadingGuideNotes: {
+    marginTop: 10,
+  },
+  shadingGuideNote: {
+    fontSize: 10,
+    color: "#6B7280",
+    marginBottom: 4,
+  },
   answerKeyGrid: {
     gap: 14,
   },
@@ -1143,6 +1780,113 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#8E97A6",
     textAlign: "center",
+  },
+  previewSectionHeader: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 12,
+    marginBottom: 18,
+  },
+  previewSectionHeaderText: {
+    width: "100%",
+  },
+  previewViewerCard: {
+    width: "100%",
+    borderRadius: 24,
+    overflow: "hidden",
+    backgroundColor: "transparent",
+  },
+  previewViewerHeader: {
+    padding: 18,
+    backgroundColor: "#F8FAFC",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  previewViewerHeading: {
+    flex: 1,
+  },
+  previewViewerTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#111827",
+  },
+  previewViewerSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#6B7280",
+  },
+  previewViewerActions: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 10,
+  },
+  previewActionButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: "#16A34A",
+    borderRadius: 12,
+  },
+  previewOpenButton: {
+    backgroundColor: "#2563EB",
+  },
+  previewActionText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  previewMetricsRow: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  previewMetricText: {
+    fontSize: 13,
+    color: "#4B5563",
+  },
+  previewWebviewWrapper: {
+    minHeight: 400,
+    maxHeight: 1400,
+    backgroundColor: "#FFFFFF",
+    padding: 0,
+  },
+  previewActionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 10,
+  },
+  previewActionsText: {
+    flex: 1,
+  },
+  previewWebview: {
+    width: "100%",
+    backgroundColor: "#FFFFFF",
+  },
+  webviewLoader: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.92)",
   },
   resultsState: {
     paddingVertical: 18,
