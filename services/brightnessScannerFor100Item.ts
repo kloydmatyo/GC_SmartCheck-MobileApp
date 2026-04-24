@@ -14,6 +14,7 @@
  */
 
 import { StudentAnswer } from "../types/scanning";
+const DEBUG_LOGS = false;
 
 // ─── TYPES ───
 
@@ -66,7 +67,7 @@ function mapToPixel(
 // Returns the mean brightness of the bubble interior (0-255)
 // Lower value = darker = more likely filled
 function sampleBubbleAt(
-  grayscale: Uint8Array,
+  pixels: Uint8Array,
   imgW: number,
   imgH: number,
   cx: number,
@@ -87,7 +88,11 @@ function sampleBubbleAt(
       const px = Math.round(cx + dx);
       const py = Math.round(cy + dy);
       if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
-        sum += grayscale[py * imgW + px];
+        const idx = (py * imgW + px) * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const b = pixels[idx + 2];
+        sum += 0.299 * r + 0.587 * g + 0.114 * b;
         count++;
       }
     }
@@ -100,7 +105,11 @@ function sampleBubbleAt(
       const px = Math.round(cx + dx);
       const py = Math.round(cy + dy);
       if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
-        sum += grayscale[py * imgW + px];
+        const idx = (py * imgW + px) * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const b = pixels[idx + 2];
+        sum += 0.299 * r + 0.587 * g + 0.114 * b;
         count++;
       }
     }
@@ -182,13 +191,14 @@ function get100ItemTemplateLayout(): TemplateLayout {
 // ─── ANSWER DETECTION ───
 // Detects answers using brightness sampling
 function detectAnswersFromImage(
-  grayscale: Uint8Array,
+  pixels: Uint8Array,
   width: number,
   height: number,
   markers: Markers,
   layout: TemplateLayout,
   numQuestions: number,
-  choicesPerQuestion: number
+  choicesPerQuestion: number,
+  enableBlockAutoAlign: boolean,
 ): StudentAnswer[] {
   const answers: StudentAnswer[] = [];
   const choiceLabels = 'ABCDE'.slice(0, choicesPerQuestion).split('');
@@ -198,11 +208,65 @@ function detectAnswersFromImage(
   const bubbleRX = (layout.bubbleDiameterNX * frameW) / 2;
   const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
 
-  console.log(`[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`);
+  if (DEBUG_LOGS) {
+    console.log(`[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`);
+  }
 
   for (const block of layout.answerBlocks) {
-    const firstPx = mapToPixel(markers, block.firstBubbleNX, block.firstBubbleNY);
-    console.log(`[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`);
+    let blockDx = 0;
+    let blockDy = 0;
+
+    // Auto-align each 10-question block using local brightness contrast.
+    // This helps when each block has slight local shift despite correct corners.
+    if (enableBlockAutoAlign) {
+      const probeRows = Math.min(3, block.endQ - block.startQ + 1);
+      let bestScore = Number.NEGATIVE_INFINITY;
+
+      for (let dy = -8; dy <= 8; dy += 2) {
+        for (let dx = -8; dx <= 8; dx += 2) {
+          let score = 0;
+          for (let row = 0; row < probeRows; row++) {
+            const rowFills: number[] = [];
+            for (let c = 0; c < choicesPerQuestion; c++) {
+              const nx = block.firstBubbleNX + c * block.bubbleSpacingNX;
+              const ny = block.firstBubbleNY + row * block.rowSpacingNY;
+              const { px, py } = mapToPixel(markers, nx, ny);
+              const b = sampleBubbleAt(
+                pixels,
+                width,
+                height,
+                px + dx,
+                py + dy,
+                bubbleRX,
+                bubbleRY,
+              );
+              rowFills.push(b);
+            }
+            const darkest = Math.min(...rowFills);
+            const brightest = Math.max(...rowFills);
+            const spread = brightest - darkest;
+            score += spread + (255 - darkest) * 0.35;
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            blockDx = dx;
+            blockDy = dy;
+          }
+        }
+      }
+
+      if (DEBUG_LOGS) {
+        console.log(
+          `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ} auto-align: dx=${blockDx}, dy=${blockDy}`,
+        );
+      }
+    }
+
+    if (DEBUG_LOGS) {
+      const firstPx = mapToPixel(markers, block.firstBubbleNX, block.firstBubbleNY);
+      console.log(`[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`);
+    }
 
     for (let q = block.startQ; q <= block.endQ && q <= numQuestions; q++) {
       const rowInBlock = q - block.startQ;
@@ -213,12 +277,20 @@ function detectAnswersFromImage(
         const nx = block.firstBubbleNX + c * block.bubbleSpacingNX;
         const ny = block.firstBubbleNY + rowInBlock * block.rowSpacingNY;
         const { px, py } = mapToPixel(markers, nx, ny);
-        const brightness = sampleBubbleAt(grayscale, width, height, px, py, bubbleRX, bubbleRY);
+        const brightness = sampleBubbleAt(
+          pixels,
+          width,
+          height,
+          px + blockDx,
+          py + blockDy,
+          bubbleRX,
+          bubbleRY,
+        );
         fills.push({ choice: choiceLabels[c], brightness });
       }
 
       // Debug: Log all brightness values for first question in each block
-      if (q === block.startQ) {
+      if (DEBUG_LOGS && q === block.startQ) {
         console.log(`[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
       }
 
@@ -239,37 +311,27 @@ function detectAnswersFromImage(
       const absoluteGap = secondDark - darkest;
       const gapFromThird = thirdDark - darkest;
 
-      // Detection with balanced thresholds:
-      // Primary: darkest must be < 68% of brightest (32%+ drop) - strong fill
-      // Secondary: darkest < 88% of brightest AND strong gap from 2nd (12%+) - clear fill
-      // Tertiary: darkest < 93% of brightest AND moderate gap (7%+) AND absolute gap >= 12 - light fill
-      // Quaternary: absolute gap >= 18 AND darkest clearly darker than 3rd (gap >= 8) - handles noise
-      // Quinary: very light fills - absolute gap >= 3 AND darkest is clearly below median
-      // Final: extremely light fills - any detectable difference (catches 1-unit differences)
+      // Detection tuned for high sensitivity while keeping guard rails.
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
-      
+      const spread = brightest - darkest;
+
       if (darkRatio < 0.68) {
-        // Strong fill: darkest is 32%+ darker than brightest
         selectedChoice = sorted[0].choice;
       } else if (darkRatio < 0.88 && gapRatio > 0.12) {
-        // Clear fill: darkest is 12%+ darker AND has strong separation from 2nd
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 12) {
-        // Light fill: darkest is 7%+ darker AND has absolute gap of 12+ units
+      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 10) {
         selectedChoice = sorted[0].choice;
       } else if (absoluteGap >= 18 && gapFromThird >= 8) {
-        // Noise handling: clear separation from both 2nd and 3rd darkest
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 3 && darkest < median - 2) {
-        // Very light fill: at least 3 units darker AND clearly below median
+      } else if (absoluteGap >= 3 && darkest < median - 2 && spread >= 6) {
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 1 && darkest < brightest) {
-        // Extremely light fill: any detectable 1+ unit difference (catches very light pencil marks)
+      } else if (absoluteGap >= 1 && darkest < brightest && spread >= 5) {
+        // Preserve very light pencil fill detection, but avoid completely flat/noisy picks.
         selectedChoice = sorted[0].choice;
       }
 
       // Log first few questions per block for debugging
-      if (q <= block.startQ + 2 || q === block.endQ || !selectedChoice) {
+      if (DEBUG_LOGS && (q <= block.startQ + 2 || q === block.endQ || !selectedChoice)) {
         console.log(`[100Q-BRIGHTNESS] Q${q}: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`);
       }
 
@@ -289,7 +351,9 @@ function detectAnswersFromImage(
 // ─── MAIN EXPORT ───
 export async function scan100ItemWithBrightness(
   imageUri: string,
-  markers: Markers
+  markers: Markers,
+  choicesPerQuestion: 4 | 5 = 5,
+  enableBlockAutoAlign = false,
 ): Promise<StudentAnswer[]> {
   console.log('[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia');
   
@@ -324,32 +388,20 @@ export async function scan100ItemWithBrightness(
     
     console.log(`[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`);
     
-    // Convert RGBA to grayscale
-    const grayscale = new Uint8Array(width * height);
-    for (let i = 0; i < width * height; i++) {
-      const idx = i * 4;
-      const r = pixels[idx];
-      const g = pixels[idx + 1];
-      const b = pixels[idx + 2];
-      // Convert to grayscale using standard formula
-      grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-    }
-    
-    console.log(`[100Q-BRIGHTNESS] Converted to grayscale`);
-    
     // Detect answers using brightness sampling
     const layout = get100ItemTemplateLayout();
     const numQuestions = 100;
-    const choicesPerQuestion = 5;
+    const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
     
     const answers = detectAnswersFromImage(
-      grayscale,
+      pixels,
       width,
       height,
       markers,
       layout,
       numQuestions,
-      choicesPerQuestion
+      effectiveChoices,
+      enableBlockAutoAlign,
     );
     
     const detectedCount = answers.filter(a => a.selectedAnswer).length;

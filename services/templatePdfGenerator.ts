@@ -428,6 +428,177 @@ function generate100QuestionHTML(template: TemplateData, logoData: string): stri
   `;
 }
 
+// Generate HTML for 200-question template (2 pages, each identical layout to 100Q)
+function generate200QuestionHTML(template: TemplateData, logoData: string): string {
+  const choices = ['A', 'B', 'C', 'D', 'E'].slice(0, template.choicesPerQuestion);
+  
+  const logoHTML = logoData 
+    ? `<img src="${logoData}" style="height: 12mm; vertical-align: middle; margin-right: 3mm;" />`
+    : '';
+  
+  // Helper to generate a question block (10 questions)
+  const generateQBlock = (startQ: number, endQ: number) => {
+    return `
+      <div>
+        <!-- Header -->
+        <div style="display: flex; align-items: center; gap: 0.5mm; margin-bottom: 2mm;">
+          <div style="width: 2.5mm; height: 2.5mm; background: black;"></div>
+          <div style="width: 12mm;"></div>
+          ${choices.map(c => `<div style="width: 5mm; text-align: center; font-size: 7pt; font-weight: bold;">${c}</div>`).join('')}
+        </div>
+        <!-- Rows -->
+        ${Array(endQ - startQ + 1).fill(0).map((_, i) => {
+          const q = startQ + i;
+          const correctLetter = template.answerKey?.[q - 1]?.toUpperCase();
+          return `
+            <div style="display: flex; align-items: center; gap: 0.5mm; margin-bottom: 0.8mm;">
+              <div style="width: 2.5mm;"></div>
+              <div style="width: 12mm; text-align: right; font-size: 7pt; font-weight: bold; padding-right: 2mm;">${q}</div>
+              ${choices.map(c => `<div class="bubble-full${correctLetter === c ? ' filled' : ''}"></div>`).join('')}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  };
+
+  // Generate a single page (100 questions) with given offset
+  const generatePage = (pageNumber: 1 | 2) => {
+    const offset = (pageNumber - 1) * 100;
+    
+    return `
+      <div class="page">
+        <!-- Corner markers -->
+        <div class="corner-marker" style="top: 3mm; left: 3mm;"></div>
+        <div class="corner-marker" style="top: 3mm; right: 3mm;"></div>
+        <div class="corner-marker" style="bottom: 3mm; left: 3mm;"></div>
+        <div class="corner-marker" style="bottom: 3mm; right: 3mm;"></div>
+        
+        <!-- Header -->
+        <div style="text-align: center; margin-bottom: 5mm;">
+          ${logoHTML}
+          <span style="font-size: 14pt; font-weight: bold;">Gordon College</span>
+        </div>
+        
+        ${template.examCode ? `<div style="text-align: center; font-size: 8pt; color: #666; margin-bottom: 5mm;">Exam Code: ${template.examCode}</div>` : ''}
+        
+        <!-- Name/Date/Course Code -->
+        <div style="display: flex; gap: 5mm; margin-bottom: 5mm; font-size: 9pt;">
+          <div style="flex: 3;">
+            <span style="font-weight: bold;">Name:</span>
+            <div style="border-bottom: 0.5mm solid black; margin-top: 1mm; margin-left: 5mm;"></div>
+          </div>
+          <div style="flex: 2;">
+            <span style="font-weight: bold;">Date:</span>
+            <div style="border-bottom: 0.5mm solid black; margin-top: 1mm; margin-left: 5mm;"></div>
+          </div>
+          <div style="flex: 2;">
+            <span style="font-weight: bold;">Course Code:</span>
+            <div style="border-bottom: 0.5mm solid black; margin-top: 1mm; margin-left: 5mm;"></div>
+          </div>
+        </div>
+        
+        <!-- Top section: ID + Shading Guide -->
+        <div style="display: flex; gap: 4mm; margin-bottom: 4mm; align-items: flex-start;">
+          <!-- Student ID -->
+          <div class="id-section">
+            <div style="font-size: 8pt; font-weight: bold; margin-bottom: 3mm;">Student ZipGrade ID</div>
+            <div style="display: flex; gap: 0.5mm; margin-bottom: 3mm;">
+              ${Array(10).fill(0).map(() => '<div class="id-box"></div>').join('')}
+            </div>
+            <div style="display: flex; gap: 0.3mm;">
+              <div style="display: flex; flex-direction: column;">
+                ${[0,1,2,3,4,5,6,7,8,9].map(n => `<div style="height: 4.8mm; font-size: 7pt; font-weight: bold; display: flex; align-items: center; width: 8mm; justify-content: flex-end; padding-right: 1mm;">${n}</div>`).join('')}
+              </div>
+              ${Array(10).fill(0).map(() => `
+                <div style="display: flex; flex-direction: column;">
+                  ${[0,1,2,3,4,5,6,7,8,9].map(() => '<div class="bubble-id"></div>').join('')}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <!-- Shading Guide -->
+          <div style="margin-top: 10mm; margin-left: auto;">
+            <div style="font-size: 8pt; font-weight: bold; margin-bottom: 3mm;">SHADING GUIDE</div>
+            <div style="font-size: 7pt;">
+              <div style="display: flex; align-items: center; gap: 2mm; margin-bottom: 2mm;">
+                <span style="width: 14mm;">Correct</span>
+                ${choices.map((_, i) => `<div style="width: 3.5mm; height: 3.5mm; border: 0.4mm solid #000; border-radius: 50; ${i === 0 ? 'background: black;' : 'background: white;'}"></div>`).join('')}
+              </div>
+              <div style="display: flex; align-items: center; gap: 2mm; margin-bottom: 2mm;">
+                <span style="width: 14mm;">Wrong</span>
+                ${choices.map((_, i) => `<div style="width: 3.5mm; height: 3.5mm; border: 0.4mm solid #000; border-radius: 50; ${i === 1 ? 'background: black; position: relative;' : 'background: white;'}">${i === 1 ? '<div style="position: absolute; top: -0.5mm; right: -0.5mm; width: 2mm; height: 2mm; border-radius: 50; border: 0.3mm solid #000; background: white;"></div>' : ''}</div>`).join('')}
+              </div>
+              <div style="display: flex; align-items: center; gap: 2mm; margin-bottom: 2mm;">
+                <span style="width: 14mm;">Wrong</span>
+                ${choices.map((_, i) => `<div style="width: 3.5mm; height: 3.5mm; border: 0.4mm solid #000; border-radius: 50; ${i === 0 ? 'background: black;' : i === 2 ? 'background: black;' : 'background: white;'}"></div>`).join('')}
+              </div>
+              <div style="display: flex; align-items: center; gap: 2mm; margin-bottom: 3mm;">
+                <span style="width: 14mm;">Erase OK</span>
+                ${choices.map((_, i) => `<div style="width: 3.5mm; height: 3.5mm; border: 0.4mm solid #000; border-radius: 50; ${i === 3 ? 'background: black;' : 'background: white;'}"></div>`).join('')}
+              </div>
+            </div>
+            <div style="font-size: 6pt; color: #555; line-height: 1.6;">
+              • Use No. 2 pencil or dark pen.<br/>
+              • Fill bubble completely.<br/>
+              • Erase stray marks fully.
+            </div>
+          </div>
+        </div>
+        
+        <!-- Answer blocks - Top row: 5 columns -->
+        <div style="display: flex; gap: 3mm; margin-bottom: 2mm;">
+          ${generateQBlock(offset + 1, offset + 10)}
+          ${generateQBlock(offset + 21, offset + 30)}
+          ${generateQBlock(offset + 41, offset + 50)}
+          ${generateQBlock(offset + 61, offset + 70)}
+          ${generateQBlock(offset + 81, offset + 90)}
+        </div>
+        <!-- Answer blocks - Bottom row: 5 columns -->
+        <div style="display: flex; gap: 3mm;">
+          ${generateQBlock(offset + 11, offset + 20)}
+          ${generateQBlock(offset + 31, offset + 40)}
+          ${generateQBlock(offset + 51, offset + 60)}
+          ${generateQBlock(offset + 71, offset + 80)}
+          ${generateQBlock(offset + 91, offset + 100)}
+        </div>
+        
+        <!-- Footer -->
+        <div style="text-align: center; font-size: 6pt; font-style: italic; color: #666; margin-top: 5mm;">
+          Do not fold, staple, or tear this answer sheet.
+        </div>
+      </div>
+    `;
+  };
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page { size: A4; margin: 10mm; }
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; }
+          .page { position: relative; width: 190mm; height: 277mm; page-break-after: always; }
+          .page:last-child { page-break-after: auto; }
+          .corner-marker { position: absolute; width: 7mm; height: 7mm; background: black; }
+          .id-section { border: 0.4mm solid black; padding: 3mm; display: inline-block; }
+          .id-box { width: 4.5mm; height: 5mm; border: 0.3mm solid black; }
+          .bubble-id { width: 3.5mm; height: 3.5mm; border: 0.3mm solid #333; border-radius: 50%; background: white; margin: 0.3mm; }
+          .bubble-full { width: 3.8mm; height: 3.8mm; border: 0.4mm solid #000; border-radius: 50%; background: white; }
+          .bubble-full.filled { background: black; }
+        </style>
+      </head>
+      <body>
+        ${generatePage(1)}
+        ${generatePage(2)}
+      </body>
+    </html>
+  `;
+}
+
 // Main function to generate PDF
 export async function generateTemplatePDF(template: TemplateData): Promise<string> {
   console.log('[PDF-GEN] Starting PDF generation...');
@@ -443,6 +614,8 @@ export async function generateTemplatePDF(template: TemplateData): Promise<strin
     html = generate50QuestionHTML(template, logoData);
   } else if (template.numQuestions === 100) {
     html = generate100QuestionHTML(template, logoData);
+  } else if (template.numQuestions === 200) {
+    html = generate200QuestionHTML(template, logoData);
   } else {
     throw new Error(`Unsupported question count: ${template.numQuestions}`);
   }

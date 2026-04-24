@@ -14,6 +14,7 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
+  choicesPerQuestion?: 4 | 5; // Expected answer choices for this exam
   scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
@@ -21,6 +22,7 @@ interface CameraScannerProps {
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
+  choicesPerQuestion = 5,
   scanStage,
   onScanComplete,
   onCancel,
@@ -184,6 +186,21 @@ export default function CameraScanner({
         return;
       }
 
+      // Enforce portrait-only captures for 200-item sheets.
+      // The 2-page 200-item template mapping expects portrait orientation.
+      if (
+        questionCount === 200 &&
+        typeof photo.width === "number" &&
+        typeof photo.height === "number" &&
+        photo.width > photo.height
+      ) {
+        Alert.alert(
+          "Portrait Mode Required",
+          "Please hold your phone in portrait orientation when scanning 200-item exams, then retake the photo.",
+        );
+        return;
+      }
+
       // Validate Zipgrade sheet quality first
       const qualityCheck = await ZipgradeScanner.validateZipgradeSheet(
         photo.uri,
@@ -207,15 +224,20 @@ export default function CameraScanner({
         questionCount,
         templateName,
         scanStage?.current as 1 | 2 | undefined,
+        choicesPerQuestion,
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");
       onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Failed to process Zipgrade answer sheet. Please try again.";
       Alert.alert(
         "Error",
-        "Failed to process Zipgrade answer sheet. Please try again.",
+        message,
       );
     } finally {
       setIsProcessing(false);
@@ -354,6 +376,13 @@ export default function CameraScanner({
                   ? "Scan Page 1 (Q1–100)"
                   : "Scan Page 2 (Q101–200)"}
               </Text>
+              <View style={styles.checklistCard}>
+                <Text style={styles.checklistTitle}>200-item checklist</Text>
+                <Text style={styles.checklistItem}>- Use portrait orientation only</Text>
+                <Text style={styles.checklistItem}>- Keep all 4 corner boxes visible</Text>
+                <Text style={styles.checklistItem}>- Fill frame with sheet inside green guide</Text>
+                <Text style={styles.checklistItem}>- Avoid glare/shadows on bubbles</Text>
+              </View>
             </View>
           )}
 
@@ -532,5 +561,28 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+  checklistCard: {
+    marginTop: 10,
+    backgroundColor: "rgba(10, 20, 16, 0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(0, 255, 127, 0.5)",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    width: 280,
+  },
+  checklistTitle: {
+    color: "#C8FFE4",
+    fontSize: 12,
+    fontWeight: "700" as const,
+    marginBottom: 4,
+    textAlign: "left" as const,
+  },
+  checklistItem: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: "left" as const,
   },
 });
