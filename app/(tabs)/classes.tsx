@@ -6,21 +6,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  FlatList,
-  GestureResponderEvent,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  UIManager,
-  View,
+    ActivityIndicator,
+    Animated,
+    Dimensions,
+    FlatList,
+    GestureResponderEvent,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    UIManager,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { COLORS, RADIUS } from "../../constants/theme";
@@ -491,9 +491,6 @@ export default function ClassesScreen() {
               )}
             </View>
             <View style={styles.classHeaderRight}>
-              <Text style={[styles.classRate, { color: accentColor }]}>
-                {avgScore} %
-              </Text>
               <TouchableOpacity
                 style={styles.cardMenuButton}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -525,7 +522,7 @@ export default function ClassesScreen() {
             )}
           </View>
 
-          <AnimatedFillBar progress={avgScore / 100} color={accentColor} />
+          <View style={styles.classFooterBar} />
         </View>
       </TouchableOpacity>
     );
@@ -1189,6 +1186,11 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     backgroundColor: "#E6ECE8",
     overflow: "hidden",
+  },
+  classFooterBar: {
+    height: 4,
+    backgroundColor: "#20BE7B",
+    borderRadius: 0,
   },
   scoreBar: {
     height: "100%",
