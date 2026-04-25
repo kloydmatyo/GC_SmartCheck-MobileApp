@@ -364,7 +364,6 @@ export class ExamService {
       if (!isOnline) {
         // Queue for sync if it's a Firestore ID but we're offline
         console.log("[ExamService] Offline. Queueing answer key update...");
-        const stagingRealm = await RealmService.getStagingRealm();
         // We'll reuse OfflineQuiz staging if possible, or we need a new PendingUpdate schema
         // For now, let's just use the existing OfflineStorageService for updates if it's not a staging quiz
         await OfflineStorageService.queueUpdate(examId, "update", {
@@ -769,7 +768,15 @@ export class ExamService {
       // 2. Fetch from Firebase (Always if online, or fallback if cache miss)
       try {
         const examRef = doc(db, "exams", examId);
-        const examSnap = await getDoc(examRef);
+        const timeoutMs = 3000;
+        const timeoutError = new Error("Network request timed out");
+
+        const examSnap = (await Promise.race([
+          getDoc(examRef),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ])) as any;
 
         if (!examSnap.exists()) {
           console.log("[ExamService] Exam document not found in Firestore");
@@ -797,7 +804,12 @@ export class ExamService {
           collection(db, "answerKeys"),
           where("examId", "==", examId),
         );
-        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+        const answerKeysSnapshot = (await Promise.race([
+          getDocs(answerKeysQuery),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ])) as any;
 
         if (!answerKeysSnapshot.empty) {
           let selected = answerKeysSnapshot.docs[0];
@@ -805,7 +817,7 @@ export class ExamService {
             Number(selected.data().updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
             Number(selected.data().version ?? 1);
 
-          answerKeysSnapshot.docs.slice(1).forEach((candidate) => {
+          answerKeysSnapshot.docs.slice(1).forEach((candidate: any) => {
             const data = candidate.data();
             const score =
               Number(data.updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
@@ -1182,7 +1194,14 @@ export class ExamService {
         return false;
       }
 
-      const examSnap = await getDoc(doc(db, "exams", examId));
+      const timeoutMs = 3000;
+      const timeoutError = new Error("Network request timed out");
+      const examSnap = (await Promise.race([
+        getDoc(doc(db, "exams", examId)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(timeoutError), timeoutMs),
+        ),
+      ])) as any;
       if (!examSnap.exists()) return false;
 
       const examData = examSnap.data();
@@ -1260,8 +1279,31 @@ export class ExamService {
         throw new Error("User not authenticated");
       }
 
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (!isOnline) {
+        throw new Error("Network error: Device is offline.");
+      }
+
+      // Handle staging exams (offline created)
+      if (examId.startsWith("staging_")) {
+        console.log("[ExamService] Offline edit for staging exam:", examId);
+        // Throw a network error to trigger the offline fallback catch block immediately
+        throw new Error("Network error: Cannot update staging exam online.");
+      }
+
       const examRef = doc(db, "exams", examId);
-      const examSnap = await getDoc(examRef);
+      // Add a 5 second timeout to prevent hanging if Firebase is stuck waiting for network
+      const timeoutMs = 5000;
+      const timeoutError = new Error("Network error: Request timed out");
+
+      const examSnap = (await Promise.race([
+        getDoc(examRef),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(timeoutError), timeoutMs),
+        ),
+      ])) as any;
 
       if (!examSnap.exists()) {
         throw new Error("Exam not found");
@@ -1288,11 +1330,16 @@ export class ExamService {
       const newVersion = currentVersion + 1;
 
       try {
-        await updateDoc(examRef, {
-          ...updateData,
-          version: newVersion,
-          updatedAt: serverTimestamp(),
-        });
+        await Promise.race([
+          updateDoc(examRef, {
+            ...updateData,
+            version: newVersion,
+            updatedAt: serverTimestamp(),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ]);
 
         const cacheRealm = await RealmService.getCacheRealm();
         const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
@@ -1339,13 +1386,11 @@ export class ExamService {
         throw updateError;
       }
     } catch (error: any) {
-      console.error("Error updating exam:", error);
-
       // Re-throw with more context
       if (this.isNetworkRelatedError(error)) {
         console.warn(
           "[ExamService] Network failed before update completed. Falling back to offline queue.",
-          error,
+          error.message || error,
         );
         await OfflineStorageService.queueUpdate(
           examId,
@@ -1544,15 +1589,17 @@ export class ExamService {
             Realm.UpdateMode.Modified,
           );
         });
-        console.log("[ExamService] ✅ Cache updated");
+        console.log("[ExamService] Cache updated");
         console.log(
-          `[ExamService] ✅ Online update complete (version: ${newVersion})\n`,
+          `[ExamService] Online update complete (version: ${newVersion})\n`,
         );
 
         return newVersion;
       } catch (updateError: any) {
-        console.error("\n❌ [ExamService] Firebase update failed:");
-        console.error("Error:", updateError);
+        if (!this.isNetworkRelatedError(updateError)) {
+          console.error("\n[ExamService] Firebase update failed:");
+          console.error("Error:", updateError);
+        }
 
         // Handle network errors specifically
         if (this.isNetworkRelatedError(updateError)) {
@@ -1589,17 +1636,13 @@ export class ExamService {
             });
           }
 
-          console.log(
-            "[ExamService] ✅ Fallback to offline queue successful\n",
-          );
+          console.log("[ExamService] Fallback to offline queue successful\n");
           return (existingCachedExam?.version || 1) + 1;
         }
         throw updateError;
       }
     } catch (error: any) {
-      console.error(
-        "\n❌ [ExamService] updateExam FAILED - FULL ERROR DETAILS:",
-      );
+      console.error("\n[ExamService] updateExam FAILED - FULL ERROR DETAILS:");
       console.error("════════════════════════════════════════════════════════");
       console.error("Exam ID:", examId);
       console.error("Update Data:", updateData);
