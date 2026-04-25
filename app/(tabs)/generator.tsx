@@ -5,6 +5,7 @@ import { useFocusEffect } from "expo-router";
 import React, { useState } from "react";
 import {
   Platform,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -18,6 +19,7 @@ import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 export default function GeneratorTab() {
   const router = useRouter();
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const topInset =
     Platform.OS === "android" ? (StatusBar.currentHeight || 0) : 0;
   const handleClose = () => {
@@ -42,6 +44,17 @@ export default function GeneratorTab() {
       })();
     }, []),
   );
+
+  const handleRefresh = React.useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing]);
 
   const colors = darkModeEnabled
     ? {
@@ -71,6 +84,14 @@ export default function GeneratorTab() {
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
       >
         <View style={[styles.topBar, { paddingTop: 8 + topInset }]}>
           <View />

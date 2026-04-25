@@ -946,9 +946,11 @@ export default function ScannerScreen({
               Please type the correct Student ID below to continue saving.
             </Text>
 
+            <Text style={styles.manualIdExampleText}>Example: 202300109</Text>
             <TextInput
               style={styles.manualIdInput}
               placeholder="e.g. 202300109"
+              placeholderTextColor="#8B929C"
               value={manualIdModal.input}
               onChangeText={(text) =>
                 setManualIdModal({ ...manualIdModal, input: text })
@@ -1228,9 +1230,9 @@ const styles = StyleSheet.create({
   },
   manualIdInput: {
     width: "100%",
-    backgroundColor: "#f5f5f5",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: "#CBD5E1",
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -1240,6 +1242,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 24,
     letterSpacing: 2,
+  },
+  manualIdExampleText: {
+    width: "100%",
+    fontSize: 13,
+    color: "#4B5563",
+    fontWeight: "600",
+    marginBottom: 8,
+    textAlign: "left",
   },
   modalOverlay: {
     flex: 1,
