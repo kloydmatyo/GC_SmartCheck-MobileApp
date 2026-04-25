@@ -3,39 +3,39 @@ import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { ExamService as ExamApi } from "@/services/examService";
 import { NetworkService } from "@/services/networkService";
 import {
-    ResultsService,
-    type UnifiedResultRow,
+  ResultsService,
+  type UnifiedResultRow,
 } from "@/services/resultsService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
-import {
-    ActivityIndicator,
-    Alert,
-    Clipboard,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Clipboard,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import Toast from "react-native-toast-message";
+import { WebView } from "react-native-webview";
+import { auth } from "../../config/firebase";
+import { ExamPreviewData } from "../../types/exam";
 import {
   buildAnswerSheetHtml,
   generateAnswerSheetPDF,
   type AnswerSheetTemplateData,
 } from "../../utils/answerSheetGenerator";
-import { WebView } from "react-native-webview";
-import Toast from "react-native-toast-message";
-import { auth } from "../../config/firebase";
-import { ExamPreviewData } from "../../types/exam";
 
 function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
   const total = exam.totalQuestions;
@@ -43,7 +43,10 @@ function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
   const section = exam.metadata.section || exam.metadata.subject || "";
   const examCode = exam.metadata.examCode || "EX-XXXXXX";
   const version = exam.metadata.version || 1;
-  const choiceLabels = exam.choiceFormat === "A-D" ? ["A", "B", "C", "D"] : ["A", "B", "C", "D", "E"];
+  const choiceLabels =
+    exam.choiceFormat === "A-D"
+      ? ["A", "B", "C", "D"]
+      : ["A", "B", "C", "D", "E"];
   const pageCount = Math.max(1, Math.ceil(total / 100));
 
   const renderQuestions = (start: number, end: number) => {
@@ -58,12 +61,7 @@ function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
         return `
           <div class="question-row">
             <div class="question-number">${questionNumber}</div>
-            ${choiceLabels
-              .map(
-                () =>
-                  `<div class="bubble"></div>`,
-              )
-              .join("")}
+            ${choiceLabels.map(() => `<div class="bubble"></div>`).join("")}
           </div>`;
       });
       return `<div class="question-column">${items.join("")}</div>`;
@@ -101,12 +99,15 @@ function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
           <div class="student-field student-id-block">
             <span>Student ZipGrade ID</span>
             <div class="student-id-grid">
-              ${Array.from({ length: 8 }, (_, pos) => `
+              ${Array.from(
+                { length: 8 },
+                (_, pos) => `
                 <div class="student-id-column">
                   <div class="student-id-label">${pos + 1}</div>
                   ${Array.from({ length: 10 }, () => `<div class="student-id-bubble"></div>`).join("")}
                 </div>
-              `).join("")}
+              `,
+              ).join("")}
             </div>
           </div>
         </div>
@@ -150,8 +151,15 @@ function buildExamPreviewPdfHtml(exam: ExamPreviewData): string {
   </head><body>${pagesHtml.join("")}</body></html>`;
 }
 
-async function createPdfFromHtml(html: string, baseName: string): Promise<string> {
-  const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+async function createPdfFromHtml(
+  html: string,
+  baseName: string,
+): Promise<string> {
+  const { uri } = await Print.printToFileAsync({
+    html,
+    width: 595,
+    height: 842,
+  });
   const dest = `${FileSystem.documentDirectory ?? FileSystem.cacheDirectory ?? ""}${baseName}.pdf`;
   await FileSystem.copyAsync({ from: uri, to: dest });
   return dest;
@@ -163,7 +171,11 @@ export default function ExamPreviewScreen() {
   const examId = params.examId as string;
   const refreshKey = params.refresh as string; // Add refresh trigger
   const classId = params.classId as string | undefined;
-  const requestedTab = params.tab as "answerKey" | "preview" | "results" | undefined;
+  const requestedTab = params.tab as
+    | "answerKey"
+    | "preview"
+    | "results"
+    | undefined;
   const goToQuizzes = () =>
     classId
       ? router.replace(`/(tabs)/class-details?classId=${classId}&tab=exams`)
@@ -176,12 +188,14 @@ export default function ExamPreviewScreen() {
   const [isOffline, setIsOffline] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [headerTopPadding, setHeaderTopPadding] = useState(56);
-  const [activeTab, setActiveTab] = useState<"answerKey" | "preview" | "results">(
+  const [activeTab, setActiveTab] = useState<
+    "answerKey" | "preview" | "results"
+  >(
     requestedTab === "results"
       ? "results"
       : requestedTab === "preview"
-      ? "preview"
-      : "answerKey",
+        ? "preview"
+        : "answerKey",
   );
   const [examResults, setExamResults] = useState<UnifiedResultRow[]>([]);
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
@@ -189,7 +203,9 @@ export default function ExamPreviewScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [previewDownloadLoading, setPreviewDownloadLoading] = useState(false);
   const [webviewLoading, setWebviewLoading] = useState(false);
-  const [previewLogoBase64, setPreviewLogoBase64] = useState<string | undefined>(undefined);
+  const [previewLogoBase64, setPreviewLogoBase64] = useState<
+    string | undefined
+  >(undefined);
   const loadRequestRef = React.useRef(0);
   const resultsRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
@@ -201,7 +217,7 @@ export default function ExamPreviewScreen() {
   }, [exam]);
 
   const resolvedAnswers = React.useMemo(() => {
-    if (!exam) return [];
+    if (!exam || !exam.answerKey) return [];
 
     const directAnswers = Array.isArray(exam.answerKey.answers)
       ? exam.answerKey.answers.map((answer) => String(answer || ""))
@@ -332,7 +348,8 @@ export default function ExamPreviewScreen() {
   const loadExamResults = async (id: string) => {
     const requestId = ++resultsRequestRef.current;
     try {
-      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      if (!mountedRef.current || requestId !== resultsRequestRef.current)
+        return;
       setResultsLoading(true);
       setExamResults([]);
 
@@ -346,14 +363,17 @@ export default function ExamPreviewScreen() {
         ),
       ]);
 
-      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      if (!mountedRef.current || requestId !== resultsRequestRef.current)
+        return;
       setExamResults(resultRows);
     } catch (err) {
-      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      if (!mountedRef.current || requestId !== resultsRequestRef.current)
+        return;
       console.warn("[ExamPreview] Failed to load results:", err);
       setExamResults([]);
     } finally {
-      if (!mountedRef.current || requestId !== resultsRequestRef.current) return;
+      if (!mountedRef.current || requestId !== resultsRequestRef.current)
+        return;
       setResultsLoading(false);
     }
   };
@@ -483,8 +503,8 @@ export default function ExamPreviewScreen() {
       requestedTab === "results"
         ? "results"
         : requestedTab === "preview"
-        ? "preview"
-        : "answerKey",
+          ? "preview"
+          : "answerKey",
     );
   }, [requestedTab]);
 
@@ -520,8 +540,10 @@ export default function ExamPreviewScreen() {
       });
       goToQuizzes();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorStack = error instanceof Error ? error.stack : "No stack trace";
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const errorStack =
+        error instanceof Error ? error.stack : "No stack trace";
 
       const fullErrorReport = [
         "═══════════════════════════════════════════",
@@ -761,9 +783,11 @@ export default function ExamPreviewScreen() {
       <>
         <View style={styles.previewSectionHeader}>
           <View style={styles.previewSectionHeaderText}>
-            <Text style={styles.previewViewerTitle}>PDF Answer Sheet Preview</Text>
+            <Text style={styles.previewViewerTitle}>
+              PDF Answer Sheet Preview
+            </Text>
           </View>
-          <View style={styles.previewViewerActions}>            
+          <View style={styles.previewViewerActions}>
             <TouchableOpacity
               style={styles.previewActionButton}
               onPress={handleDownloadPreviewPdf}
@@ -828,7 +852,6 @@ export default function ExamPreviewScreen() {
   if (loading) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
-
         <ActivityIndicator size="large" color="#00a550" />
         <Text style={[styles.loadingText, { color: colors.text }]}>
           Loading exam data...
@@ -1023,14 +1046,11 @@ export default function ExamPreviewScreen() {
             {renderAnswerKeyGrid()}
           </View>
         ) : activeTab === "preview" ? (
-          <View style={styles.section}>
-            {renderPreviewSheet()}
-          </View>
+          <View style={styles.section}>{renderPreviewSheet()}</View>
         ) : (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.title }]}>
-
                 Results
               </Text>
               {examResults.length > 0 && (

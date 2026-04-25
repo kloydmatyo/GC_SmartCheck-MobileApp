@@ -394,6 +394,8 @@ export default function CreateQuizScreen() {
           updatedAt: serverTimestamp(),
           locked: false,
           version: 1,
+          // answers array — required by the web app's AnswerKeyService
+          answers: Array.from({ length: numQuestions }, () => ""),
           questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
             questionNumber: i + 1,
             correctAnswer: "",

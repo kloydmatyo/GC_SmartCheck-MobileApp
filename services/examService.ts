@@ -635,66 +635,87 @@ export class ExamService {
           : null;
         const totalQuestions = cachedQuiz.questionCount || 20;
 
-        const extractedAnswers: string[] = [];
-        if (answerKeyData?.questionSettings) {
-          for (let i = 0; i < totalQuestions; i++) {
-            const setting = answerKeyData.questionSettings.find(
-              (qs: any) => qs.questionNumber === i + 1,
-            );
-            extractedAnswers.push(setting?.correctAnswer || "");
-          }
-        } else if (
-          answerKeyData?.answers &&
-          Array.isArray(answerKeyData.answers)
-        ) {
-          for (let i = 0; i < totalQuestions; i++) {
-            extractedAnswers.push(answerKeyData.answers[i] || "");
-          }
-        } else {
-          for (let i = 0; i < totalQuestions; i++) {
-            extractedAnswers.push("");
-          }
-        }
+        // If the cache has no answer key, fall through to Firestore so we
+        // pick up an answer key that was saved from the web app after the
+        // cache was last populated.
+        const hasAnswers =
+          answerKeyData &&
+          (
+            (Array.isArray(answerKeyData.answers) && answerKeyData.answers.some((a: string) => a)) ||
+            (Array.isArray(answerKeyData.questionSettings) && answerKeyData.questionSettings.some((q: any) => q.correctAnswer))
+          );
 
-        return {
-          metadata: {
-            examId: cachedQuiz.id,
-            title: cachedQuiz.title,
-            subject: cachedQuiz.subject,
-            section: "",
-            date: cachedQuiz.createdAt.toISOString(),
-            examCode: cachedQuiz.examCode || "N/A",
-            status: cachedQuiz.status as any,
-            structureLocked: Boolean(cachedQuiz.structureLocked),
-            createdAt: cachedQuiz.createdAt,
-            updatedAt: cachedQuiz.updatedAt,
-            createdBy: cachedQuiz.createdBy,
-            version: cachedQuiz.version || 1,
-          },
-          answerKey: answerKeyData
-            ? {
-                id: answerKeyData.id || "",
-                examId: examId,
-                answers: extractedAnswers,
-                questionSettings: answerKeyData.questionSettings || [],
-                locked: answerKeyData.locked || false,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                createdBy: "",
-                version: 1,
-              }
-            : (null as any),
-          templateLayout: {
-            name: "Standard Template",
+        const { NetworkService } = await import("./networkService");
+        const isOnline = await NetworkService.isOnline();
+
+        if (!hasAnswers && isOnline) {
+          console.log("[ExamService] Cache has no answer key — falling through to Firestore for live fetch.");
+          // Don't return here; fall through to the Firestore path below.
+        } else {
+          const extractedAnswers: string[] = [];
+          // Prefer the answers array (web app format) over questionSettings
+          // (mobile format) so web-edited keys are always reflected correctly.
+          if (
+            answerKeyData?.answers &&
+            Array.isArray(answerKeyData.answers) &&
+            answerKeyData.answers.some((a: string) => a)
+          ) {
+            for (let i = 0; i < totalQuestions; i++) {
+              extractedAnswers.push(answerKeyData.answers[i] || "");
+            }
+          } else if (answerKeyData?.questionSettings && Array.isArray(answerKeyData.questionSettings)) {
+            for (let i = 0; i < totalQuestions; i++) {
+              const setting = answerKeyData.questionSettings.find(
+                (qs: any) => qs.questionNumber === i + 1,
+              );
+              extractedAnswers.push(setting?.correctAnswer || "");
+            }
+          } else {
+            for (let i = 0; i < totalQuestions; i++) {
+              extractedAnswers.push("");
+            }
+          }
+
+          return {
+            metadata: {
+              examId: cachedQuiz.id,
+              title: cachedQuiz.title,
+              subject: cachedQuiz.subject,
+              section: "",
+              date: cachedQuiz.createdAt.toISOString(),
+              examCode: cachedQuiz.examCode || "N/A",
+              status: cachedQuiz.status as any,
+              structureLocked: Boolean(cachedQuiz.structureLocked),
+              createdAt: cachedQuiz.createdAt,
+              updatedAt: cachedQuiz.updatedAt,
+              createdBy: cachedQuiz.createdBy,
+              version: cachedQuiz.version || 1,
+            },
+            answerKey: answerKeyData
+              ? {
+                  id: answerKeyData.id || "",
+                  examId: examId,
+                  answers: extractedAnswers,
+                  questionSettings: answerKeyData.questionSettings || [],
+                  locked: answerKeyData.locked || false,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                  createdBy: "",
+                  version: 1,
+                }
+              : null,
+            templateLayout: {
+              name: "Standard Template",
+              totalQuestions: totalQuestions,
+              choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+              columns: 2,
+              questionsPerColumn: Math.ceil(totalQuestions / 2),
+            },
             totalQuestions: totalQuestions,
             choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
-            columns: 2,
-            questionsPerColumn: Math.ceil(totalQuestions / 2),
-          },
-          totalQuestions: totalQuestions,
-          choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
-          lastModified: cachedQuiz.updatedAt,
-        };
+            lastModified: cachedQuiz.updatedAt,
+          };
+        }
       }
 
       // 1.5. Check OfflineStorageService (Legacy/Persistence Fallback) - FAST
@@ -889,19 +910,42 @@ export class ExamService {
 
         // Determine choice format
         const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
-        const totalQuestions =
+        // Use num_items from the exam doc as the authoritative question count.
+        // Answer key arrays may be shorter if not all answers are filled in yet.
+        const totalQuestions = examData.num_items ||
           answerKeyData?.questionSettings?.length ||
           answerKeyData?.answers?.length ||
-          examData.num_items ||
           20;
 
-        // Extract answers - support both mobile and web formats
+        // Extract answers - prefer the answers array (web app format) over
+        // questionSettings so web-edited keys are always reflected correctly.
         const extractedAnswers: string[] = [];
 
-        if (answerKeyData?.questionSettings) {
+        if (
+          answerKeyData?.answers &&
+          Array.isArray(answerKeyData.answers) &&
+          answerKeyData.answers.some((a: string) => a)
+        ) {
+          // Web app format (or mobile format after our fix): plain answers array
+          console.log(
+            "[ExamService] Using answers array:",
+            answerKeyData.answers.length,
+          );
+          for (let i = 0; i < totalQuestions; i++) {
+            const answer = answerKeyData.answers[i] || "";
+            extractedAnswers.push(answer);
+            if (i < 5) {
+              console.log(`[ExamService] Q${i + 1}: ${answer}`);
+            }
+          }
+          console.log(
+            "[ExamService] Total answers extracted:",
+            extractedAnswers.filter((a) => a).length,
+          );
+        } else if (answerKeyData?.questionSettings && Array.isArray(answerKeyData.questionSettings)) {
           // Mobile app format: questionSettings array
           console.log(
-            "[ExamService] Using mobile format (questionSettings):",
+            "[ExamService] Using questionSettings:",
             answerKeyData.questionSettings.length,
           );
           for (let i = 0; i < totalQuestions; i++) {
@@ -918,30 +962,10 @@ export class ExamService {
             "[ExamService] Total answers extracted:",
             extractedAnswers.filter((a) => a).length,
           );
-        } else if (
-          answerKeyData?.answers &&
-          Array.isArray(answerKeyData.answers)
-        ) {
-          // Web app format: answers array
-          console.log(
-            "[ExamService] Using web format (answers array):",
-            answerKeyData.answers.length,
-          );
-          for (let i = 0; i < totalQuestions; i++) {
-            const answer = answerKeyData.answers[i] || "";
-            extractedAnswers.push(answer);
-            if (i < 5) {
-              console.log(`[ExamService] Q${i + 1}: ${answer}`);
-            }
-          }
-          console.log(
-            "[ExamService] Total answers extracted:",
-            extractedAnswers.filter((a) => a).length,
-          );
         } else {
           // No answers found - use empty array
           console.log(
-            "[ExamService] No questionSettings or answers array found, using empty answers",
+            "[ExamService] No answers or questionSettings found, using empty answers",
           );
           for (let i = 0; i < totalQuestions; i++) {
             extractedAnswers.push("");
@@ -949,6 +973,30 @@ export class ExamService {
         }
 
         // Transform to ExamPreviewData format
+        // Update the Realm cache with the fresh answer key so offline reads
+        // have it available and the cache-hit path won't fall through again.
+        if (answerKeyData) {
+          try {
+            const cacheRealmForUpdate = await RealmService.getCacheRealm();
+            const cachedEntry = cacheRealmForUpdate.objectForPrimaryKey<QuizCache>(
+              "QuizCache",
+              examSnap.id,
+            );
+            if (cachedEntry) {
+              cacheRealmForUpdate.write(() => {
+                cachedEntry.answerKey = JSON.stringify({
+                  id: answerKeyId,
+                  ...answerKeyData,
+                  answers: extractedAnswers,
+                });
+                cachedEntry.updatedAt = new Date();
+              });
+            }
+          } catch (cacheWriteErr) {
+            console.warn("[ExamService] Failed to update Realm cache with answer key:", cacheWriteErr);
+          }
+        }
+
         return {
           metadata: {
             examId: examSnap.id,

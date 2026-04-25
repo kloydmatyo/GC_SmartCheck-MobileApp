@@ -1,27 +1,26 @@
 import ConfirmationModal from "@/components/common/ConfirmationModal";
-import { auth, db } from "@/config/firebase";
+import { auth } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    FlatList,
-    GestureResponderEvent,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    UIManager,
-    View,
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  FlatList,
+  GestureResponderEvent,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  UIManager,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { COLORS, RADIUS } from "../../constants/theme";
@@ -97,14 +96,19 @@ export default function ClassesScreen() {
   const [archiveConfirmVisible, setArchiveConfirmVisible] = useState(false);
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [editingClassId, setEditingClassId] = useState<string | null>(null);
-  const [consumedEditRequestId, setConsumedEditRequestId] = useState<string | null>(null);
-  const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
-  const [discardClassConfirmVisible, setDiscardClassConfirmVisible] = useState(false);
+  const [consumedEditRequestId, setConsumedEditRequestId] = useState<
+    string | null
+  >(null);
+  const [collapsedRecent, setCollapsedRecent] = useState<
+    Record<string, boolean>
+  >({});
+  const [discardClassConfirmVisible, setDiscardClassConfirmVisible] =
+    useState(false);
 
-const [classMenuPosition, setClassMenuPosition] = useState({
-  top: 0,
-  left: 0,
-});
+  const [classMenuPosition, setClassMenuPosition] = useState({
+    top: 0,
+    left: 0,
+  });
 
   useEffect(() => {
     if (
@@ -171,7 +175,7 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       const allExams = await ExamService.getExamsByUser();
 
       const byClass: Record<string, RecentQuiz[]> = {};
-      
+
       allExams.forEach((exam) => {
         const cid = exam.classId;
         // Also check if the 'class' field title matches if classId is missing (legacy)
@@ -241,7 +245,9 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       return;
     }
 
-    const targetClass = classes.find((item) => item.id === requestedEditClassId);
+    const targetClass = classes.find(
+      (item) => item.id === requestedEditClassId,
+    );
     if (!targetClass) return;
 
     setConsumedEditRequestId(requestedEditClassId);
@@ -295,9 +301,13 @@ const [classMenuPosition, setClassMenuPosition] = useState({
     formData.year,
   ];
   const hasMissingRequired = requiredFields.some((value) => !value);
-  const hasClassNameTooShort = trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4;
-  const hasCourseSubjectTooShort = trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5;
-  const hasRoomInvalid = trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room);
+  const hasClassNameTooShort =
+    trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4;
+  const hasCourseSubjectTooShort =
+    trimmedForm.course_subject.length > 0 &&
+    trimmedForm.course_subject.length < 5;
+  const hasRoomInvalid =
+    trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room);
   const hasTooLong = [trimmedForm.class_name, trimmedForm.course_subject].some(
     (value) => value.length > MAX_FIELD_LENGTH,
   );
@@ -313,16 +323,16 @@ const [classMenuPosition, setClassMenuPosition] = useState({
   const hasClassFormChanges = editingClassId
     ? Boolean(
         selectedClass &&
-          (trimmedForm.class_name !== (selectedClass.class_name ?? "") ||
-            trimmedForm.course_subject !== (selectedClass.course_subject ?? "") ||
-            trimmedForm.room !== (selectedClass.room ?? "") ||
-            formData.year !== (selectedClass.year ?? "")),
+        (trimmedForm.class_name !== (selectedClass.class_name ?? "") ||
+          trimmedForm.course_subject !== (selectedClass.course_subject ?? "") ||
+          trimmedForm.room !== (selectedClass.room ?? "") ||
+          formData.year !== (selectedClass.year ?? "")),
       )
     : Boolean(
         trimmedForm.class_name ||
-          trimmedForm.course_subject ||
-          trimmedForm.room ||
-          formData.year,
+        trimmedForm.course_subject ||
+        trimmedForm.room ||
+        formData.year,
       );
 
   const handleAttemptCloseClassModal = () => {
@@ -350,27 +360,51 @@ const [classMenuPosition, setClassMenuPosition] = useState({
 
   const handleCreateClass = async () => {
     if (!trimmedForm.class_name) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Program is required" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Program is required",
+      });
       return;
     }
     if (trimmedForm.class_name.length < 4) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Class Name must be at least 4 characters" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Class Name must be at least 4 characters",
+      });
       return;
     }
     if (!trimmedForm.course_subject) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Course subject is required" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course subject is required",
+      });
       return;
     }
     if (trimmedForm.course_subject.length < 5) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Course Subject must be at least 5 characters" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Course Subject must be at least 5 characters",
+      });
       return;
     }
     if (trimmedForm.room && !/^\d{3}$/.test(trimmedForm.room)) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Room must be exactly 3 digits (e.g. 101)" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Room must be exactly 3 digits (e.g. 101)",
+      });
       return;
     }
     if (hasTooLong) {
-      Toast.show({ type: "error", text1: "Validation Error", text2: "Each field must be 50 characters or fewer" });
+      Toast.show({
+        type: "error",
+        text1: "Validation Error",
+        text2: "Each field must be 50 characters or fewer",
+      });
       return;
     }
 
@@ -383,7 +417,11 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           room: trimmedForm.room || undefined,
           year: formData.year,
         });
-        Toast.show({ type: "success", text1: "Success", text2: "Class updated successfully" });
+        Toast.show({
+          type: "success",
+          text1: "Success",
+          text2: "Class updated successfully",
+        });
       } else {
         await ClassService.createClass({
           class_name: trimmedForm.class_name,
@@ -391,7 +429,11 @@ const [classMenuPosition, setClassMenuPosition] = useState({
           room: trimmedForm.room || undefined,
           year: formData.year,
         });
-        Toast.show({ type: "success", text1: "Success", text2: "Class created successfully" });
+        Toast.show({
+          type: "success",
+          text1: "Success",
+          text2: "Class created successfully",
+        });
       }
 
       resetForm();
@@ -403,7 +445,9 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       Toast.show({
         type: "error",
         text1: "Error",
-        text2: editingClassId ? "Failed to update class" : "Failed to create class",
+        text2: editingClassId
+          ? "Failed to update class"
+          : "Failed to create class",
       });
     } finally {
       setCreating(false);
@@ -656,24 +700,26 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       />
 
       {/* Create Class Modal */}
-        <Modal
-          visible={modalVisible}
-          animationType="slide"
-          transparent={false}
-          onRequestClose={handleAttemptCloseClassModal}
-        >
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={handleAttemptCloseClassModal}
+      >
         <KeyboardAvoidingView
           style={styles.createScreen}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={styles.createScreenHeader}>
             <View style={styles.createScreenHeaderSpacer} />
-            <Text style={styles.createSheetTitle}>{editingClassId ? "Edit Class" : "Create Class"}</Text>
-              <TouchableOpacity
-                style={styles.createSheetClose}
-                onPress={handleAttemptCloseClassModal}
-                disabled={creating}
-              >
+            <Text style={styles.createSheetTitle}>
+              {editingClassId ? "Edit Class" : "Create Class"}
+            </Text>
+            <TouchableOpacity
+              style={styles.createSheetClose}
+              onPress={handleAttemptCloseClassModal}
+              disabled={creating}
+            >
               <Ionicons name="close" size={24} color="#A8AFBC" />
             </TouchableOpacity>
           </View>
@@ -691,17 +737,24 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               style={[
                 styles.sheetInput,
                 trimmedForm.class_name.length >= 4 && styles.sheetInputValid,
-                trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4 && styles.sheetInputError,
+                trimmedForm.class_name.length > 0 &&
+                  trimmedForm.class_name.length < 4 &&
+                  styles.sheetInputError,
               ]}
               placeholder="Enter program name"
               placeholderTextColor="#B5BCC8"
               maxLength={MAX_FIELD_LENGTH}
               value={formData.class_name}
-              onChangeText={(text) => setFormData({ ...formData, class_name: text })}
+              onChangeText={(text) =>
+                setFormData({ ...formData, class_name: text })
+              }
             />
-            {trimmedForm.class_name.length > 0 && trimmedForm.class_name.length < 4 && (
-              <Text style={styles.fieldHint}>At least 4 characters required</Text>
-            )}
+            {trimmedForm.class_name.length > 0 &&
+              trimmedForm.class_name.length < 4 && (
+                <Text style={styles.fieldHint}>
+                  At least 4 characters required
+                </Text>
+              )}
 
             <Text style={styles.sheetLabel}>
               Course <Text style={styles.requiredStar}>*</Text>
@@ -709,18 +762,26 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             <TextInput
               style={[
                 styles.sheetInput,
-                trimmedForm.course_subject.length >= 5 && styles.sheetInputValid,
-                trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5 && styles.sheetInputError,
+                trimmedForm.course_subject.length >= 5 &&
+                  styles.sheetInputValid,
+                trimmedForm.course_subject.length > 0 &&
+                  trimmedForm.course_subject.length < 5 &&
+                  styles.sheetInputError,
               ]}
               placeholder="Enter course subject"
               placeholderTextColor="#B5BCC8"
               maxLength={MAX_FIELD_LENGTH}
               value={formData.course_subject}
-              onChangeText={(text) => setFormData({ ...formData, course_subject: text })}
+              onChangeText={(text) =>
+                setFormData({ ...formData, course_subject: text })
+              }
             />
-            {trimmedForm.course_subject.length > 0 && trimmedForm.course_subject.length < 5 && (
-              <Text style={styles.fieldHint}>At least 5 characters required</Text>
-            )}
+            {trimmedForm.course_subject.length > 0 &&
+              trimmedForm.course_subject.length < 5 && (
+                <Text style={styles.fieldHint}>
+                  At least 5 characters required
+                </Text>
+              )}
 
             <Text style={styles.sheetLabel}>
               Year <Text style={styles.requiredStar}>*</Text>
@@ -733,7 +794,13 @@ const [classMenuPosition, setClassMenuPosition] = useState({
               ]}
               onPress={() => setYearPickerVisible(true)}
             >
-              <Text style={formData.year ? styles.sheetPickerValue : styles.sheetPickerPlaceholder}>
+              <Text
+                style={
+                  formData.year
+                    ? styles.sheetPickerValue
+                    : styles.sheetPickerPlaceholder
+                }
+              >
                 {formData.year || "Select year level"}
               </Text>
               <Ionicons name="chevron-down" size={16} color="#B5BCC8" />
@@ -747,8 +814,12 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                 <TextInput
                   style={[
                     styles.sheetInput,
-                    trimmedForm.room.length === 3 && /^\d{3}$/.test(trimmedForm.room) && styles.sheetInputValid,
-                    trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room) && styles.sheetInputError,
+                    trimmedForm.room.length === 3 &&
+                      /^\d{3}$/.test(trimmedForm.room) &&
+                      styles.sheetInputValid,
+                    trimmedForm.room.length > 0 &&
+                      !/^\d{3}$/.test(trimmedForm.room) &&
+                      styles.sheetInputError,
                   ]}
                   placeholder="Enter room number (exactly 3 digits)"
                   placeholderTextColor="#B5BCC8"
@@ -760,44 +831,44 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                     setFormData({ ...formData, room: digits });
                   }}
                 />
-                {trimmedForm.room.length > 0 && !/^\d{3}$/.test(trimmedForm.room) && (
-                  <Text style={styles.fieldHint}>Exactly 3 digits</Text>
-                )}
+                {trimmedForm.room.length > 0 &&
+                  !/^\d{3}$/.test(trimmedForm.room) && (
+                    <Text style={styles.fieldHint}>Exactly 3 digits</Text>
+                  )}
               </View>
             </View>
+          </ScrollView>
 
-            </ScrollView>
-  
-            <View style={styles.createScreenFooter}>
+          <View style={styles.createScreenFooter}>
             {!isClassFormValid && (
               <Text style={styles.validationText}>
                 {hasTooLong
                   ? "Keep each field under 50 characters."
                   : hasClassNameTooShort
-                  ? "Class Name must be at least 4 characters."
-                  : hasCourseSubjectTooShort
-                  ? "Course Subject must be at least 5 characters."
-                  : hasRoomInvalid
-                  ? "Room must be exactly 3 digits."
-                  : "Complete all required fields to continue."}
+                    ? "Class Name must be at least 4 characters."
+                    : hasCourseSubjectTooShort
+                      ? "Course Subject must be at least 5 characters."
+                      : hasRoomInvalid
+                        ? "Room must be exactly 3 digits."
+                        : "Complete all required fields to continue."}
               </Text>
             )}
-              <TouchableOpacity
-                style={[
-                  styles.sheetPrimaryButton,
-                  (!canCreateClass || creating) && styles.createButtonDisabled,
-                ]}
-                onPress={handleCreateClass}
-                disabled={!canCreateClass}
-              >
-                {creating ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.sheetPrimaryButtonText}>
-                    {editingClassId ? "Save Changes" : "Create Class"}
-                  </Text>
-                )}
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.sheetPrimaryButton,
+                (!canCreateClass || creating) && styles.createButtonDisabled,
+              ]}
+              onPress={handleCreateClass}
+              disabled={!canCreateClass}
+            >
+              {creating ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.sheetPrimaryButtonText}>
+                  {editingClassId ? "Save Changes" : "Create Class"}
+                </Text>
+              )}
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -831,7 +902,8 @@ const [classMenuPosition, setClassMenuPosition] = useState({
                 <Text
                   style={[
                     styles.yearPickerItemText,
-                    formData.year === option && styles.yearPickerItemTextSelected,
+                    formData.year === option &&
+                      styles.yearPickerItemTextSelected,
                   ]}
                 >
                   {option}
@@ -912,8 +984,8 @@ const [classMenuPosition, setClassMenuPosition] = useState({
         </TouchableOpacity>
       </Modal>
 
-        <ConfirmationModal
-          visible={archiveConfirmVisible}
+      <ConfirmationModal
+        visible={archiveConfirmVisible}
         title="Archive Item"
         message={`Are you sure you want to archive ${selectedClass?.class_name ?? "this class"}? You can still view it later in the archived section.`}
         cancelText="Cancel"
@@ -925,25 +997,24 @@ const [classMenuPosition, setClassMenuPosition] = useState({
             setArchiveConfirmVisible(false);
             archiveClass(selectedClass);
           }
-          }}
-        />
+        }}
+      />
 
-        <ConfirmationModal
-          visible={discardClassConfirmVisible}
-          title="Discard Changes"
-          message="You have unsaved class changes. Leave without saving?"
-          cancelText="Stay"
-          confirmText="Discard"
-          destructive
-          onCancel={() => setDiscardClassConfirmVisible(false)}
-          onConfirm={() => {
-            setDiscardClassConfirmVisible(false);
-            setModalVisible(false);
-            resetForm();
-          }}
-        />
-
-      </View>
+      <ConfirmationModal
+        visible={discardClassConfirmVisible}
+        title="Discard Changes"
+        message="You have unsaved class changes. Leave without saving?"
+        cancelText="Stay"
+        confirmText="Discard"
+        destructive
+        onCancel={() => setDiscardClassConfirmVisible(false)}
+        onConfirm={() => {
+          setDiscardClassConfirmVisible(false);
+          setModalVisible(false);
+          resetForm();
+        }}
+      />
+    </View>
   );
 }
 
