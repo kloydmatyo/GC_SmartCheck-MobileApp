@@ -72,6 +72,10 @@ export interface GradeStorageRecord {
   status: "saved" | "duplicate" | "pending" | "error";
   scannedBy: string; // Firebase auth UID of the faculty who scanned
   createdAt: Date;
+  /** Plain answer choices (A/B/C/D) — required by the web app's ScannedResult schema */
+  answers?: string[];
+  /** Whether the student ID could not be read — required by the web app's ScannedResult schema */
+  isNullId?: boolean;
 }
 
 export interface BubbleDetection {

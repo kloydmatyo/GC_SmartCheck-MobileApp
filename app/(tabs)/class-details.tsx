@@ -148,6 +148,22 @@ export default function ClassDetailsScreen() {
     studentId: string;
     studentName: string;
   } | null>(null);
+  const [studentAverages, setStudentAverages] = useState<
+    Record<string, number>
+  >({});
+  const [studentToEdit, setStudentToEdit] = useState<{
+    studentId: string;
+    firstName: string;
+    lastName: string;
+    middleName: string;
+  } | null>(null);
+  const [editStudentVisible, setEditStudentVisible] = useState(false);
+  const [editStudentForm, setEditStudentForm] = useState({
+    student_id: "",
+    first_name: "",
+    last_name: "",
+    middle_name: "",
+  });
   const [importing, setImporting] = useState(false);
   const [sortBy, setSortBy] = useState<
     "id_asc" | "id_desc" | "fname_asc" | "fname_desc"
@@ -452,6 +468,46 @@ export default function ClassDetailsScreen() {
 
       if (requestId !== examLoadRequestRef.current) return;
       setExamRows(examsWithStats);
+
+      // Fetch real per-student averages from scannedResults
+      try {
+        const isOnline = await NetworkService.isOnline();
+        if (isOnline) {
+          const { collection, query, where, getDocs } =
+            await import("firebase/firestore");
+          const { db } = await import("@/config/firebase");
+          const examIds = examsWithStats.map((e) => e.id);
+          if (examIds.length > 0) {
+            const snap = await getDocs(
+              query(
+                collection(db, "scannedResults"),
+                where("examId", "in", examIds.slice(0, 10)),
+              ),
+            );
+            const totals: Record<string, { sum: number; count: number }> = {};
+            snap.docs.forEach((d) => {
+              const data = d.data();
+              const sid = data.studentId;
+              const pct =
+                data.percentage ??
+                (data.totalQuestions > 0
+                  ? Math.round((data.score / data.totalQuestions) * 100)
+                  : 0);
+              if (!sid) return;
+              if (!totals[sid]) totals[sid] = { sum: 0, count: 0 };
+              totals[sid].sum += pct;
+              totals[sid].count += 1;
+            });
+            const averages: Record<string, number> = {};
+            Object.entries(totals).forEach(([sid, { sum, count }]) => {
+              averages[sid] = Math.round(sum / count);
+            });
+            setStudentAverages(averages);
+          }
+        }
+      } catch {
+        // non-blocking
+      }
     } catch (error) {
       console.error("Error loading exams:", error);
       if (requestId !== examLoadRequestRef.current) return;
@@ -529,7 +585,7 @@ export default function ClassDetailsScreen() {
   const students = useMemo<StudentRow[]>(() => {
     if (!classData) return [];
     return classData.students.map((student, index) => {
-      const average = buildStudentAverage(student.student_id, index);
+      const average = studentAverages[student.student_id] ?? 0;
       return {
         id: student.student_id,
         initials:
@@ -540,7 +596,7 @@ export default function ClassDetailsScreen() {
         color: avatarColor(index),
       };
     });
-  }, [classData]);
+  }, [classData, studentAverages]);
 
   const filteredStudents = useMemo(() => {
     if (!searchQuery.trim()) return students;
@@ -1099,11 +1155,22 @@ export default function ClassDetailsScreen() {
                 key={student.id}
                 style={styles.studentCard}
                 onPress={() => {
-                  setStudentToRemove({
-                    studentId: student.id,
-                    studentName: student.name,
+                  const raw = classData?.students.find(
+                    (s) => s.student_id === student.id,
+                  );
+                  setEditStudentForm({
+                    student_id: student.id,
+                    first_name: raw?.first_name || "",
+                    last_name: raw?.last_name || "",
+                    middle_name: (raw as any)?.middle_name || "",
                   });
-                  setRemoveStudentConfirmVisible(true);
+                  setStudentToEdit({
+                    studentId: student.id,
+                    firstName: raw?.first_name || "",
+                    lastName: raw?.last_name || "",
+                    middleName: (raw as any)?.middle_name || "",
+                  });
+                  setEditStudentVisible(true);
                 }}
               >
                 <View
@@ -1129,7 +1196,7 @@ export default function ClassDetailsScreen() {
                   >
                     {student.average}%
                   </Text>
-                  <Text style={styles.studentAvgLabel}>avg</Text>
+                  <Text style={styles.studentAvgLabel}>avg score</Text>
                 </View>
               </TouchableOpacity>
             ))
@@ -1282,13 +1349,13 @@ export default function ClassDetailsScreen() {
           </View>
           <View style={styles.statsGrid}>
             <View style={styles.statsSmallCard}>
-              <Text style={styles.statsSmallLabel}>Highest</Text>
+              <Text style={styles.statsSmallLabel}>Highest Score</Text>
               <Text style={[styles.statsSmallValue, { color: "#20BE7B" }]}>
                 {stats.highest}%
               </Text>
             </View>
             <View style={styles.statsSmallCard}>
-              <Text style={styles.statsSmallLabel}>Lowest</Text>
+              <Text style={styles.statsSmallLabel}>Lowest Score</Text>
               <Text style={[styles.statsSmallValue, { color: "#EF4444" }]}>
                 {stats.lowest}%
               </Text>
@@ -1834,6 +1901,210 @@ export default function ClassDetailsScreen() {
           handleArchiveExam();
         }}
       />
+
+      <Modal
+        visible={editStudentVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditStudentVisible(false)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 24,
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#fff",
+              borderRadius: 16,
+              padding: 24,
+              width: "100%",
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 18,
+                fontWeight: "700",
+                color: "#273142",
+                marginBottom: 16,
+              }}
+            >
+              Edit Student
+            </Text>
+
+            <Text style={{ fontSize: 13, color: "#6B7280", marginBottom: 4 }}>
+              Student ID
+            </Text>
+            <TextInput
+              value={editStudentForm.student_id}
+              onChangeText={(v) =>
+                setEditStudentForm((f) => ({ ...f, student_id: v }))
+              }
+              style={{
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                borderRadius: 10,
+                padding: 10,
+                marginBottom: 12,
+                fontSize: 15,
+                color: "#273142",
+              }}
+              placeholder="Student ID"
+            />
+
+            <Text style={{ fontSize: 13, color: "#6B7280", marginBottom: 4 }}>
+              First Name
+            </Text>
+            <TextInput
+              value={editStudentForm.first_name}
+              onChangeText={(v) =>
+                setEditStudentForm((f) => ({ ...f, first_name: v }))
+              }
+              style={{
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                borderRadius: 10,
+                padding: 10,
+                marginBottom: 12,
+                fontSize: 15,
+                color: "#273142",
+              }}
+              placeholder="First Name"
+            />
+
+            <Text style={{ fontSize: 13, color: "#6B7280", marginBottom: 4 }}>
+              Middle Name
+            </Text>
+            <TextInput
+              value={editStudentForm.middle_name}
+              onChangeText={(v) =>
+                setEditStudentForm((f) => ({ ...f, middle_name: v }))
+              }
+              style={{
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                borderRadius: 10,
+                padding: 10,
+                marginBottom: 12,
+                fontSize: 15,
+                color: "#273142",
+              }}
+              placeholder="Middle Name (optional)"
+            />
+
+            <Text style={{ fontSize: 13, color: "#6B7280", marginBottom: 4 }}>
+              Last Name
+            </Text>
+            <TextInput
+              value={editStudentForm.last_name}
+              onChangeText={(v) =>
+                setEditStudentForm((f) => ({ ...f, last_name: v }))
+              }
+              style={{
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                borderRadius: 10,
+                padding: 10,
+                marginBottom: 16,
+                fontSize: 15,
+                color: "#273142",
+              }}
+              placeholder="Last Name"
+            />
+
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => setEditStudentVisible(false)}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: 12,
+                  backgroundColor: "#F3F4F6",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontWeight: "600", color: "#273142" }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  if (!classData || !editStudentForm.student_id.trim()) return;
+                  const originalId = studentToEdit?.studentId;
+                  const updatedStudents = classData.students.map((s) => {
+                    if (s.student_id !== originalId) return s;
+                    return {
+                      ...s,
+                      student_id: editStudentForm.student_id.trim(),
+                      first_name: editStudentForm.first_name.trim(),
+                      last_name: editStudentForm.last_name.trim(),
+                      middle_name: editStudentForm.middle_name.trim(),
+                    };
+                  });
+                  try {
+                    await ClassService.updateClass(classId, {
+                      students: updatedStudents,
+                    });
+                    setEditStudentVisible(false);
+                    await loadClassData();
+                    Toast.show({ type: "success", text1: "Student updated" });
+                  } catch (e) {
+                    Toast.show({
+                      type: "error",
+                      text1: "Failed to update student",
+                    });
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: 12,
+                  backgroundColor: "#20BE7B",
+                  alignItems: "center",
+                }}
+              >
+                <Text style={{ fontWeight: "600", color: "#fff" }}>Save</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              onPress={async () => {
+                if (!classData || !studentToEdit) return;
+                try {
+                  await ClassService.removeStudent(
+                    classId,
+                    studentToEdit.studentId,
+                  );
+                  setEditStudentVisible(false);
+                  await loadClassData();
+                  Toast.show({ type: "success", text1: "Student removed" });
+                } catch (e: any) {
+                  Toast.show({
+                    type: "error",
+                    text1: "Failed to remove student",
+                    text2: e?.message,
+                  });
+                }
+              }}
+              style={{
+                marginTop: 10,
+                padding: 14,
+                borderRadius: 12,
+                alignItems: "center",
+                backgroundColor: "#EF4444",
+              }}
+            >
+              <Text style={{ fontWeight: "600", color: "#fff", fontSize: 15 }}>
+                Remove Student
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <ConfirmationModal
         visible={removeStudentConfirmVisible}
