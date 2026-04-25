@@ -1,11 +1,11 @@
-﻿/**
+﻿﻿/**
  * Brightness-Based Scanner for 100-Item Templates
- * 
+ *
  * This scanner uses brightness sampling instead of contour detection
  * to achieve >99% accuracy for 100-item answer sheets.
- * 
+ *
  * Ported from Web-Based-for-SIA/src/components/scanning/OMRScanner.tsx
- * 
+ *
  * Key differences from contour-based scanning:
  * - Samples pixel brightness at calculated positions
  * - Uses bilinear coordinate mapping for perspective correction
@@ -46,16 +46,20 @@ interface TemplateLayout {
 function mapToPixel(
   markers: Markers,
   nx: number,
-  ny: number
+  ny: number,
 ): { px: number; py: number } {
   // Interpolate along top edge
-  const topX = markers.topLeft.x + nx * (markers.topRight.x - markers.topLeft.x);
-  const topY = markers.topLeft.y + nx * (markers.topRight.y - markers.topLeft.y);
-  
+  const topX =
+    markers.topLeft.x + nx * (markers.topRight.x - markers.topLeft.x);
+  const topY =
+    markers.topLeft.y + nx * (markers.topRight.y - markers.topLeft.y);
+
   // Interpolate along bottom edge
-  const botX = markers.bottomLeft.x + nx * (markers.bottomRight.x - markers.bottomLeft.x);
-  const botY = markers.bottomLeft.y + nx * (markers.bottomRight.y - markers.bottomLeft.y);
-  
+  const botX =
+    markers.bottomLeft.x + nx * (markers.bottomRight.x - markers.bottomLeft.x);
+  const botY =
+    markers.bottomLeft.y + nx * (markers.bottomRight.y - markers.bottomLeft.y);
+
   // Interpolate vertically
   return {
     px: topX + ny * (botX - topX),
@@ -73,18 +77,24 @@ function sampleBubbleAt(
   cx: number,
   cy: number,
   radiusX: number,
-  radiusY: number
+  radiusY: number,
 ): number {
   // Sample the center of the bubble using an elliptical mask
   // Use inner 50% to safely avoid the printed circle outline
-  let sum = 0, count = 0;
-  const innerRX = radiusX * 0.50;
-  const innerRY = radiusY * 0.50;
+  let sum = 0,
+    count = 0;
+  const innerRX = radiusX * 0.5;
+  const innerRY = radiusY * 0.5;
   const step = Math.max(1, Math.floor(Math.min(innerRX, innerRY) / 4));
 
   for (let dy = -Math.ceil(innerRY); dy <= Math.ceil(innerRY); dy += step) {
     for (let dx = -Math.ceil(innerRX); dx <= Math.ceil(innerRX); dx += step) {
-      if (innerRX > 0 && innerRY > 0 && (dx * dx) / (innerRX * innerRX) + (dy * dy) / (innerRY * innerRY) > 1) continue;
+      if (
+        innerRX > 0 &&
+        innerRY > 0 &&
+        (dx * dx) / (innerRX * innerRX) + (dy * dy) / (innerRY * innerRY) > 1
+      )
+        continue;
       const px = Math.round(cx + dx);
       const py = Math.round(cy + dy);
       if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
@@ -101,7 +111,12 @@ function sampleBubbleAt(
   // Also sample the exact center cross pattern for extra precision
   // This catches small-pencil fills that are concentrated at center
   for (let r = 0; r <= Math.floor(innerRX * 0.7); r++) {
-    for (const [dx, dy] of [[r, 0], [-r, 0], [0, r], [0, -r]]) {
+    for (const [dx, dy] of [
+      [r, 0],
+      [-r, 0],
+      [0, r],
+      [0, -r],
+    ]) {
       const px = Math.round(cx + dx);
       const py = Math.round(cy + dy);
       if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
@@ -121,8 +136,10 @@ function sampleBubbleAt(
 
 // ─── TEMPLATE LAYOUT ───
 // 100-question full page A4 (210 × 297 mm)
-// Corner markers: cornerInset=2mm, markerSize=8mm → marker centers at ~6mm from each edge
-// Frame between marker centers: fw = 210 - 12 = 198mm, fh = 297 - 12 = 285mm
+// Source: drawFullSheet() in templatePdfGenerator.ts
+//
+// Corner markers: cornerInset=2mm, markerSize=8mm → marker centers at (6,6) and (204,291)
+// Frame between marker centers: fw = 198mm, fh = 285mm
 //
 // Template grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
 //   Col 0: Q1-10  (row 0), Q11-20  (row 1)
@@ -133,56 +150,66 @@ function sampleBubbleAt(
 //
 // Physical measurements (drawFullSheet, A4 210×297mm):
 //   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
-//   qBlockW = 10 + 4×5.5 + 3.5 = 35.5mm
-//   colGap = (190 - 5×35.5) / 6 = 12.5/6 ≈ 2.083mm
-//   bx[col] = 10 + 2.083 + col×37.583 = 12.083 + col×37.583
-//   firstBubbleX[col] = bx[col] + numW(10) = 22.083 + col×37.583
-//   NX = (firstBubbleX - 6) / 198:
-//     Col 0: 16.083/198 = 0.0812
-//     Col 1: 53.667/198 = 0.2710
-//     Col 2: 91.250/198 = 0.4609
-//     Col 3: 128.833/198 = 0.6507
-//     Col 4: 166.417/198 = 0.8405
+//   qBlockW = 10 + (5-1)×5.5 + 3.5 = 35.5mm
+//   colGap = (190 - 5×35.5) / 6 = 12.5/6 ≈ 2.0833mm
+//   bx[col] = 10 + 2.0833 + col×37.5833
+//   firstBubbleX[col] = bx[col] + numW(10)  (A-choice center)
+//     Col 0: 22.0833mm → NX = (22.0833-6)/198 = 0.08123
+//     Col 1: 59.6667mm → NX = (59.6667-6)/198 = 0.27104
+//     Col 2: 97.2500mm → NX = (97.2500-6)/198 = 0.46086
+//     Col 3: 134.8333mm → NX = (134.8333-6)/198 = 0.65067
+//     Col 4: 172.4167mm → NX = (172.4167-6)/198 = 0.84049
 //
-//   Answer Y start (currentY after header+ID): ≈ 77mm from page top
-//   firstBubbleNY row 0 = (77 - 6) / 285 = 71/285 = 0.2491
+//   currentY after header+ID ≈ 81mm from page top
+//   drawQBlock adds 5mm header → first bubble row at currentY+5
+//   Row 0 first bubble Y: 81+5 = 86mm → NY = (86-6)/285 = 0.28070
 //   blockVGap = 10×5.2 + 10 = 62mm
-//   firstBubbleNY row 1 = (77 + 62 - 6) / 285 = 133/285 = 0.4667
+//   Row 1 first bubble Y: 143+5 = 148mm → NY = (148-6)/285 = 0.49825
 //
-//   bubbleSpacingNX = 5.5 / 198 = 0.02778
-//   rowSpacingNY    = 5.2 / 285 = 0.01825
+//   bubbleSpacingNX = 5.5 / 198 = 0.027778
+//   rowSpacingNY    = 5.2 / 285 = 0.018246
 function get100ItemTemplateLayout(): TemplateLayout {
-  const fw = 198, fh = 285;
+  const fw = 198,
+    fh = 285;
 
-  // Column first-bubble NX values
-  const col0NX = 16.083 / fw;
-  const col1NX = 53.667 / fw;
-  const col2NX = 91.250 / fw;
-  const col3NX = 128.833 / fw;
-  const col4NX = 166.417 / fw;
+  const bSpacingNX = 5.5 / fw;   // 0.027778 — horizontal gap between choice bubbles
+  const rSpacingNY = 5.2 / fh;   // 0.018246 — vertical gap between question rows
 
-  // Row first-bubble NY values
-  const row0NY = 71 / fh;
-  const row1NY = 133 / fh;
+  // Exact first-bubble NX per column (A-choice center, derived from template source)
+  // Col 4 is nudged slightly left (-0.015) because its E-bubble lands near the right
+  // frame edge (NX≈0.95) and gets clipped when the sheet isn't perfectly framed.
+  const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.82549];
+  // Exact first-bubble NY per row (first question row center, derived from template source)
+  const rowNY = [0.28070, 0.49825];
 
-  const bSpacingNX = 5.5 / fw;
-  const rSpacingNY = 5.2 / fh;
+  // 10 blocks: 5 cols × 2 rows
+  // Reading order: left-to-right across row 0, then row 1
+  //   Row 0: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
+  //   Row 1: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
+  const BLOCKS: { startQ: number; col: number; row: number }[] = [
+    { startQ: 1,  col: 0, row: 0 },
+    { startQ: 21, col: 1, row: 0 },
+    { startQ: 41, col: 2, row: 0 },
+    { startQ: 61, col: 3, row: 0 },
+    { startQ: 81, col: 4, row: 0 },
+    { startQ: 11, col: 0, row: 1 },
+    { startQ: 31, col: 1, row: 1 },
+    { startQ: 51, col: 2, row: 1 },
+    { startQ: 71, col: 3, row: 1 },
+    { startQ: 91, col: 4, row: 1 },
+  ];
+
+  const answerBlocks: AnswerBlock[] = BLOCKS.map((b) => ({
+    startQ: b.startQ,
+    endQ: b.startQ + 9,
+    firstBubbleNX: colNX[b.col],
+    firstBubbleNY: rowNY[b.row],
+    bubbleSpacingNX: bSpacingNX,
+    rowSpacingNY: rSpacingNY,
+  }));
 
   return {
-    answerBlocks: [
-      // Row 0 (top blocks) — Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
-      { startQ: 1,  endQ: 10,  firstBubbleNX: col0NX, firstBubbleNY: row0NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 21, endQ: 30,  firstBubbleNX: col1NX, firstBubbleNY: row0NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 41, endQ: 50,  firstBubbleNX: col2NX, firstBubbleNY: row0NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 61, endQ: 70,  firstBubbleNX: col3NX, firstBubbleNY: row0NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 81, endQ: 90,  firstBubbleNX: col4NX, firstBubbleNY: row0NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      // Row 1 (bottom blocks) — Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
-      { startQ: 11, endQ: 20,  firstBubbleNX: col0NX, firstBubbleNY: row1NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 31, endQ: 40,  firstBubbleNX: col1NX, firstBubbleNY: row1NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 51, endQ: 60,  firstBubbleNX: col2NX, firstBubbleNY: row1NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 71, endQ: 80,  firstBubbleNX: col3NX, firstBubbleNY: row1NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-      { startQ: 91, endQ: 100, firstBubbleNX: col4NX, firstBubbleNY: row1NY, bubbleSpacingNX: bSpacingNX, rowSpacingNY: rSpacingNY },
-    ],
+    answerBlocks,
     bubbleDiameterNX: 3.5 / fw,
     bubbleDiameterNY: 3.5 / fh,
   };
@@ -201,7 +228,7 @@ function detectAnswersFromImage(
   enableBlockAutoAlign: boolean,
 ): StudentAnswer[] {
   const answers: StudentAnswer[] = [];
-  const choiceLabels = 'ABCDE'.slice(0, choicesPerQuestion).split('');
+  const choiceLabels = "ABCDE".slice(0, choicesPerQuestion).split("");
 
   const frameW = markers.topRight.x - markers.topLeft.x;
   const frameH = markers.bottomLeft.y - markers.topLeft.y;
@@ -209,7 +236,9 @@ function detectAnswersFromImage(
   const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
 
   if (DEBUG_LOGS) {
-    console.log(`[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`);
+    console.log(
+      `[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
+    );
   }
 
   for (const block of layout.answerBlocks) {
@@ -264,8 +293,14 @@ function detectAnswersFromImage(
     }
 
     if (DEBUG_LOGS) {
-      const firstPx = mapToPixel(markers, block.firstBubbleNX, block.firstBubbleNY);
-      console.log(`[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`);
+      const firstPx = mapToPixel(
+        markers,
+        block.firstBubbleNX,
+        block.firstBubbleNY,
+      );
+      console.log(
+        `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`,
+      );
     }
 
     for (let q = block.startQ; q <= block.endQ && q <= numQuestions; q++) {
@@ -291,7 +326,9 @@ function detectAnswersFromImage(
 
       // Debug: Log all brightness values for first question in each block
       if (DEBUG_LOGS && q === block.startQ) {
-        console.log(`[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
+        console.log(
+          `[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")}`,
+        );
       }
 
       // Sort ascending by brightness — darkest (most filled) first
@@ -301,7 +338,7 @@ function detectAnswersFromImage(
       const thirdDark = sorted.length >= 3 ? sorted[2].brightness : 255;
       const brightest = sorted[sorted.length - 1].brightness;
 
-      let selectedChoice = '';
+      let selectedChoice = "";
 
       // Use the brightest bubble as the "unfilled" reference
       const ref = brightest;
@@ -331,8 +368,13 @@ function detectAnswersFromImage(
       }
 
       // Log first few questions per block for debugging
-      if (DEBUG_LOGS && (q <= block.startQ + 2 || q === block.endQ || !selectedChoice)) {
-        console.log(`[100Q-BRIGHTNESS] Q${q}: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`);
+      if (
+        DEBUG_LOGS &&
+        (q <= block.startQ + 2 || q === block.endQ || !selectedChoice)
+      ) {
+        console.log(
+          `[100Q-BRIGHTNESS] Q${q}: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")} → ${selectedChoice || "?"} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`,
+        );
       }
 
       answers.push({
@@ -355,44 +397,48 @@ export async function scan100ItemWithBrightness(
   choicesPerQuestion: 4 | 5 = 5,
   enableBlockAutoAlign = false,
 ): Promise<StudentAnswer[]> {
-  console.log('[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia');
-  
+  console.log("[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
+
   try {
     // Import Skia and FileSystem (using legacy API for compatibility)
-    const { Skia } = require('@shopify/react-native-skia');
-    const FileSystem = require('expo-file-system/legacy');
-    
+    const { Skia } = require("@shopify/react-native-skia");
+    const FileSystem = require("expo-file-system/legacy");
+
     // Load image with Skia
-    const normalizedUri = imageUri.startsWith('file://') ? imageUri : `file://${imageUri}`;
+    const normalizedUri = imageUri.startsWith("file://")
+      ? imageUri
+      : `file://${imageUri}`;
     const base64 = await FileSystem.readAsStringAsync(normalizedUri, {
-      encoding: 'base64',
+      encoding: "base64",
     });
-    
+
     const imageData = Skia.Data.fromBase64(base64);
     const image = Skia.Image.MakeImageFromEncoded(imageData);
-    
+
     if (!image) {
-      throw new Error('Failed to load image with Skia');
+      throw new Error("Failed to load image with Skia");
     }
-    
+
     const width = image.width();
     const height = image.height();
     console.log(`[100Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
-    
+
     // Read pixel data (RGBA format)
     const pixels = image.readPixels();
-    
+
     if (!pixels) {
-      throw new Error('Failed to read pixels from image');
+      throw new Error("Failed to read pixels from image");
     }
-    
-    console.log(`[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`);
-    
+
+    console.log(
+      `[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`,
+    );
+
     // Detect answers using brightness sampling
     const layout = get100ItemTemplateLayout();
     const numQuestions = 100;
     const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
-    
+
     const answers = detectAnswersFromImage(
       pixels,
       width,
@@ -403,19 +449,18 @@ export async function scan100ItemWithBrightness(
       effectiveChoices,
       enableBlockAutoAlign,
     );
-    
-    const detectedCount = answers.filter(a => a.selectedAnswer).length;
+
+    const detectedCount = answers.filter((a) => a.selectedAnswer).length;
     console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
-    
+
     return answers;
-    
   } catch (error) {
-    console.error('[100Q-BRIGHTNESS] Error:', error);
-    
+    console.error("[100Q-BRIGHTNESS] Error:", error);
+
     // Return empty answers on error
     return Array.from({ length: 100 }, (_, i) => ({
       questionNumber: i + 1,
-      selectedAnswer: '',
+      selectedAnswer: "",
     }));
   }
 }

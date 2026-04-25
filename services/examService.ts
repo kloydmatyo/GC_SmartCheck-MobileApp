@@ -1,11 +1,11 @@
 import { auth, db } from "@/config/firebase";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    where,
 } from "firebase/firestore";
 import Realm from "realm";
 import { ExamPreviewData } from "../types/exam";
@@ -640,16 +640,20 @@ export class ExamService {
         // cache was last populated.
         const hasAnswers =
           answerKeyData &&
-          (
-            (Array.isArray(answerKeyData.answers) && answerKeyData.answers.some((a: string) => a)) ||
-            (Array.isArray(answerKeyData.questionSettings) && answerKeyData.questionSettings.some((q: any) => q.correctAnswer))
-          );
+          ((Array.isArray(answerKeyData.answers) &&
+            answerKeyData.answers.some((a: string) => a)) ||
+            (Array.isArray(answerKeyData.questionSettings) &&
+              answerKeyData.questionSettings.some(
+                (q: any) => q.correctAnswer,
+              )));
 
         const { NetworkService } = await import("./networkService");
         const isOnline = await NetworkService.isOnline();
 
         if (!hasAnswers && isOnline) {
-          console.log("[ExamService] Cache has no answer key — falling through to Firestore for live fetch.");
+          console.log(
+            "[ExamService] Cache has no answer key — falling through to Firestore for live fetch.",
+          );
           // Don't return here; fall through to the Firestore path below.
         } else {
           const extractedAnswers: string[] = [];
@@ -663,7 +667,10 @@ export class ExamService {
             for (let i = 0; i < totalQuestions; i++) {
               extractedAnswers.push(answerKeyData.answers[i] || "");
             }
-          } else if (answerKeyData?.questionSettings && Array.isArray(answerKeyData.questionSettings)) {
+          } else if (
+            answerKeyData?.questionSettings &&
+            Array.isArray(answerKeyData.questionSettings)
+          ) {
             for (let i = 0; i < totalQuestions; i++) {
               const setting = answerKeyData.questionSettings.find(
                 (qs: any) => qs.questionNumber === i + 1,
@@ -912,7 +919,8 @@ export class ExamService {
         const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
         // Use num_items from the exam doc as the authoritative question count.
         // Answer key arrays may be shorter if not all answers are filled in yet.
-        const totalQuestions = examData.num_items ||
+        const totalQuestions =
+          examData.num_items ||
           answerKeyData?.questionSettings?.length ||
           answerKeyData?.answers?.length ||
           20;
@@ -942,7 +950,10 @@ export class ExamService {
             "[ExamService] Total answers extracted:",
             extractedAnswers.filter((a) => a).length,
           );
-        } else if (answerKeyData?.questionSettings && Array.isArray(answerKeyData.questionSettings)) {
+        } else if (
+          answerKeyData?.questionSettings &&
+          Array.isArray(answerKeyData.questionSettings)
+        ) {
           // Mobile app format: questionSettings array
           console.log(
             "[ExamService] Using questionSettings:",
@@ -978,10 +989,11 @@ export class ExamService {
         if (answerKeyData) {
           try {
             const cacheRealmForUpdate = await RealmService.getCacheRealm();
-            const cachedEntry = cacheRealmForUpdate.objectForPrimaryKey<QuizCache>(
-              "QuizCache",
-              examSnap.id,
-            );
+            const cachedEntry =
+              cacheRealmForUpdate.objectForPrimaryKey<QuizCache>(
+                "QuizCache",
+                examSnap.id,
+              );
             if (cachedEntry) {
               cacheRealmForUpdate.write(() => {
                 cachedEntry.answerKey = JSON.stringify({
@@ -993,7 +1005,10 @@ export class ExamService {
               });
             }
           } catch (cacheWriteErr) {
-            console.warn("[ExamService] Failed to update Realm cache with answer key:", cacheWriteErr);
+            console.warn(
+              "[ExamService] Failed to update Realm cache with answer key:",
+              cacheWriteErr,
+            );
           }
         }
 
@@ -1646,6 +1661,43 @@ export class ExamService {
     } catch (error) {
       console.error("Error checking scan sessions:", error);
       return false;
+    }
+  }
+
+  /**
+   * Delete an exam and remove from local cache
+   */
+  static async deleteExam(examId: string): Promise<void> {
+    try {
+      // Handle staging exams
+      if (examId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sQuiz) {
+          stagingRealm.write(() => stagingRealm.delete(sQuiz));
+        }
+        return;
+      }
+
+      const { deleteDoc, doc } = await import("firebase/firestore");
+      await deleteDoc(doc(db, "exams", examId));
+
+      // Remove from local cache
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<QuizCache>(
+        "QuizCache",
+        examId,
+      );
+      if (cached) {
+        cacheRealm.write(() => cacheRealm.delete(cached));
+      }
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      throw error;
     }
   }
 

@@ -134,18 +134,20 @@ export default function CameraScanner({
   // Coordinates mirror the scanner's getLayoutRegions() fractions exactly.
   const getScanRegions = (): Array<{
     label: string;
-    xMin: number; xMax: number;
-    yMin: number; yMax: number;
+    xMin: number;
+    xMax: number;
+    yMin: number;
+    yMax: number;
   }> => {
     if (questionCount <= 20) {
       return [
-        { label: "Q1–10",  xMin: 0.26, xMax: 0.50, yMin: 0.38, yMax: 0.95 },
+        { label: "Q1–10", xMin: 0.26, xMax: 0.5, yMin: 0.38, yMax: 0.95 },
         { label: "Q11–20", xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95 },
       ];
     } else if (questionCount <= 50) {
       // 5 horizontal columns matching the template's single-row layout
       return [
-        { label: "Q1–10",  xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97 },
+        { label: "Q1–10", xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97 },
         { label: "Q11–20", xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97 },
         { label: "Q21–30", xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97 },
         { label: "Q31–40", xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97 },
@@ -153,17 +155,20 @@ export default function CameraScanner({
       ];
     } else {
       // 5 columns × 2 rows matching the 100q template grid
+      // Derived from drawFullSheet() physical measurements in templatePdfGenerator.ts
       return [
-        { label: "Q1–10",   xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.50 },
-        { label: "Q21–30",  xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.50 },
-        { label: "Q41–50",  xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.50 },
-        { label: "Q61–70",  xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.50 },
-        { label: "Q81–90",  xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.50 },
-        { label: "Q11–20",  xMin: 0.04, xMax: 0.24, yMin: 0.48, yMax: 0.72 },
-        { label: "Q31–40",  xMin: 0.22, xMax: 0.42, yMin: 0.48, yMax: 0.72 },
-        { label: "Q51–60",  xMin: 0.40, xMax: 0.60, yMin: 0.48, yMax: 0.72 },
-        { label: "Q71–80",  xMin: 0.58, xMax: 0.78, yMin: 0.48, yMax: 0.72 },
-        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.48, yMax: 0.72 },
+        // Row 0 (top)
+        { label: "Q1–10",   xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49 },
+        { label: "Q21–30",  xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49 },
+        { label: "Q41–50",  xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.49 },
+        { label: "Q61–70",  xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49 },
+        { label: "Q81–90",  xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49 },
+        // Row 1 (bottom)
+        { label: "Q11–20",  xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.70 },
+        { label: "Q31–40",  xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.70 },
+        { label: "Q51–60",  xMin: 0.40, xMax: 0.60, yMin: 0.47, yMax: 0.70 },
+        { label: "Q71–80",  xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.70 },
+        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.70 },
       ];
     }
   };
@@ -235,10 +240,7 @@ export default function CameraScanner({
         error instanceof Error && error.message
           ? error.message
           : "Failed to process Zipgrade answer sheet. Please try again.";
-      Alert.alert(
-        "Error",
-        message,
-      );
+      Alert.alert("Error", message);
     } finally {
       setIsProcessing(false);
     }
@@ -323,7 +325,8 @@ export default function CameraScanner({
                     left: region.xMin * frameDimensions.width,
                     top: region.yMin * frameDimensions.height,
                     width: (region.xMax - region.xMin) * frameDimensions.width,
-                    height: (region.yMax - region.yMin) * frameDimensions.height,
+                    height:
+                      (region.yMax - region.yMin) * frameDimensions.height,
                     borderWidth: 1,
                     borderColor: "rgba(0, 255, 127, 0.45)",
                     borderStyle: "dashed",
@@ -359,14 +362,18 @@ export default function CameraScanner({
           {scanStage && (
             <View style={styles.stageBanner}>
               <View style={styles.stageIndicatorRow}>
-                <View style={[
-                  styles.stageDot,
-                  scanStage.current >= 1 && styles.stageDotActive,
-                ]} />
-                <View style={[
-                  styles.stageDot,
-                  scanStage.current >= 2 && styles.stageDotActive,
-                ]} />
+                <View
+                  style={[
+                    styles.stageDot,
+                    scanStage.current >= 1 && styles.stageDotActive,
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.stageDot,
+                    scanStage.current >= 2 && styles.stageDotActive,
+                  ]}
+                />
               </View>
               <Text style={styles.stageText}>
                 Page {scanStage.current} of {scanStage.total}
@@ -378,10 +385,18 @@ export default function CameraScanner({
               </Text>
               <View style={styles.checklistCard}>
                 <Text style={styles.checklistTitle}>200-item checklist</Text>
-                <Text style={styles.checklistItem}>- Use portrait orientation only</Text>
-                <Text style={styles.checklistItem}>- Keep all 4 corner boxes visible</Text>
-                <Text style={styles.checklistItem}>- Fill frame with sheet inside green guide</Text>
-                <Text style={styles.checklistItem}>- Avoid glare/shadows on bubbles</Text>
+                <Text style={styles.checklistItem}>
+                  - Use portrait orientation only
+                </Text>
+                <Text style={styles.checklistItem}>
+                  - Keep all 4 corner boxes visible
+                </Text>
+                <Text style={styles.checklistItem}>
+                  - Fill frame with sheet inside green guide
+                </Text>
+                <Text style={styles.checklistItem}>
+                  - Avoid glare/shadows on bubbles
+                </Text>
               </View>
             </View>
           )}
