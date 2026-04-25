@@ -177,7 +177,7 @@ export class GradingService {
       gradeEquivalent: letterGrade,
       letterGrade, // Alias for compatibility
       correctAnswers,
-      totalQuestions: scanResult.answers.length,
+      totalQuestions: answerKey.length,  // use answer key length — authoritative item count
       dateScanned: timestamp,
       timestamp, // Alias for compatibility
       status: "pending" as const,

@@ -42,7 +42,7 @@ export default function TemplatePreviewScreen() {
     router.replace("/(tabs)/index");
   };
 
-  const handleGenerateTemplate = async (numQuestions: 20 | 50 | 100) => {
+  const handleGenerateTemplate = async (numQuestions: 20 | 50 | 100 | 200) => {
     try {
       setGenerating(numQuestions);
       Toast.show({
@@ -265,6 +265,53 @@ export default function TemplatePreviewScreen() {
               <>
                 <Ionicons name="download-outline" size={20} color="#fff" />
                 <Text style={styles.generateButtonText}>Generate 100Q Template</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* 200 Questions Template */}
+        <View style={[styles.templateCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+          <View style={styles.templateHeader}>
+            <View style={[styles.iconContainer, { backgroundColor: colors.iconBg }]}>
+              <Ionicons name="documents" size={32} color={colors.icon} />
+            </View>
+            <View style={[styles.badge, styles.badgeFeatured]}>
+              <Text style={styles.badgeText}>2 Pages</Text>
+            </View>
+          </View>
+
+          <Text style={[styles.templateTitle, { color: colors.title }]}>200 Questions</Text>
+          <Text style={[styles.templateDescription, { color: colors.subtitle }]}>
+            Two-page answer sheet for mock board exams. Page 1 covers Q1–100, Page 2 covers Q101–200.
+          </Text>
+
+          <View style={styles.features}>
+            <View style={styles.featureItem}>
+              <Ionicons name="checkmark-circle" size={16} color={colors.icon} />
+              <Text style={[styles.featureText, { color: colors.subtitle }]}>2-page A4 PDF (100 items per page)</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="checkmark-circle" size={16} color={colors.icon} />
+              <Text style={[styles.featureText, { color: colors.subtitle }]}>Same layout as 100Q template per page</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="checkmark-circle" size={16} color={colors.icon} />
+              <Text style={[styles.featureText, { color: colors.subtitle }]}>2-stage scanning compatible</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.generateButton, { backgroundColor: colors.primary }]}
+            onPress={() => handleGenerateTemplate(200)}
+            disabled={generating !== null}
+          >
+            {generating === 200 ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="download-outline" size={20} color="#fff" />
+                <Text style={styles.generateButtonText}>Generate 200Q Template</Text>
               </>
             )}
           </TouchableOpacity>

@@ -22,7 +22,7 @@ import {
   serverTimestamp,
   where,
 } from "firebase/firestore";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -40,6 +40,113 @@ interface QuestionAnswer {
   questionNumber: number;
   answer: string;
 }
+
+interface QuestionRowProps {
+  item: QuestionAnswer;
+  choices: string[];
+  darkModeEnabled: boolean;
+  isHighlighted: boolean;
+  loading: boolean;
+  saving: boolean;
+  onSelect: (questionNumber: number, answer: string) => void;
+}
+
+const QuestionRow = React.memo(
+  ({
+    item,
+    choices,
+    darkModeEnabled,
+    isHighlighted,
+    loading,
+    saving,
+    onSelect,
+  }: QuestionRowProps) => {
+    const isUnanswered = !item.answer;
+
+    return (
+      <View
+        style={[
+          styles.questionCard,
+          {
+            backgroundColor: darkModeEnabled ? "#1f2b26" : "#F7F7F8",
+            borderColor: darkModeEnabled ? "#34483f" : "#E8EBF0",
+          },
+          isUnanswered && styles.questionCardUnanswered,
+          isHighlighted && styles.questionCardHighlighted,
+        ]}
+      >
+        <View
+          style={[
+            styles.questionNumberWrap,
+            isHighlighted && styles.questionNumberWrapHighlighted,
+          ]}
+        >
+          <Text
+            style={[
+              styles.questionNumber,
+              {
+                color: isHighlighted
+                  ? "#14925F"
+                  : darkModeEnabled
+                    ? "#e7f1eb"
+                    : "#98A1B2",
+              },
+            ]}
+          >
+            {item.questionNumber}.
+          </Text>
+          {isUnanswered ? (
+            <Ionicons
+              name="bookmark"
+              size={14}
+              color="#F59E0B"
+              style={styles.unansweredBookmark}
+            />
+          ) : null}
+        </View>
+        <View style={styles.choicesContainer}>
+          {choices.map((choice) => (
+            <TouchableOpacity
+              key={choice}
+              style={[
+                styles.choiceButton,
+                darkModeEnabled && {
+                  backgroundColor: "#2a3a33",
+                  borderColor: "#34483f",
+                },
+                item.answer === choice && styles.choiceButtonSelected,
+                isHighlighted && styles.choiceButtonHighlighted,
+                isHighlighted &&
+                  item.answer === choice &&
+                  styles.choiceButtonSelectedHighlighted,
+              ]}
+              onPress={() => onSelect(item.questionNumber, choice)}
+              disabled={loading || saving}
+            >
+              <Text
+                style={[
+                  styles.choiceText,
+                  darkModeEnabled && { color: "#9db1a6" },
+                  item.answer === choice && styles.choiceTextSelected,
+                ]}
+              >
+                {choice}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+    );
+  },
+  (prev, next) =>
+    prev.item === next.item &&
+    prev.darkModeEnabled === next.darkModeEnabled &&
+    prev.isHighlighted === next.isHighlighted &&
+    prev.loading === next.loading &&
+    prev.saving === next.saving &&
+    prev.choices === next.choices &&
+    prev.onSelect === next.onSelect,
+);
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
@@ -330,7 +437,7 @@ export default function EditAnswerKeyScreen() {
       const online = await NetworkService.isOnline();
       setIsOffline(!online);
 
-      // Use centralized ExamService to fetch data (handles Staging -> Cache -> Online)
+      // Use centralized ExamService to fetch exam metadata (title, num_items, etc.)
       const examData = await ExamService.getExamById(examId as string);
 
       if (!examData) {
@@ -346,22 +453,64 @@ export default function EditAnswerKeyScreen() {
         return;
       }
 
-      // Update UI with fetched data
+      // Update UI with fetched exam metadata
       setExamTitle(examData.metadata.title);
       setExamCode(examData.metadata.examCode || "");
       setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
-
       const numItems = examData.totalQuestions || 20;
+
+      // When online, always fetch the answer key directly from Firestore so we
+      // pick up any edits made from the web app without relying on the Realm cache.
+      let freshAnswers: string[] = [];
+      let freshAkId = examData.answerKey?.id || `ak_${examId}`;
+      let freshVersion = Number(examData.answerKey?.version ?? 1);
+
+      if (online) {
+        try {
+          const akQuery = query(
+            collection(db, "answerKeys"),
+            where("examId", "==", examId as string),
+          );
+          const akSnap = await getDocs(akQuery);
+
+          if (!akSnap.empty) {
+            // Pick the highest-version doc
+            let best = akSnap.docs[0];
+            akSnap.docs.slice(1).forEach((d) => {
+              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+            });
+            const akData = best.data();
+            freshAkId = best.id;
+            freshVersion = Number(akData.version ?? 1);
+
+            if (Array.isArray(akData.answers) && akData.answers.length > 0) {
+              freshAnswers = akData.answers as string[];
+            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+              freshAnswers = (akData.questionSettings as any[])
+                .slice()
+                .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+                .map((q: any) => String(q.correctAnswer ?? ""));
+            }
+          }
+        } catch (akErr) {
+          console.warn("[EditAnswerKey] Direct Firestore answer key fetch failed, using cached:", akErr);
+          // Fall back to whatever ExamService already loaded
+          freshAnswers = examData.answerKey?.answers ?? [];
+        }
+      } else {
+        // Offline — use whatever ExamService returned from cache
+        freshAnswers = examData.answerKey?.answers ?? [];
+      }
+
       const initialAnswers = Array.from({ length: numItems }, (_, i) => ({
         questionNumber: i + 1,
-        answer: examData.answerKey?.answers?.[i] || "",
+        answer: freshAnswers[i] || "",
       }));
 
       setAnswers(initialAnswers);
-      setAnswerKeyId(examData.answerKey?.id || `ak_${examId}`);
-      const loadedVersion = Number(examData.answerKey?.version ?? 1);
-      setAnswerKeyVersion(loadedVersion);
-      setRemoteVersion(loadedVersion);
+      setAnswerKeyId(freshAkId);
+      setAnswerKeyVersion(freshVersion);
+      setRemoteVersion(freshVersion);
       setConflictDetected(false);
       setHasLocalChanges(false);
 
@@ -379,14 +528,14 @@ export default function EditAnswerKeyScreen() {
     }
   };
 
-  const handleAnswerSelect = (questionNumber: number, answer: string) => {
+  const handleAnswerSelect = useCallback((questionNumber: number, answer: string) => {
     setHasLocalChanges(true);
     setAnswers((prev) =>
       prev.map((item) =>
         item.questionNumber === questionNumber ? { ...item, answer } : item,
       ),
     );
-  };
+  }, []);
 
   const getUnansweredQuestions = () =>
     answers
@@ -542,6 +691,8 @@ export default function EditAnswerKeyScreen() {
           updatedAt: serverTimestamp(),
           locked: false,
           version: nextVersion,
+          // answers array — required by the web app's AnswerKeyService
+          answers: answers.map((item) => item.answer),
           questionSettings: answers.map((item) => {
             const existingSetting = (answerKeySnap.data()?.questionSettings || []).find(
               (q: any) => q.questionNumber === item.questionNumber
@@ -590,13 +741,13 @@ export default function EditAnswerKeyScreen() {
     }
   };
 
-  const getChoiceOptions = () => {
+  const choiceOptions = useMemo(() => {
     const options = ["A", "B", "C", "D"];
     if (choicesPerItem === 5) {
       options.push("E");
     }
     return options;
-  };
+  }, [choicesPerItem]);
 
   const normalizeHeader = (value: unknown) =>
     String(value ?? "")
@@ -706,7 +857,7 @@ export default function EditAnswerKeyScreen() {
         return;
       }
 
-      const allowedChoices = new Set(getChoiceOptions());
+      const allowedChoices = new Set(choiceOptions);
       const incoming = new Map<number, string>();
 
       for (let i = 1; i < rows.length; i += 1) {
@@ -809,86 +960,27 @@ export default function EditAnswerKeyScreen() {
     }
   };
 
-  const renderQuestion = ({ item }: { item: QuestionAnswer }) => {
-    const choices = getChoiceOptions();
-    const isUnanswered = !item.answer;
-    const isHighlighted = highlightedQuestionNumber === item.questionNumber;
-
-    return (
-      <View
-        style={[
-          styles.questionCard,
-          {
-            backgroundColor: darkModeEnabled ? "#1f2b26" : "#F7F7F8",
-            borderColor: darkModeEnabled ? "#34483f" : "#E8EBF0",
-          },
-          isUnanswered && styles.questionCardUnanswered,
-          isHighlighted && styles.questionCardHighlighted,
-        ]}
-      >
-        <View
-          style={[
-            styles.questionNumberWrap,
-            isHighlighted && styles.questionNumberWrapHighlighted,
-          ]}
-        >
-          <Text
-            style={[
-              styles.questionNumber,
-              {
-                color: isHighlighted
-                  ? "#14925F"
-                  : darkModeEnabled
-                    ? "#e7f1eb"
-                    : "#98A1B2",
-              },
-            ]}
-          >
-            {item.questionNumber}.
-          </Text>
-          {isUnanswered ? (
-            <Ionicons
-              name="bookmark"
-              size={14}
-              color="#F59E0B"
-              style={styles.unansweredBookmark}
-            />
-          ) : null}
-        </View>
-        <View style={styles.choicesContainer}>
-          {choices.map((choice) => (
-            <TouchableOpacity
-              key={choice}
-              style={[
-                styles.choiceButton,
-                darkModeEnabled && {
-                  backgroundColor: "#2a3a33",
-                  borderColor: "#34483f",
-                },
-                item.answer === choice && styles.choiceButtonSelected,
-                isHighlighted && styles.choiceButtonHighlighted,
-                isHighlighted &&
-                  item.answer === choice &&
-                  styles.choiceButtonSelectedHighlighted,
-              ]}
-              onPress={() => handleAnswerSelect(item.questionNumber, choice)}
-              disabled={loading || saving}
-            >
-              <Text
-                style={[
-                  styles.choiceText,
-                  darkModeEnabled && { color: "#9db1a6" },
-                  item.answer === choice && styles.choiceTextSelected,
-                ]}
-              >
-                {choice}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    );
-  };
+  const renderQuestion = useCallback(
+    ({ item }: { item: QuestionAnswer }) => (
+      <QuestionRow
+        item={item}
+        choices={choiceOptions}
+        darkModeEnabled={darkModeEnabled}
+        isHighlighted={highlightedQuestionNumber === item.questionNumber}
+        loading={loading}
+        saving={saving}
+        onSelect={handleAnswerSelect}
+      />
+    ),
+    [
+      choiceOptions,
+      darkModeEnabled,
+      highlightedQuestionNumber,
+      loading,
+      saving,
+      handleAnswerSelect,
+    ],
+  );
 
   if (loading) {
     return (
@@ -1034,10 +1126,10 @@ export default function EditAnswerKeyScreen() {
         keyExtractor={(item) => item.questionNumber.toString()}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
-        initialNumToRender={answers.length}
-        maxToRenderPerBatch={answers.length}
-        windowSize={Math.max(answers.length, 21)}
-        removeClippedSubviews={false}
+        initialNumToRender={24}
+        maxToRenderPerBatch={20}
+        windowSize={11}
+        removeClippedSubviews={true}
         onScrollBeginDrag={() => {
           if (highlightedQuestionNumber !== null) {
             setHighlightedQuestionNumber(null);

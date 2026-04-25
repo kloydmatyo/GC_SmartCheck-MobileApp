@@ -2,6 +2,8 @@ import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
+const OMR_DEBUG_LOGS = false;
+
 // ═════════════════════════════════════════════════════════════════════════════
 // ZIPGRADE SCANNER SERVICE
 // ═════════════════════════════════════════════════════════════════════════════
@@ -453,74 +455,74 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     ];
   } else if (questionCount <= 50) {
     // ── 50-question layout ──────────────────────────────────────────────────
-    // Physical frame: 91 × 211 mm
+    // Template: 2 mini-sheets stacked on A4 (210 × 297mm), each sheet 210 × 148.5mm
+    // Each mini-sheet has 5 blocks arranged HORIZONTALLY in a single row:
+    //   Q1-10 | Q11-20 | Q21-30 | Q31-40 | Q41-50
     //
-    // CORRECTED based on detailed bubble density analysis from actual scans:
-    // The sheet has LEFT and RIGHT columns, each with 3 vertical blocks
+    // Physical measurements (per mini-sheet, relative to its own top-left):
+    //   margin = 10mm, width = 210mm → usableW = 190mm
+    //   blockWidth = 190 / 5 = 38mm per block
+    //   Block X positions (mm): 10, 48, 86, 124, 162  (left edge of each block)
+    //   Block X ends   (mm): 48, 86, 124, 162, 200
+    //   As fractions of 210mm:
+    //     Col 0 (Q1-10):  xMin=0.048, xMax=0.229
+    //     Col 1 (Q11-20): xMin=0.229, xMax=0.410
+    //     Col 2 (Q21-30): xMin=0.410, xMax=0.590
+    //     Col 3 (Q31-40): xMin=0.590, xMax=0.771
+    //     Col 4 (Q41-50): xMin=0.771, xMax=0.952
     //
-    // Actual bubble positions from density grid show:
-    // LEFT column (x30-50%):
-    //   y20-30%: 10 bubbles (Q1-Q2, 2 rows)
-    //   y30-40%: 80 bubbles (Q3-Q10, 8 rows)
-    //   y40-50%: 71 bubbles (Q11-Q17, 7 rows)
-    //   y50-60%: 67 bubbles (Q18-Q24, 7 rows)
-    //   y60-70%: 56 bubbles (Q25-Q30, 6 rows)
+    //   Answer Y start: after header (~27mm) + name row (4mm) + ID section (~55mm) ≈ 86mm
+    //   Answer Y end:   86mm + 10 rows × 5.2mm ≈ 138mm
+    //   As fractions of 148.5mm: yMin ≈ 0.55, yMax ≈ 0.95
     //
-    // Therefore regions must be:
-    // - Q1-10:  LEFT,  Y: 20%-40.5% (extends to 40.5% to capture Q10, avoid overlap)
-    // - Q11-20: LEFT,  Y: 40.5%-56% (starts at 40.5% to catch Q11, avoid artifact)
-    // - Q21-30: LEFT,  Y: 55.5%-71% (starts at 55.5% to catch Q21)
-    // - Q31-40: RIGHT, Y: 20%-40.5% (extends to 40.5% to capture Q40)
-    // - Q41-50: RIGHT, Y: 41%-56% (starts at 41%, working perfectly)
-    //
-    // Student ID is at top (Y: 0%-18%), skip it
+    // NOTE: The scanner receives a cropped image of ONE mini-sheet (half the A4 page).
     return [
-      { xMin: 0.25, xMax: 0.52, yMin: 0.28, yMax: 0.5, startQ: 1, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.45, yMax: 0.65, startQ: 11, numQ: 10 },
-      { xMin: 0.25, xMax: 0.52, yMin: 0.6, yMax: 0.8, startQ: 21, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.28, yMax: 0.5, startQ: 31, numQ: 10 },
-      { xMin: 0.48, xMax: 0.72, yMin: 0.45, yMax: 0.65, startQ: 41, numQ: 10 },
+      { xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97, startQ: 1,  numQ: 10 },
+      { xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97, startQ: 11, numQ: 10 },
+      { xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97, startQ: 21, numQ: 10 },
+      { xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97, startQ: 31, numQ: 10 },
+      { xMin: 0.77, xMax: 0.97, yMin: 0.52, yMax: 0.97, startQ: 41, numQ: 10 },
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Gordon College 100q template - 10 blocks in a grid layout
+    // Template: full A4 page (210 × 297mm), drawFullSheet()
     //
-    // From bubble density analysis, the template has:
-    // - 10 blocks total (Q1-10, Q11-20, ..., Q91-100)
-    // - Arranged in 2 rows × 5 columns
-    // - Each block has 10 questions × 5 choices = 50 bubbles
-    // - Block markers (black squares) beside each block
+    // Grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
+    //   Col 0: Q1-10  (row 0), Q11-20  (row 1)
+    //   Col 1: Q21-30 (row 0), Q31-40  (row 1)
+    //   Col 2: Q41-50 (row 0), Q51-60  (row 1)
+    //   Col 3: Q61-70 (row 0), Q71-80  (row 1)
+    //   Col 4: Q81-90 (row 0), Q91-100 (row 1)
     //
-    // Bubble density shows blocks at:
-    // Row 1 (top): y10-40%
-    //   - Column 1: x20-40% (Q41-50 or Q1-10)
-    //   - Column 2: x40-60% (Q51-60 or Q11-20)
-    //   - Column 3: x60-80% (Q61-70 or Q21-30)
-    //   - Column 4: x80-100% (Q71-80 or Q31-40)
+    // Physical measurements (mm, page = 210 × 297):
+    //   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
+    //   qBlockW = 10 + 4×5.5 + 3.5 = 35.5mm
+    //   totalGridW = 5 × 35.5 = 177.5mm
+    //   colGap = (190 - 177.5) / 6 ≈ 2.08mm
+    //   bx[col] = 10 + 2.08 + col × (35.5 + 2.08) = 12.08 + col × 37.58
+    //     Col 0: bx=12.08  → xEnd=47.58  → fracs 0.058–0.227
+    //     Col 1: bx=49.67  → xEnd=85.17  → fracs 0.237–0.406
+    //     Col 2: bx=87.25  → xEnd=122.75 → fracs 0.416–0.585
+    //     Col 3: bx=124.83 → xEnd=160.33 → fracs 0.595–0.763
+    //     Col 4: bx=162.42 → xEnd=197.92 → fracs 0.774–0.942
     //
-    // Row 2 (bottom): y40-90%
-    //   - Column 1: x20-40% (Q1-10 or Q41-50)
-    //   - Column 2: x40-60% (Q11-20 or Q51-60)
-    //   - Column 3: x60-80% (Q21-30 or Q61-70)
-    //   - Column 4: x80-100% (Q31-40 or Q71-80)
-    //
-    // STRATEGY: Define all 10 blocks, let block markers refine positions
+    //   Answer Y start (currentY after header+ID): ≈ 87mm
+    //   blockVGap = 10×5.2 + 10 = 62mm
+    //   Row 0: Y 87–139mm  → fracs 0.293–0.468
+    //   Row 1: Y 149–201mm → fracs 0.502–0.677
     return [
-      // Top row (y: 10-40%)
-      { xMin: 0.18, xMax: 0.42, yMin: 0.1, yMax: 0.4, startQ: 41, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.1, yMax: 0.4, startQ: 51, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.1, yMax: 0.4, startQ: 61, numQ: 10 },
-      { xMin: 0.78, xMax: 0.98, yMin: 0.1, yMax: 0.4, startQ: 71, numQ: 10 },
-
-      // Bottom row (y: 40-90%)
-      { xMin: 0.18, xMax: 0.42, yMin: 0.4, yMax: 0.9, startQ: 1, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.4, yMax: 0.9, startQ: 11, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.4, yMax: 0.9, startQ: 21, numQ: 10 },
-      { xMin: 0.78, xMax: 0.98, yMin: 0.4, yMax: 0.9, startQ: 31, numQ: 10 },
-
-      // Additional blocks (if needed)
-      { xMin: 0.05, xMax: 0.25, yMin: 0.1, yMax: 0.4, startQ: 81, numQ: 10 },
-      { xMin: 0.05, xMax: 0.25, yMin: 0.4, yMax: 0.9, startQ: 91, numQ: 10 },
+      // Row 0 (top blocks)
+      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.50, startQ: 1,  numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.50, startQ: 21, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.50, startQ: 41, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.50, startQ: 61, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.50, startQ: 81, numQ: 10 },
+      // Row 1 (bottom blocks)
+      { xMin: 0.04, xMax: 0.24, yMin: 0.48, yMax: 0.72, startQ: 11, numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.48, yMax: 0.72, startQ: 31, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.48, yMax: 0.72, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.48, yMax: 0.72, startQ: 71, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.48, yMax: 0.72, startQ: 91, numQ: 10 },
     ];
   }
 }
@@ -537,6 +539,7 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
     pageNumber?: 1 | 2,
+    choicesPerQuestion: 4 | 5 = 5,
   ): Promise<ScanResult> {
     // Track all Mat objects for cleanup
     const matsToCleanup: any[] = [];
@@ -591,15 +594,11 @@ export class ZipgradeScanner {
       }
 
       // ── 1.5. Auto-rotate image based on expected sheet orientation ────────
-      // Only for 50q sheets - 20q and 100q sheets should NOT be rotated
-      // 50q sheets should be portrait (tall), but camera may capture landscape
-      // 100q sheets are A4 portrait (210×297mm, aspect ~0.707) - same as 20q
       let workingMat = srcMat;
+      const imgAspect = srcJs.cols / srcJs.rows;
+      const isLandscape = imgAspect > 1.0;
 
       if (qCount === 50) {
-        const imgAspect = srcJs.cols / srcJs.rows;
-        const isLandscape = imgAspect > 1.0;
-
         // 50q sheets are very tall (aspect ~0.43), should be portrait
         // If we have a 50q exam but image is landscape, rotate 90° clockwise
         if (isLandscape) {
@@ -623,6 +622,24 @@ export class ZipgradeScanner {
           );
           workingMat = rotatedMat;
         }
+      } else if (qCount >= 100 && isLandscape) {
+        // 100q/200q templates are portrait-oriented A4-like sheets.
+        console.log(
+          `[OMR] Image is landscape (${srcJs.cols}x${srcJs.rows}, aspect=${imgAspect.toFixed(2)}) for ${qCount}q. Rotating 90° clockwise...`,
+        );
+        const rotatedMat = OpenCV.createObject(
+          ObjectType.Mat,
+          0,
+          0,
+          DataTypes.CV_8U,
+        );
+        matsToCleanup.push(rotatedMat);
+        OpenCV.invoke("rotate", srcMat, rotatedMat, 0);
+        const rotatedJs = OpenCV.toJSValue(rotatedMat, "jpeg") as any;
+        console.log(
+          `[OMR] After rotation: ${rotatedJs.cols}x${rotatedJs.rows}`,
+        );
+        workingMat = rotatedMat;
       }
 
       const IMG_W: number = (OpenCV.toJSValue(workingMat) as any).cols;
@@ -993,7 +1010,7 @@ export class ZipgradeScanner {
         );
 
         // Debug: log timing mark details
-        if (timingMarks.length > 0) {
+        if (OMR_DEBUG_LOGS && timingMarks.length > 0) {
           timingMarks.forEach((m, idx) => {
             console.log(
               `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
@@ -1018,14 +1035,132 @@ export class ZipgradeScanner {
       );
       console.log(`[OMR] regMarks: ${regMarks.length}`);
 
+      const getStrict200CornerMarkers = () => {
+        if (regMarks.length < 4) return null;
+
+        const cornerTargets = [
+          { key: "topLeft", x: 0, y: 0 },
+          { key: "topRight", x: imgWidth, y: 0 },
+          { key: "bottomLeft", x: 0, y: imgHeight },
+          { key: "bottomRight", x: imgWidth, y: imgHeight },
+        ] as const;
+
+        const chosenIndices = new Set<number>();
+        const chosen: Record<string, { x: number; y: number }> = {};
+
+        for (const target of cornerTargets) {
+          let bestIdx = -1;
+          let bestScore = Number.POSITIVE_INFINITY;
+          for (let i = 0; i < regMarks.length; i++) {
+            if (chosenIndices.has(i)) continue;
+            const m = regMarks[i];
+            const dx = m.x - target.x;
+            const dy = m.y - target.y;
+            const score = dx * dx + dy * dy;
+            if (score < bestScore) {
+              bestScore = score;
+              bestIdx = i;
+            }
+          }
+
+          if (bestIdx < 0) return null;
+          chosenIndices.add(bestIdx);
+          chosen[target.key] = { x: regMarks[bestIdx].x, y: regMarks[bestIdx].y };
+        }
+
+        const tl = chosen.topLeft;
+        const tr = chosen.topRight;
+        const bl = chosen.bottomLeft;
+        const br = chosen.bottomRight;
+        const minWidth = imgWidth * 0.45;
+        const minHeight = imgHeight * 0.45;
+        const topWidth = Math.abs(tr.x - tl.x);
+        const bottomWidth = Math.abs(br.x - bl.x);
+        const leftHeight = Math.abs(bl.y - tl.y);
+        const rightHeight = Math.abs(br.y - tr.y);
+        const maxCornerOffsetX = imgWidth * 0.25;
+        const maxCornerOffsetY = imgHeight * 0.25;
+
+        const cornersNearImageEdges =
+          tl.x <= maxCornerOffsetX &&
+          tl.y <= maxCornerOffsetY &&
+          tr.x >= imgWidth - maxCornerOffsetX &&
+          tr.y <= maxCornerOffsetY &&
+          bl.x <= maxCornerOffsetX &&
+          bl.y >= imgHeight - maxCornerOffsetY &&
+          br.x >= imgWidth - maxCornerOffsetX &&
+          br.y >= imgHeight - maxCornerOffsetY;
+
+        const geometryLooksValid =
+          topWidth >= minWidth &&
+          bottomWidth >= minWidth &&
+          leftHeight >= minHeight &&
+          rightHeight >= minHeight;
+
+        if (!cornersNearImageEdges || !geometryLooksValid) {
+          return null;
+        }
+
+        return {
+          topLeft: tl,
+          topRight: tr,
+          bottomLeft: bl,
+          bottomRight: br,
+        };
+      };
+
       let paperLeft = imgWidth * 0.03,
         paperRight = imgWidth * 0.97;
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      // Use registration marks for cropping when available (like Main)
-      if (regMarks.length >= 3) {
+      // Use strict corner markers for 200-item sheets.
+      const strict200Corners = qCount === 200 ? getStrict200CornerMarkers() : null;
+
+      if (qCount === 200 && strict200Corners) {
+        paperLeft = Math.max(
+          0,
+          Math.min(
+            strict200Corners.topLeft.x,
+            strict200Corners.bottomLeft.x,
+            strict200Corners.topRight.x,
+            strict200Corners.bottomRight.x,
+          ) - medianW * 2,
+        );
+        paperRight = Math.min(
+          imgWidth,
+          Math.max(
+            strict200Corners.topLeft.x,
+            strict200Corners.bottomLeft.x,
+            strict200Corners.topRight.x,
+            strict200Corners.bottomRight.x,
+          ) + medianW * 2,
+        );
+        paperTop = Math.max(
+          0,
+          Math.min(
+            strict200Corners.topLeft.y,
+            strict200Corners.topRight.y,
+            strict200Corners.bottomLeft.y,
+            strict200Corners.bottomRight.y,
+          ) - medianH * 2,
+        );
+        paperBottom = Math.min(
+          imgHeight,
+          Math.max(
+            strict200Corners.topLeft.y,
+            strict200Corners.topRight.y,
+            strict200Corners.bottomLeft.y,
+            strict200Corners.bottomRight.y,
+          ) + medianH * 2,
+        );
+        console.log(
+          `[OMR] 200q strict crop from 4 corners: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
+        );
+      }
+      // Use registration marks for cropping when available (legacy path).
+      else if (regMarks.length >= 3) {
         const mxs = regMarks.map((m) => m.x).sort((a, b) => a - b);
         const mys = regMarks.map((m) => m.y).sort((a, b) => a - b);
         paperLeft = Math.max(0, mxs[0] - medianW * 2);
@@ -1067,15 +1202,17 @@ export class ZipgradeScanner {
         const yi = Math.min(Math.floor((b.y / paperH) * yBands), yBands - 1);
         grid[yi][xi]++;
       }
-      console.log(`[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`);
-      grid.forEach((row, yi) => {
-        const label = `y${yi * 10}-${yi * 10 + 10}%`;
-        const cells = row
-          .map((v, xi) => (v > 0 ? `x${xi * 10}:${v}` : ""))
-          .filter(Boolean)
-          .join(" ");
-        if (cells) console.log(`  ${label}: ${cells}`);
-      });
+      if (OMR_DEBUG_LOGS) {
+        console.log(`[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`);
+        grid.forEach((row, yi) => {
+          const label = `y${yi * 10}-${yi * 10 + 10}%`;
+          const cells = row
+            .map((v, xi) => (v > 0 ? `x${xi * 10}:${v}` : ""))
+            .filter(Boolean)
+            .join(" ");
+          if (cells) console.log(`  ${label}: ${cells}`);
+        });
+      }
 
       // ── 8. Auto-detect sheet type if not explicitly set ──────────────────
       // For 20q: use simple bubble count heuristic (like Main)
@@ -1235,6 +1372,17 @@ export class ZipgradeScanner {
 
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
+        if (qCount === 200 && strict200Corners) {
+          console.log(
+            "[OMR] Corner markers:",
+            `TL=(${Math.round(strict200Corners.topLeft.x)},${Math.round(strict200Corners.topLeft.y)})`,
+            `TR=(${Math.round(strict200Corners.topRight.x)},${Math.round(strict200Corners.topRight.y)})`,
+            `BL=(${Math.round(strict200Corners.bottomLeft.x)},${Math.round(strict200Corners.bottomLeft.y)})`,
+            `BR=(${Math.round(strict200Corners.bottomRight.x)},${Math.round(strict200Corners.bottomRight.y)})`,
+          );
+          return strict200Corners;
+        }
+
         const sortedMarks = [...regMarks].sort(
           (a, b) => a.y - b.y || a.x - b.x,
         );
@@ -1315,7 +1463,7 @@ export class ZipgradeScanner {
       };
 
       // ── 200-item template: brightness scanning with page offset ──────────
-      if (qCount === 200 && regMarks.length >= 3) {
+      if (qCount === 200 && strict200Corners) {
         const currentPage = pageNumber || 1;
         console.log(
           `[OMR] Using BRIGHTNESS scanning for 200-item template Page ${currentPage} (Skia pixel sampling)`,
@@ -1323,7 +1471,12 @@ export class ZipgradeScanner {
 
         const { scan200ItemPage } = require("./brightnessScannerFor200Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan200ItemPage(imageUri, markers, currentPage);
+        allAnswers = await scan200ItemPage(
+          imageUri,
+          markers,
+          currentPage,
+          choicesPerQuestion,
+        );
 
         const rangeStart = currentPage === 1 ? 1 : 101;
         const rangeEnd = currentPage === 1 ? 100 : 200;
@@ -1331,32 +1484,10 @@ export class ZipgradeScanner {
           `[OMR] 200Q Page ${currentPage}: Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
       }
-      // ── 200-item fallback: estimate corners from paper bounds ──────────
+      // ── 200-item strict guard: require all four edge corner boxes ───────
       else if (qCount === 200) {
-        const currentPage = pageNumber || 1;
-        console.warn(
-          `[OMR] Only ${regMarks.length} corner markers found for 200-item template. Using estimated corners from paper bounds.`,
-        );
-
-        const { scan200ItemPage } = require("./brightnessScannerFor200Item");
-        // Estimate corners from the detected paper boundaries
-        const estimatedMarkers = {
-          topLeft: { x: paperLeft, y: paperTop },
-          topRight: { x: paperRight, y: paperTop },
-          bottomLeft: { x: paperLeft, y: paperBottom },
-          bottomRight: { x: paperRight, y: paperBottom },
-        };
-
-        console.log(
-          `[OMR] Estimated markers: TL=(${Math.round(paperLeft)},${Math.round(paperTop)}) BR=(${Math.round(paperRight)},${Math.round(paperBottom)})`,
-        );
-
-        allAnswers = await scan200ItemPage(imageUri, estimatedMarkers, currentPage);
-
-        const rangeStart = currentPage === 1 ? 1 : 101;
-        const rangeEnd = currentPage === 1 ? 100 : 200;
-        console.log(
-          `[OMR] 200Q Page ${currentPage} (fallback): Detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+        throw new Error(
+          "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
         );
       }
       // ── 100-item template: brightness scanning ──────────────────────────
@@ -1369,7 +1500,11 @@ export class ZipgradeScanner {
           scan100ItemWithBrightness,
         } = require("./brightnessScannerFor100Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan100ItemWithBrightness(imageUri, markers);
+        allAnswers = await scan100ItemWithBrightness(
+          imageUri,
+          markers,
+          choicesPerQuestion,
+        );
 
         console.log(
           `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,
@@ -1451,8 +1586,14 @@ export class ZipgradeScanner {
         .padStart(8, "0")
         .slice(0, 8);
       console.log(`[OMR] Final studentId: ${numericId}`);
-      console.log("--- OPENCV EXTRACTED ANSWERS ---");
-      console.log(JSON.stringify(finalAnswers, null, 2));
+      if (OMR_DEBUG_LOGS) {
+        console.log("--- OPENCV EXTRACTED ANSWERS ---");
+        console.log(JSON.stringify(finalAnswers, null, 2));
+      } else {
+        console.log(
+          `[OMR] Answers extracted: ${finalAnswers.filter((a) => !!a.selectedAnswer).length}/${finalAnswers.length}`,
+        );
+      }
 
       return {
         studentId: numericId,
@@ -1462,6 +1603,9 @@ export class ZipgradeScanner {
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);
+      if (error instanceof Error && error.message) {
+        throw error;
+      }
       throw new Error("Failed to process Zipgrade answer sheet");
     } finally {
       // Explicitly clear all OpenCV buffers and release memory

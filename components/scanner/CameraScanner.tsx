@@ -14,6 +14,7 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
+  choicesPerQuestion?: 4 | 5; // Expected answer choices for this exam
   scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onCancel: () => void;
@@ -21,6 +22,7 @@ interface CameraScannerProps {
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
+  choicesPerQuestion = 5,
   scanStage,
   onScanComplete,
   onCancel,
@@ -101,25 +103,72 @@ export default function CameraScanner({
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
-    // Custom dimensions for each template to fit phone screen
-    // These dimensions create the green guide frame overlay
+    // Fit the guide frame inside the screen with a consistent margin
+    const maxW = screenWidth * 0.88;
+    const maxH = screenHeight * 0.72;
+
     if (questionCount <= 20) {
-      // 20-item: 105mm × 148.5mm (aspect ~0.707)
-      return { width: 300, height: 400 };
+      // 20-item: quarter-page portrait — 105mm × 148.5mm (aspect ~0.707)
+      const aspect = 105 / 148.5;
+      const h = Math.min(maxH, maxW / aspect);
+      const w = h * aspect;
+      return { width: Math.round(w), height: Math.round(h) };
     } else if (questionCount <= 50) {
-      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
-      return { width: 215, height: 500 };
-    } else if (questionCount <= 200) {
-      // 100-item / 200-item: 210mm × 297mm (aspect ~0.707, A4 paper)
-      // Both pages use the same physical layout
-      return { width: 320, height: 450 };
+      // 50-item: half-page LANDSCAPE — 210mm × 148.5mm (aspect ~1.414, wider than tall)
+      const aspect = 210 / 148.5;
+      const w = Math.min(maxW, maxH * aspect);
+      const h = w / aspect;
+      return { width: Math.round(w), height: Math.round(h) };
     } else {
-      // Fallback for any other count
-      return { width: 320, height: 450 };
+      // 100-item / 200-item: full A4 portrait — 210mm × 297mm (aspect ~0.707)
+      const aspect = 210 / 297;
+      const h = Math.min(maxH, maxW / aspect);
+      const w = h * aspect;
+      return { width: Math.round(w), height: Math.round(h) };
     }
   };
 
   const frameDimensions = getFrameDimensions();
+
+  // Returns scan region zones to overlay on the guide frame.
+  // Coordinates mirror the scanner's getLayoutRegions() fractions exactly.
+  const getScanRegions = (): Array<{
+    label: string;
+    xMin: number; xMax: number;
+    yMin: number; yMax: number;
+  }> => {
+    if (questionCount <= 20) {
+      return [
+        { label: "Q1–10",  xMin: 0.26, xMax: 0.50, yMin: 0.38, yMax: 0.95 },
+        { label: "Q11–20", xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95 },
+      ];
+    } else if (questionCount <= 50) {
+      // 5 horizontal columns matching the template's single-row layout
+      return [
+        { label: "Q1–10",  xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97 },
+        { label: "Q11–20", xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97 },
+        { label: "Q21–30", xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97 },
+        { label: "Q31–40", xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97 },
+        { label: "Q41–50", xMin: 0.77, xMax: 0.97, yMin: 0.52, yMax: 0.97 },
+      ];
+    } else {
+      // 5 columns × 2 rows matching the 100q template grid
+      return [
+        { label: "Q1–10",   xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.50 },
+        { label: "Q21–30",  xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.50 },
+        { label: "Q41–50",  xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.50 },
+        { label: "Q61–70",  xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.50 },
+        { label: "Q81–90",  xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.50 },
+        { label: "Q11–20",  xMin: 0.04, xMax: 0.24, yMin: 0.48, yMax: 0.72 },
+        { label: "Q31–40",  xMin: 0.22, xMax: 0.42, yMin: 0.48, yMax: 0.72 },
+        { label: "Q51–60",  xMin: 0.40, xMax: 0.60, yMin: 0.48, yMax: 0.72 },
+        { label: "Q71–80",  xMin: 0.58, xMax: 0.78, yMin: 0.48, yMax: 0.72 },
+        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.48, yMax: 0.72 },
+      ];
+    }
+  };
+
+  const scanRegions = getScanRegions();
 
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
@@ -134,6 +183,21 @@ export default function CameraScanner({
 
       if (!photo) {
         Alert.alert("Error", "Failed to capture image");
+        return;
+      }
+
+      // Enforce portrait-only captures for 200-item sheets.
+      // The 2-page 200-item template mapping expects portrait orientation.
+      if (
+        questionCount === 200 &&
+        typeof photo.width === "number" &&
+        typeof photo.height === "number" &&
+        photo.width > photo.height
+      ) {
+        Alert.alert(
+          "Portrait Mode Required",
+          "Please hold your phone in portrait orientation when scanning 200-item exams, then retake the photo.",
+        );
         return;
       }
 
@@ -160,15 +224,20 @@ export default function CameraScanner({
         questionCount,
         templateName,
         scanStage?.current as 1 | 2 | undefined,
+        choicesPerQuestion,
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");
       onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Failed to process Zipgrade answer sheet. Please try again.";
       Alert.alert(
         "Error",
-        "Failed to process Zipgrade answer sheet. Please try again.",
+        message,
       );
     } finally {
       setIsProcessing(false);
@@ -244,6 +313,39 @@ export default function CameraScanner({
                 <Ionicons name="camera-outline" size={54} color="#00FF7F" />
               </View>
 
+              {/* Scan region zone indicators */}
+              {scanRegions.map((region, i) => (
+                <View
+                  key={i}
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    left: region.xMin * frameDimensions.width,
+                    top: region.yMin * frameDimensions.height,
+                    width: (region.xMax - region.xMin) * frameDimensions.width,
+                    height: (region.yMax - region.yMin) * frameDimensions.height,
+                    borderWidth: 1,
+                    borderColor: "rgba(0, 255, 127, 0.45)",
+                    borderStyle: "dashed",
+                    backgroundColor: "rgba(0, 255, 127, 0.06)",
+                    justifyContent: "flex-start",
+                    alignItems: "center",
+                    paddingTop: 3,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "rgba(0, 255, 127, 0.85)",
+                      fontSize: questionCount > 50 ? 7 : 8,
+                      fontWeight: "600",
+                      letterSpacing: 0.2,
+                    }}
+                  >
+                    {region.label}
+                  </Text>
+                </View>
+              ))}
+
               {/* Corner Markers */}
               <View style={[styles.corner, styles.topLeft]} />
               <View style={[styles.corner, styles.topRight]} />
@@ -274,6 +376,13 @@ export default function CameraScanner({
                   ? "Scan Page 1 (Q1–100)"
                   : "Scan Page 2 (Q101–200)"}
               </Text>
+              <View style={styles.checklistCard}>
+                <Text style={styles.checklistTitle}>200-item checklist</Text>
+                <Text style={styles.checklistItem}>- Use portrait orientation only</Text>
+                <Text style={styles.checklistItem}>- Keep all 4 corner boxes visible</Text>
+                <Text style={styles.checklistItem}>- Fill frame with sheet inside green guide</Text>
+                <Text style={styles.checklistItem}>- Avoid glare/shadows on bubbles</Text>
+              </View>
             </View>
           )}
 
@@ -452,5 +561,28 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+  checklistCard: {
+    marginTop: 10,
+    backgroundColor: "rgba(10, 20, 16, 0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(0, 255, 127, 0.5)",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    width: 280,
+  },
+  checklistTitle: {
+    color: "#C8FFE4",
+    fontSize: 12,
+    fontWeight: "700" as const,
+    marginBottom: 4,
+    textAlign: "left" as const,
+  },
+  checklistItem: {
+    color: "rgba(255,255,255,0.92)",
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: "left" as const,
   },
 });
