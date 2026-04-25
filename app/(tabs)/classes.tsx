@@ -15,6 +15,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -100,6 +101,7 @@ export default function ClassesScreen() {
   const [consumedEditRequestId, setConsumedEditRequestId] = useState<string | null>(null);
   const [collapsedRecent, setCollapsedRecent] = useState<Record<string, boolean>>({});
   const [discardClassConfirmVisible, setDiscardClassConfirmVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
 const [classMenuPosition, setClassMenuPosition] = useState({
   top: 0,
@@ -231,6 +233,16 @@ const [classMenuPosition, setClassMenuPosition] = useState({
       })();
     }, [loadClasses]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadClasses();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadClasses, refreshing]);
 
   useEffect(() => {
     if (
@@ -644,6 +656,14 @@ const [classMenuPosition, setClassMenuPosition] = useState({
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="school-outline" size={64} color="#ccc" />

@@ -12,6 +12,7 @@ import NetInfo from '@react-native-community/netinfo';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -78,6 +79,7 @@ export default function SyncScreen() {
   const [exams, setExams] = useState<PendingExam[]>(INITIAL_PENDING);
   const [autoSync, setAutoSync] = useState(true);
   const [offlineModalVisible, setOfflineModalVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -128,6 +130,18 @@ export default function SyncScreen() {
     }, 900);
   }
 
+  async function handleRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const state = await NetInfo.fetch();
+      setIsConnected(Boolean(state.isConnected));
+      setExams((prev) => [...prev]);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} translucent={false} />
@@ -145,6 +159,14 @@ export default function SyncScreen() {
           <ScrollView
             contentContainerStyle={[styles.scrollContent, { paddingHorizontal: horizontalPadding }]}
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#2D6A4F"
+                colors={["#2D6A4F"]}
+              />
+            }
           >
             <View style={styles.heroBlock}>
               <View style={[styles.heroIconWrap, { backgroundColor: isConnected ? '#0ed36a' : '#ece2d7' }]}>
@@ -198,6 +220,14 @@ export default function SyncScreen() {
           <ScrollView
             contentContainerStyle={[styles.scrollContent, { paddingHorizontal: horizontalPadding }]}
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#2D6A4F"
+                colors={["#2D6A4F"]}
+              />
+            }
           >
             <View style={styles.cloudCard}>
               <View style={styles.cloudTop}>

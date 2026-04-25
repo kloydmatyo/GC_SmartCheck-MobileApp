@@ -19,6 +19,7 @@ import {
   Dimensions,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -194,6 +195,7 @@ export default function ClassDetailsScreen() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [addingStudent, setAddingStudent] = useState(false);
   const [savingClassEdit, setSavingClassEdit] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [classForm, setClassForm] = useState({
     class_name: "",
     course_subject: "",
@@ -513,6 +515,16 @@ export default function ClassDetailsScreen() {
       loadExams();
     }
   }, [classData, loadExams]);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadClassData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadClassData, refreshing]);
 
   const students = useMemo<StudentRow[]>(() => {
     if (!classData) return [];
@@ -1376,6 +1388,14 @@ export default function ClassDetailsScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
       >
         {renderTab()}
       </ScrollView>

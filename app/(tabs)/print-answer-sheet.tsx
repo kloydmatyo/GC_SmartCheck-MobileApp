@@ -17,6 +17,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Platform,
+    RefreshControl,
     SafeAreaView,
     ScrollView,
     StatusBar,
@@ -693,6 +694,7 @@ export default function PrintAnswerSheetScreen() {
   const params = useLocalSearchParams<{ examId?: string }>();
   const examId = typeof params.examId === "string" ? params.examId : "";
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const goToQuizzes = () => {
     if (router.canGoBack()) {
       router.back();
@@ -796,6 +798,20 @@ export default function PrintAnswerSheetScreen() {
       }
     }, [examId, syncExamContext]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+      if (examId) {
+        await syncExamContext();
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }, [examId, refreshing, syncExamContext]);
 
   const colors = darkModeEnabled
     ? {
@@ -1151,6 +1167,14 @@ export default function PrintAnswerSheetScreen() {
           styles.content,
           { paddingHorizontal: horizontalPadding },
         ]}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
       >
         <View
           style={[

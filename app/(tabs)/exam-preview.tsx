@@ -15,6 +15,7 @@ import {
     Alert,
     Clipboard,
     Platform,
+    RefreshControl,
     SafeAreaView,
     ScrollView,
     StatusBar,
@@ -190,6 +191,8 @@ export default function ExamPreviewScreen() {
   const [previewDownloadLoading, setPreviewDownloadLoading] = useState(false);
   const [webviewLoading, setWebviewLoading] = useState(false);
   const [previewLogoBase64, setPreviewLogoBase64] = useState<string | undefined>(undefined);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [isSectionRefreshing, setIsSectionRefreshing] = useState(false);
   const loadRequestRef = React.useRef(0);
   const resultsRequestRef = React.useRef(0);
   const mountedRef = React.useRef(true);
@@ -409,17 +412,19 @@ export default function ExamPreviewScreen() {
     }
   };
 
-  const loadExamData = async () => {
+  const loadExamData = React.useCallback(async (fromPullRefresh = false) => {
     const requestId = ++loadRequestRef.current;
     let resultsStarted = false;
 
     try {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      setLoading(true);
+      if (!fromPullRefresh) {
+        setLoading(true);
+        setExam(null);
+      }
+      setExamResults([]);
       setResultsLoading(true);
       setError(null);
-      setExam(null);
-      setExamResults([]);
 
       const currentUser = auth.currentUser;
       if (!currentUser) {
@@ -460,12 +465,14 @@ export default function ExamPreviewScreen() {
       console.error("[ExamPreview] Load error:", err);
     } finally {
       if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-      setLoading(false);
+      if (!fromPullRefresh) {
+        setLoading(false);
+      }
       if (!resultsStarted) {
         setResultsLoading(false);
       }
     }
-  };
+  }, [examId]);
 
   const resetViewState = () => {
     setExam(null);
@@ -492,8 +499,30 @@ export default function ExamPreviewScreen() {
     React.useCallback(() => {
       resetViewState();
       loadExamData();
-    }, [examId, refreshKey]),
+    }, [loadExamData, refreshKey]),
   );
+
+  const handlePullToRefresh = async () => {
+    if (isPullRefreshing) return;
+    setIsPullRefreshing(true);
+    setIsSectionRefreshing(true);
+    const refreshStartTime = Date.now();
+    try {
+      await loadExamData(true);
+    } finally {
+      const minRefreshStateMs = 450;
+      const elapsed = Date.now() - refreshStartTime;
+      if (elapsed < minRefreshStateMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, minRefreshStateMs - elapsed),
+        );
+      }
+      if (mountedRef.current) {
+        setIsPullRefreshing(false);
+        setIsSectionRefreshing(false);
+      }
+    }
+  };
 
   const closeSettingsMenu = () => {
     setSettingsMenuVisible(false);
@@ -574,6 +603,17 @@ export default function ExamPreviewScreen() {
   };
 
   const renderAnswerKeyGrid = () => {
+    if (isSectionRefreshing) {
+      return (
+        <View style={styles.resultsState}>
+          <ActivityIndicator size="small" color={colors.accent} />
+          <Text style={[styles.resultsStateText, { color: colors.text }]}>
+            Loading answer key...
+          </Text>
+        </View>
+      );
+    }
+
     if (!exam) return null;
 
     const columns = 5;
@@ -745,6 +785,17 @@ export default function ExamPreviewScreen() {
   };
 
   const renderPreviewSheet = () => {
+    if (isSectionRefreshing) {
+      return (
+        <View style={styles.resultsState}>
+          <ActivityIndicator size="small" color={colors.accent} />
+          <Text style={[styles.resultsStateText, { color: colors.text }]}>
+            Loading template...
+          </Text>
+        </View>
+      );
+    }
+
     if (!exam || !previewHtml) {
       return (
         <View style={styles.emptyPanel}>
@@ -842,7 +893,7 @@ export default function ExamPreviewScreen() {
       <View style={[styles.centerContainer, { backgroundColor: colors.bg }]}>
         <Ionicons name="alert-circle-outline" size={64} color="#e74c3c" />
         <Text style={styles.errorText}>{error || "Exam not found"}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadExamData}>
+        <TouchableOpacity style={styles.retryButton} onPress={() => loadExamData()}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.backButton} onPress={goToQuizzes}>
@@ -956,6 +1007,14 @@ export default function ExamPreviewScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isPullRefreshing}
+            onRefresh={handlePullToRefresh}
+            tintColor="#16A34A"
+            colors={["#16A34A"]}
+          />
+        }
       >
         {activeTab === "answerKey" ? (
           <View style={styles.section}>

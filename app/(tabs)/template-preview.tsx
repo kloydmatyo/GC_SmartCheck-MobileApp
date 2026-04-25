@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Platform,
+  RefreshControl,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -21,6 +22,7 @@ export default function TemplatePreviewScreen() {
   const router = useRouter();
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
   const [generating, setGenerating] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const topInset = Platform.OS === "android" ? (StatusBar.currentHeight || 0) : 0;
 
   React.useEffect(() => {
@@ -33,6 +35,17 @@ export default function TemplatePreviewScreen() {
       }
     })();
   }, []);
+
+  const handleRefresh = React.useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const savedDarkMode = await AsyncStorage.getItem(DARK_MODE_STORAGE_KEY);
+      setDarkModeEnabled(savedDarkMode === "true");
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing]);
 
   const handleClose = () => {
     if (router.canGoBack()) {
@@ -108,6 +121,14 @@ export default function TemplatePreviewScreen() {
         style={styles.content}
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
       >
         <View style={[styles.topBar, { paddingTop: 8 + topInset }]}>
           <View />
