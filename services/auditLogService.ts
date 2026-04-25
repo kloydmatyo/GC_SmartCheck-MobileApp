@@ -514,7 +514,6 @@ export class AuditLogService {
       console.log(
         `Audit log created for batch status change: ${oldStatus} → ${newStatus}`,
       );
-      0;
     } catch (error) {
       console.error("Error creating batch status audit log:", error);
     }

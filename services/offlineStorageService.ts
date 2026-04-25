@@ -153,7 +153,7 @@ export class OfflineStorageService {
    */
   static async queueUpdate(
     examId: string,
-    action: "create" | "update" | "delete",
+    action: "create" | "update" | "delete" | "update-answer-key" | "audit_log",
     data: any,
     collection: "exams" | "classes" = "exams",
   ): Promise<void> {
