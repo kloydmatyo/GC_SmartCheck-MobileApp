@@ -31,7 +31,7 @@ export interface DownloadedExam {
 export interface PendingUpdate {
   id: string;
   examId: string;
-  action: "create" | "update" | "delete";
+  action: "create" | "update" | "delete" | "update-answer-key" | "audit_log";
   collection?: "exams" | "classes";
   data: any;
   timestamp: Date;
@@ -167,6 +167,7 @@ export class OfflineStorageService {
           data: JSON.stringify(data),
           timestamp: new Date(),
           retryCount: 0,
+          collection,
         });
       });
       console.log("Update queued for sync in Realm");
@@ -176,6 +177,25 @@ export class OfflineStorageService {
     }
   }
 
+
+  /**
+   * Increment retry count for a pending update
+   */
+  static async incrementRetryCount(updateId: string): Promise<void> {
+    try {
+      const realm = await RealmService.getStagingRealm();
+      const updates = realm.objects<OfflinePendingUpdate>("OfflinePendingUpdate");
+      const target = updates.filtered("updateId == bash", updateId)[0];
+
+      if (target) {
+        realm.write(() => {
+          target.retryCount = (target.retryCount || 0) + 1;
+        });
+      }
+    } catch (error) {
+      console.error("Error incrementing retry count:", error);
+    }
+  }
   /**
    * Get all pending updates
    */
@@ -193,6 +213,7 @@ export class OfflineStorageService {
         data: JSON.parse(u.data),
         timestamp: u.timestamp,
         retryCount: u.retryCount,
+        collection: u.collection as any,
       }));
     } catch (error) {
       console.error("Error getting pending updates:", error);

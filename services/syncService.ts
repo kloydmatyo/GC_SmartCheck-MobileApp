@@ -17,6 +17,7 @@ import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
 import {
   OfflineClass,
+  OfflineGrade,
   OfflinePendingUpdate,
   OfflineQuiz,
   RealmService,
@@ -144,10 +145,6 @@ export class SyncService {
             await OfflineStorageService.removePendingUpdate(update.id);
             syncedCount++;
           } catch (updateError: any) {
-            console.error(
-              `Failed to sync update ${update.id} for exam ${update.examId}:`,
-              updateError,
-            );
             const errorCode = updateError?.code || updateError?.errorInfo?.code;
             const isPermissionError =
               errorCode === "permission-denied" ||
@@ -155,6 +152,13 @@ export class SyncService {
               updateError?.message?.includes(
                 "Missing or insufficient permissions",
               );
+
+            if (!isPermissionError) {
+              console.error(
+                `Failed to sync update ${update.id} for exam ${update.examId}:`,
+                updateError,
+              );
+            }
 
             if (isPermissionError) {
               // Permission errors are unrecoverable — drop immediately
@@ -266,27 +270,41 @@ export class SyncService {
     );
     const gradesSnap = await getDocs(gradesQuery);
 
-    // 4. Fetch pending updates to ensure we don't overwrite local work
+    // 4. Fetch all staging data to ensure Cache reflects local reality
     const stagingRealm = await RealmService.getStagingRealm();
+    
+    // Get pending updates (edits/deletes)
     const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>(
       "OfflinePendingUpdate",
     );
-    const updateMap = new Map<string, any>();
+        const updateMap = new Map<string, any>();
+    const deletedIds = new Set<string>();
     pendingUpdates.forEach((u) => {
-      if (u.action === "update" || u.action === "update-answer-key") {
+      if (u.action === "delete") {
+        deletedIds.add(u.examId);
+      } else if (u.action === "update" || u.action === "update-answer-key") {
         updateMap.set(u.examId, JSON.parse(u.data));
       }
     });
 
+    // Get newly created items that haven't hit Firestore yet
+    const stagingQuizzes = stagingRealm.objects<OfflineQuiz>("OfflineQuiz");
+    const stagingClasses = stagingRealm.objects<OfflineClass>("OfflineClass");
+    const stagingGrades = stagingRealm.objects<OfflineGrade>("OfflineGrade");
+
     realm.write(() => {
-      // Clear existing cache for these types
+      // Clear existing cache
       realm.delete(realm.objects("ClassCache"));
       realm.delete(realm.objects("QuizCache"));
       realm.delete(realm.objects("GradeCache"));
 
-      // Insert fresh classes
+      // 1. Insert fresh classes (Server + Staging)
+      const processedClassIds = new Set<string>();
+      
       classesSnap.docs.forEach((doc) => {
+        if (deletedIds.has(doc.id)) return;
         const data = doc.data();
+        processedClassIds.add(doc.id);
         realm.create("ClassCache", {
           id: doc.id,
           class_name: data.class_name,
@@ -301,46 +319,73 @@ export class SyncService {
         });
       });
 
-      // Insert fresh exams
+      stagingClasses.forEach((sClass) => {
+        const id = sClass._id.toHexString();
+        if (!processedClassIds.has(id)) {
+          realm.create("ClassCache", {
+            id,
+            class_name: sClass.class_name,
+            course_subject: sClass.course_subject,
+            room: sClass.room || "",
+            section_block: sClass.section_block || "",
+            students: sClass.students,
+            createdBy: sClass.createdBy,
+            updatedAt: sClass.createdAt,
+          });
+        }
+      });
+
+      // 2. Insert fresh exams (Server + Staging + Merged Edits)
+      const processedExamIds = new Set<string>();
+
       examsWithAK.forEach((item) => {
+        if (deletedIds.has(item.id)) return;
         const pendingData = updateMap.get(item.id);
+        processedExamIds.add(item.id);
 
         realm.create("QuizCache", {
           id: item.id,
           title: pendingData?.title || item.data.title,
-          subject:
-            pendingData?.subject ||
-            item.data.subject ||
-            item.data.className ||
-            "",
-          status:
-            pendingData?.isArchived !== undefined
-              ? pendingData.isArchived
-                ? "Archived"
-                : "Draft"
-              : item.data.status || "Draft",
+          subject: pendingData?.subject || item.data.subject || item.data.className || "",
+          status: pendingData?.status || item.data.status || "Draft",
           papersCount: item.data.scanned_papers || 0,
           questionCount: pendingData?.num_items || item.data.num_items || 0,
-          answerKey: pendingData?.answers
-            ? JSON.stringify({
-                ...JSON.parse(item.answerKey || "{}"),
-                answers: pendingData.answers,
-              })
-            : pendingData?.answerKey
-              ? JSON.stringify(pendingData.answerKey)
-              : item.answerKey,
+          answerKey: pendingData?.answers 
+            ? JSON.stringify({ ...JSON.parse(item.answerKey || "{}"), answers: pendingData.answers })
+            : item.answerKey,
           createdBy: item.data.createdBy,
           createdAt: item.data.createdAt?.toDate?.() || new Date(),
           updatedAt: item.data.updatedAt?.toDate?.() || new Date(),
           instructorId: item.data.instructorId || "",
-          examCode: item.data.examCode || item.data.room || "",
-          choicesPerItem:
-            pendingData?.choices_per_item || item.data.choices_per_item || 4,
+          examCode: item.data.examCode || "",
+          choicesPerItem: pendingData?.choices_per_item || item.data.choices_per_item || 4,
           version: pendingData?.version || item.data.version || 1,
         });
       });
 
-      // Insert fresh grades
+      stagingQuizzes.forEach((sQuiz) => {
+        const id = sQuiz._id.toHexString();
+        if (!processedExamIds.has(id)) {
+          realm.create("QuizCache", {
+            id,
+            title: sQuiz.title,
+            subject: sQuiz.subject,
+            status: sQuiz.status,
+            papersCount: 0,
+            questionCount: sQuiz.questionCount,
+            answerKey: sQuiz.answerKey,
+            createdBy: sQuiz.createdBy,
+            createdAt: sQuiz.createdAt,
+            updatedAt: sQuiz.createdAt,
+            instructorId: sQuiz.instructorId || "",
+            examCode: sQuiz.examCode || "",
+            choicesPerItem: sQuiz.choicesPerItem || 4,
+            version: 1,
+          });
+        }
+      });
+
+      // 3. Insert fresh grades (Server + Staging)
       gradesSnap.docs.forEach((doc) => {
         const data = doc.data();
         realm.create("GradeCache", {
@@ -354,6 +399,21 @@ export class SyncService {
           dateScanned: data.dateScanned,
           scannedBy: data.scannedBy,
           createdAt: data.createdAt?.toDate?.() || new Date(),
+        });
+      });
+
+      stagingGrades.forEach((sGrade) => {
+        realm.create("GradeCache", {
+          id: sGrade._id.toHexString(),
+          studentId: sGrade.studentId,
+          examId: sGrade.examId,
+          score: sGrade.score,
+          totalPoints: sGrade.totalPoints,
+          percentage: sGrade.percentage,
+          gradeEquivalent: sGrade.gradeEquivalent,
+          dateScanned: sGrade.dateScanned,
+          scannedBy: sGrade.scannedBy,
+          createdAt: sGrade.createdAt,
         });
       });
     });
@@ -474,7 +534,7 @@ export class SyncService {
         const conflict = await this.syncUpdate(update);
         if (conflict) {
           // Resolve by merging or using server data to prevent stalls
-          await this.resolveConflict(conflict, "use-server");
+          await this.resolveConflict(conflict, "merge");
         }
         await OfflineStorageService.removePendingUpdate(update.id);
       } catch (err) {
@@ -511,13 +571,13 @@ export class SyncService {
         if (collectionName === "classes") {
           // Verify ownership before writing
           const classDoc = await getDoc(targetRef);
-          if (
-            classDoc.exists() &&
-            classDoc.data().createdBy !== currentUser.uid
-          ) {
-            throw Object.assign(new Error("Permission denied: not the owner"), {
-              code: "permission-denied",
-            });
+          if (classDoc.exists()) {
+            const data = classDoc.data();
+            if (data.createdBy !== currentUser.uid && data.instructorId !== currentUser.uid) {
+              throw Object.assign(new Error("Permission denied: not the owner or instructor"), {
+                code: "permission-denied",
+              });
+            }
           }
           await updateDoc(targetRef, {
             ...update.data,
@@ -627,7 +687,6 @@ export class SyncService {
 
       return null;
     } catch (error) {
-      console.error(`Error syncing update for exam ${update.examId}:`, error);
       throw error;
     }
   }
