@@ -7,6 +7,7 @@ import {
     getDoc,
     getDocs,
     query,
+    serverTimestamp,
     Timestamp,
     where,
     writeBatch,
@@ -108,13 +109,12 @@ export class GradeStorageService {
         }
       }
 
-      // ── 3. Fallback: single Firestore query by student_id field ──────────
-      const studentFieldQ = query(
-        collection(db, "students"),
-        where("student_id", "==", studentId),
-      );
-      const studentFieldSnap = await getDocs(studentFieldQ);
-      if (!studentFieldSnap.empty) return true;
+      // ── 3. Fallback: single Firestore query by student_id field (both variants) ──────────
+      const [studentFieldSnap, studentCamelSnap] = await Promise.all([
+        getDocs(query(collection(db, "students"), where("student_id", "==", studentId))),
+        getDocs(query(collection(db, "students"), where("studentId", "==", studentId))),
+      ]);
+      if (!studentFieldSnap.empty || !studentCamelSnap.empty) return true;
 
       LogService.warn(
         "STUDENT_ID_INVALID",
@@ -277,6 +277,8 @@ export class GradeStorageService {
         status: "pending",
         scannedBy: uid,
         createdAt: new Date(),
+        answers: result.answers?.map((a) => a.studentAnswer) ?? [],
+        isNullId: result.metadata?.isValidId === false,
       };
       return GradeStorageService.queueOffline(record);
     }
@@ -371,6 +373,8 @@ export class GradeStorageService {
       status: "saved",
       scannedBy: uid,
       createdAt: new Date(),
+      answers: result.answers?.map((a) => a.studentAnswer) ?? [],
+      isNullId: result.metadata?.isValidId === false,
     };
 
     return GradeStorageService.writeToFirestore(record);
@@ -385,7 +389,7 @@ export class GradeStorageService {
     const gradeRef = doc(collection(db, GRADE_RESULTS_COLLECTION));
 
     const batch = writeBatch(db);
-    batch.set(gradeRef, { ...lean, createdAt: Timestamp.now() });
+    batch.set(gradeRef, { ...lean, createdAt: Timestamp.now(), scannedAt: serverTimestamp() });
 
     console.log(
       `[GradeStorageService] Attempting Firestore write to doc ${gradeRef.id}...`,
@@ -692,9 +696,12 @@ export class GradeStorageService {
           correctAnswers: record.correctAnswers,
           totalQuestions: record.totalQuestions,
           dateScanned: record.dateScanned,
+          answers: record.answers ?? [],
+          isNullId: record.isNullId ?? false,
           status: "saved",
           scannedBy: record.scannedBy,
           createdAt: Timestamp.now(), // Source of truth sync time
+          scannedAt: serverTimestamp(),
         });
 
         validRecordsToSyncCount++;

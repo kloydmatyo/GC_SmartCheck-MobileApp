@@ -437,7 +437,7 @@ export default function EditAnswerKeyScreen() {
       const online = await NetworkService.isOnline();
       setIsOffline(!online);
 
-      // Use centralized ExamService to fetch data (handles Staging -> Cache -> Online)
+      // Use centralized ExamService to fetch exam metadata (title, num_items, etc.)
       const examData = await ExamService.getExamById(examId as string);
 
       if (!examData) {
@@ -453,22 +453,64 @@ export default function EditAnswerKeyScreen() {
         return;
       }
 
-      // Update UI with fetched data
+      // Update UI with fetched exam metadata
       setExamTitle(examData.metadata.title);
       setExamCode(examData.metadata.examCode || "");
       setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
-
       const numItems = examData.totalQuestions || 20;
+
+      // When online, always fetch the answer key directly from Firestore so we
+      // pick up any edits made from the web app without relying on the Realm cache.
+      let freshAnswers: string[] = [];
+      let freshAkId = examData.answerKey?.id || `ak_${examId}`;
+      let freshVersion = Number(examData.answerKey?.version ?? 1);
+
+      if (online) {
+        try {
+          const akQuery = query(
+            collection(db, "answerKeys"),
+            where("examId", "==", examId as string),
+          );
+          const akSnap = await getDocs(akQuery);
+
+          if (!akSnap.empty) {
+            // Pick the highest-version doc
+            let best = akSnap.docs[0];
+            akSnap.docs.slice(1).forEach((d) => {
+              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+            });
+            const akData = best.data();
+            freshAkId = best.id;
+            freshVersion = Number(akData.version ?? 1);
+
+            if (Array.isArray(akData.answers) && akData.answers.length > 0) {
+              freshAnswers = akData.answers as string[];
+            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+              freshAnswers = (akData.questionSettings as any[])
+                .slice()
+                .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+                .map((q: any) => String(q.correctAnswer ?? ""));
+            }
+          }
+        } catch (akErr) {
+          console.warn("[EditAnswerKey] Direct Firestore answer key fetch failed, using cached:", akErr);
+          // Fall back to whatever ExamService already loaded
+          freshAnswers = examData.answerKey?.answers ?? [];
+        }
+      } else {
+        // Offline — use whatever ExamService returned from cache
+        freshAnswers = examData.answerKey?.answers ?? [];
+      }
+
       const initialAnswers = Array.from({ length: numItems }, (_, i) => ({
         questionNumber: i + 1,
-        answer: examData.answerKey?.answers?.[i] || "",
+        answer: freshAnswers[i] || "",
       }));
 
       setAnswers(initialAnswers);
-      setAnswerKeyId(examData.answerKey?.id || `ak_${examId}`);
-      const loadedVersion = Number(examData.answerKey?.version ?? 1);
-      setAnswerKeyVersion(loadedVersion);
-      setRemoteVersion(loadedVersion);
+      setAnswerKeyId(freshAkId);
+      setAnswerKeyVersion(freshVersion);
+      setRemoteVersion(freshVersion);
       setConflictDetected(false);
       setHasLocalChanges(false);
 
@@ -649,6 +691,8 @@ export default function EditAnswerKeyScreen() {
           updatedAt: serverTimestamp(),
           locked: false,
           version: nextVersion,
+          // answers array — required by the web app's AnswerKeyService
+          answers: answers.map((item) => item.answer),
           questionSettings: answers.map((item) => {
             const existingSetting = (answerKeySnap.data()?.questionSettings || []).find(
               (q: any) => q.questionNumber === item.questionNumber
