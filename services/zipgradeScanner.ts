@@ -1,6 +1,5 @@
 import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
-import { scan200ItemPageFast } from "./brightnessScannerFor200Item";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
 const OMR_DEBUG_LOGS = false;
@@ -546,7 +545,7 @@ export class ZipgradeScanner {
     const matsToCleanup: any[] = [];
 
     try {
-      // Normalize questionCount before loading OpenCV so 200q can use the fast path.
+      // Normalize questionCount before loading OpenCV.
       const rawQ =
         typeof questionCount === "number"
           ? questionCount
@@ -555,26 +554,9 @@ export class ZipgradeScanner {
 
       if (qCount === 200) {
         const currentPage = pageNumber || 1;
-        const startedAt = Date.now();
         console.log(
-          `[OMR] 200Q fast path config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+          `[OMR] 200Q strict path config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
         );
-        const answers = await scan200ItemPageFast(
-          imageUri,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        console.log(
-          `[OMR] 200Q fast path complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
-        );
-
-        return {
-          studentId: "00000000",
-          answers,
-          confidence: 0.98,
-          processedImageUri: imageUri,
-        };
       }
 
       // Load OpenCV

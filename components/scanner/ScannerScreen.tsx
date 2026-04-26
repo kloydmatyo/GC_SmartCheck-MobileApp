@@ -377,13 +377,10 @@ function normalize200ScanMapping(
   }
 
   const improvement = bestScore - baselineScore;
-  const shouldApply =
-    bestCandidate.name !== "identity" &&
-    improvement >= 8 &&
-    bestScore >= Math.max(50, baselineScore + 8);
+  const shouldApply = false;
 
   console.log(
-    `[ScannerScreen] 200Q mapping check: baseline=${baselineScore}/200, best=${bestScore}/200 (${bestMode}:${bestCandidate.name}), applied=${shouldApply}`,
+    `[ScannerScreen] 200Q mapping diagnostic: baseline=${baselineScore}/200, best=${bestScore}/200 (${bestMode}:${bestCandidate.name}), improvement=${improvement}, applied=${shouldApply}`,
   );
 
   return shouldApply

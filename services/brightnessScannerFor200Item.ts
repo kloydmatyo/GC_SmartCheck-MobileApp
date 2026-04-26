@@ -11,7 +11,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { StudentAnswer } from "../types/scanning";
 
 const DEBUG_LOGS = false;
-const SCANNER_200Q_VERSION = "200Q-anchor-orientation-v4";
+const SCANNER_200Q_VERSION = "200Q-adaptive-bubble-grid-v8";
 
 interface Markers {
   topLeft: { x: number; y: number };
@@ -91,6 +91,7 @@ interface AnswerBlock {
 }
 
 interface TemplateLayout {
+  profileName: string;
   answerBlocks: AnswerBlock[];
   bubbleDiameterNX: number;
   bubbleDiameterNY: number;
@@ -148,6 +149,42 @@ interface ImagePixels {
   pixels: Uint8Array;
   width: number;
   height: number;
+}
+
+interface RectifiedBubbleCandidate {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  area: number;
+  density: number;
+  score: number;
+}
+
+interface AxisCluster {
+  center: number;
+  count: number;
+  score: number;
+  items: RectifiedBubbleCandidate[];
+}
+
+interface AdaptiveBandGrid {
+  rows: AxisCluster[];
+  columnGroups: AxisCluster[][];
+  candidates: RectifiedBubbleCandidate[];
+}
+
+interface AdaptiveGrid {
+  orientation: PageOrientation;
+  roiX0: number;
+  roiY0: number;
+  roiX1: number;
+  roiY1: number;
+  rectWidth: number;
+  rectHeight: number;
+  expectedBubblePx: number;
+  componentCount: number;
+  bands: [AdaptiveBandGrid, AdaptiveBandGrid];
 }
 
 function mapToPixel(
@@ -502,7 +539,66 @@ function buildOffsetCandidates(radius: number, step: number): number[] {
   return result.sort((a, b) => a - b);
 }
 
-function get200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function build200ItemLayout(input: {
+  profileName: string;
+  physicalChoices: 4 | 5;
+  firstBlockNX: number;
+  blockSpacingNX: number;
+  bubbleSpacingNX: number;
+  blockMarkerOffsetNX: number;
+  blockMarkerOffsetNY: number;
+  topFirstNY: number;
+  bottomFirstNY: number;
+  rowSpacingNY: number;
+  bubbleDiameterNX: number;
+  bubbleDiameterNY: number;
+}): TemplateLayout {
+  const firstBubbleNX = Array.from(
+    { length: 5 },
+    (_, idx) => input.firstBlockNX + idx * input.blockSpacingNX,
+  );
+
+  const makeBlock = (
+    startQ: number,
+    endQ: number,
+    column: number,
+    firstBubbleNY: number,
+  ): AnswerBlock => ({
+    startQ,
+    endQ,
+    firstBubbleNX: firstBubbleNX[column],
+    firstBubbleNY,
+    markerNX: firstBubbleNX[column] - input.blockMarkerOffsetNX,
+    markerNY: firstBubbleNY - input.blockMarkerOffsetNY,
+    bubbleSpacingNX: input.bubbleSpacingNX,
+    rowSpacingNY: input.rowSpacingNY,
+  });
+
+  return {
+    profileName: input.profileName,
+    physicalChoices: input.physicalChoices,
+    answerBlocks: [
+      makeBlock(1, 10, 0, input.topFirstNY),
+      makeBlock(21, 30, 1, input.topFirstNY),
+      makeBlock(41, 50, 2, input.topFirstNY),
+      makeBlock(61, 70, 3, input.topFirstNY),
+      makeBlock(81, 90, 4, input.topFirstNY),
+      makeBlock(11, 20, 0, input.bottomFirstNY),
+      makeBlock(31, 40, 1, input.bottomFirstNY),
+      makeBlock(51, 60, 2, input.bottomFirstNY),
+      makeBlock(71, 80, 3, input.bottomFirstNY),
+      makeBlock(91, 100, 4, input.bottomFirstNY),
+    ],
+    bubbleDiameterNX: input.bubbleDiameterNX,
+    bubbleDiameterNY: input.bubbleDiameterNY,
+  };
+}
+
+function getLegacy200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
   // Measured from the provided 5-choice 200_Answer_Sheet.pdf.
   // Coordinates are normalized against the four 8mm corner-marker centers.
   // The app can generate 4-choice sheets too; those use the same first block
@@ -516,121 +612,76 @@ function get200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
     physicalChoices === 4
       ? fiveChoiceBlockSpacingNX - bubbleSpacingNX
       : fiveChoiceBlockSpacingNX;
-  const firstBubbleNX = Array.from(
-    { length: 5 },
-    (_, idx) => firstBlockNX + idx * blockSpacingNX,
-  );
   const topFirstNY = 0.280701672;
   const bottomFirstNY = 0.498246014;
   const rowSpacingNY = 0.018245609;
 
-  return {
+  return build200ItemLayout({
+    profileName: `legacy-${physicalChoices}choice`,
     physicalChoices,
-    answerBlocks: [
-      {
-        startQ: 1,
-        endQ: 10,
-        firstBubbleNX: firstBubbleNX[0],
-        firstBubbleNY: topFirstNY,
-        markerNX: firstBubbleNX[0] - blockMarkerOffsetNX,
-        markerNY: topFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 21,
-        endQ: 30,
-        firstBubbleNX: firstBubbleNX[1],
-        firstBubbleNY: topFirstNY,
-        markerNX: firstBubbleNX[1] - blockMarkerOffsetNX,
-        markerNY: topFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 41,
-        endQ: 50,
-        firstBubbleNX: firstBubbleNX[2],
-        firstBubbleNY: topFirstNY,
-        markerNX: firstBubbleNX[2] - blockMarkerOffsetNX,
-        markerNY: topFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 61,
-        endQ: 70,
-        firstBubbleNX: firstBubbleNX[3],
-        firstBubbleNY: topFirstNY,
-        markerNX: firstBubbleNX[3] - blockMarkerOffsetNX,
-        markerNY: topFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 81,
-        endQ: 90,
-        firstBubbleNX: firstBubbleNX[4],
-        firstBubbleNY: topFirstNY,
-        markerNX: firstBubbleNX[4] - blockMarkerOffsetNX,
-        markerNY: topFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 11,
-        endQ: 20,
-        firstBubbleNX: firstBubbleNX[0],
-        firstBubbleNY: bottomFirstNY,
-        markerNX: firstBubbleNX[0] - blockMarkerOffsetNX,
-        markerNY: bottomFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 31,
-        endQ: 40,
-        firstBubbleNX: firstBubbleNX[1],
-        firstBubbleNY: bottomFirstNY,
-        markerNX: firstBubbleNX[1] - blockMarkerOffsetNX,
-        markerNY: bottomFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 51,
-        endQ: 60,
-        firstBubbleNX: firstBubbleNX[2],
-        firstBubbleNY: bottomFirstNY,
-        markerNX: firstBubbleNX[2] - blockMarkerOffsetNX,
-        markerNY: bottomFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 71,
-        endQ: 80,
-        firstBubbleNX: firstBubbleNX[3],
-        firstBubbleNY: bottomFirstNY,
-        markerNX: firstBubbleNX[3] - blockMarkerOffsetNX,
-        markerNY: bottomFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-      {
-        startQ: 91,
-        endQ: 100,
-        firstBubbleNX: firstBubbleNX[4],
-        firstBubbleNY: bottomFirstNY,
-        markerNX: firstBubbleNX[4] - blockMarkerOffsetNX,
-        markerNY: bottomFirstNY - blockMarkerOffsetNY,
-        bubbleSpacingNX,
-        rowSpacingNY,
-      },
-    ],
+    firstBlockNX,
+    blockSpacingNX,
+    bubbleSpacingNX,
+    blockMarkerOffsetNX,
+    blockMarkerOffsetNY,
+    topFirstNY,
+    bottomFirstNY,
+    rowSpacingNY,
     bubbleDiameterNX: 0.017676768,
     bubbleDiameterNY: 0.012280698,
-  };
+  });
+}
+
+function getGenerated200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
+  // Mirrors services/templatePdfGenerator.ts for generated 200-item sheets.
+  // The coordinates are normalized against the centers of the four 7mm corner
+  // markers: page marker centers (6.5, 6.5) to (183.5, 270.5) on the
+  // 190mm x 277mm printable page.
+  const frameWidthMM = 177;
+  const frameHeightMM = 264;
+  const markerLeftMM = 6.5;
+  const markerTopMM = 6.5;
+  const headerSquareMM = 2.5;
+  const labelWidthMM = 12;
+  const bubbleMM = 3.8;
+  const gapMM = 0.5;
+  const blockGapMM = 3;
+  const blockWidthMM =
+    headerSquareMM + labelWidthMM + physicalChoices * bubbleMM + (physicalChoices + 1) * gapMM;
+  const firstBubbleXMM =
+    headerSquareMM + gapMM + labelWidthMM + gapMM + bubbleMM / 2;
+  const markerXMM = headerSquareMM / 2;
+  const markerToBubbleYMM = headerSquareMM / 2 + 2 + bubbleMM / 2;
+  const topFirstYMM = 110.8;
+  const answerBandGapMM = 52.5;
+
+  return build200ItemLayout({
+    profileName: `generated-${physicalChoices}choice`,
+    physicalChoices,
+    firstBlockNX: (firstBubbleXMM - markerLeftMM) / frameWidthMM,
+    blockSpacingNX: (blockWidthMM + blockGapMM) / frameWidthMM,
+    bubbleSpacingNX: (bubbleMM + gapMM) / frameWidthMM,
+    blockMarkerOffsetNX: (firstBubbleXMM - markerXMM) / frameWidthMM,
+    blockMarkerOffsetNY: markerToBubbleYMM / frameHeightMM,
+    topFirstNY: (topFirstYMM - markerTopMM) / frameHeightMM,
+    bottomFirstNY: (topFirstYMM + answerBandGapMM - markerTopMM) / frameHeightMM,
+    rowSpacingNY: (bubbleMM + 0.8) / frameHeightMM,
+    bubbleDiameterNX: bubbleMM / frameWidthMM,
+    bubbleDiameterNY: bubbleMM / frameHeightMM,
+  });
+}
+
+function get200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
+  return getGenerated200ItemPageLayout(physicalChoices);
+}
+
+function get200ItemPageLayoutCandidates(
+  physicalChoices: 4 | 5,
+): TemplateLayout[] {
+  return [
+    getGenerated200ItemPageLayout(physicalChoices),
+    getLegacy200ItemPageLayout(physicalChoices),
+  ];
 }
 
 function getExpectedGridPoints(
@@ -851,8 +902,11 @@ function scoreBlockMarkersForOrientation(
   bubbleRX: number,
   bubbleRY: number,
 ): number {
-  const searchRadius = Math.max(8, Math.round(Math.max(bubbleRX, bubbleRY) * 2));
-  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.35));
+  const searchRadius = Math.max(
+    10,
+    Math.round(Math.max(bubbleRX, bubbleRY) * 4.6),
+  );
+  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.45));
   let score = 0;
 
   for (const block of layout.answerBlocks) {
@@ -923,15 +977,14 @@ function estimatePageOrientation(
     headerWinner >= 0.18 &&
     (headerWinner - headerLoser >= 0.18 ||
       headerWinner >= Math.max(0.01, headerLoser) * 1.8);
-  const scoresAreWeak = Math.max(normalScore, rotatedScore) < 95;
-  const scoresAreClose = Math.abs(normalScore - rotatedScore) < 12;
-  const orientation =
-    headerIsDecisive || scoresAreWeak || scoresAreClose
-      ? headerOrientation
-      : markerOrientation;
+  // Generated 200Q sheets are graded in the printed/upright orientation. The
+  // old header-density heuristic can be fooled because the answer grid is much
+  // darker than the logo/name area, so it often "decisively" prefers 180deg.
+  // Keep the diagnostics, but avoid remapping exam answers through that guess.
+  const orientation: PageOrientation = "normal";
 
   console.log(
-    `[200Q-FAST] Orientation final: header=${headerOrientation}${headerIsDecisive ? "/decisive" : ""}, marker=${markerOrientation}, markerScore normal=${normalScore.toFixed(1)}, rotated180=${rotatedScore.toFixed(1)} -> ${orientation}`,
+    `[200Q-FAST] Orientation final: header=${headerOrientation}${headerIsDecisive ? "/decisive" : "/weak"}/diagnostic, marker=${markerOrientation}/diagnostic, markerScore normal=${normalScore.toFixed(1)}, rotated180=${rotatedScore.toFixed(1)} -> ${orientation}`,
   );
 
   return orientation;
@@ -949,42 +1002,74 @@ function findBestPageCalibration(
   markerOffsets: readonly PixelOffset[],
   markerBackgroundOffsets: readonly PixelOffset[],
 ): PageCalibration {
-  const layout = get200ItemPageLayout(requestedChoices);
-  const orientation = estimatePageOrientation(
-    pixels,
-    width,
-    height,
-    markers,
-    layout,
-    markerOffsets,
-    markerBackgroundOffsets,
-    bubbleRX,
-    bubbleRY,
-  );
-  const grid = findGridCalibration(
-    pixels,
-    width,
-    height,
-    markers,
-    layout,
-    requestedChoices,
-    bubbleRX,
-    bubbleRY,
-    ringOffsets,
-    orientation,
-  );
+  let bestCalibration: PageCalibration | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const layout of get200ItemPageLayoutCandidates(requestedChoices)) {
+    const orientation = estimatePageOrientation(
+      pixels,
+      width,
+      height,
+      markers,
+      layout,
+      markerOffsets,
+      markerBackgroundOffsets,
+      bubbleRX,
+      bubbleRY,
+    );
+    const grid = findGridCalibration(
+      pixels,
+      width,
+      height,
+      markers,
+      layout,
+      requestedChoices,
+      bubbleRX,
+      bubbleRY,
+      ringOffsets,
+      orientation,
+    );
+    const markerScore = scoreBlockMarkersForOrientation(
+      pixels,
+      width,
+      height,
+      markers,
+      layout,
+      orientation,
+      markerOffsets,
+      markerBackgroundOffsets,
+      bubbleRX,
+      bubbleRY,
+    );
+    const layoutPreference =
+      layout.profileName.startsWith("generated") ? 2 : 0;
+    const combinedScore = grid.score + markerScore * 0.45 + layoutPreference;
+
+    console.log(
+      `[200Q-FAST] Layout candidate ${layout.profileName}: orientation=${orientation}, grid=${grid.score.toFixed(1)}, markers=${markerScore.toFixed(1)}, combined=${combinedScore.toFixed(1)}`,
+    );
+
+    if (combinedScore > bestScore) {
+      bestScore = combinedScore;
+      bestCalibration = {
+        layout,
+        physicalChoices: requestedChoices,
+        orientation,
+        grid,
+        score: combinedScore,
+      };
+    }
+  }
+
+  if (!bestCalibration) {
+    throw new Error("Unable to calibrate 200-item answer grid.");
+  }
 
   console.log(
-    `[200Q-FAST] Using requested ${requestedChoices}-choice layout, orientation=${orientation}, score=${grid.score.toFixed(1)}`,
+    `[200Q-FAST] Using ${bestCalibration.layout.profileName} layout, orientation=${bestCalibration.orientation}, score=${bestCalibration.score.toFixed(1)}`,
   );
 
-  return {
-    layout,
-    physicalChoices: requestedChoices,
-    orientation,
-    grid,
-    score: grid.score,
-  };
+  return bestCalibration;
 }
 
 function getCalibratedBubblePoint(
@@ -1133,8 +1218,11 @@ function calibrateBlockAnchors(
   bubbleRX: number,
   bubbleRY: number,
 ): BlockAnchor[] {
-  const searchRadius = Math.max(12, Math.round(Math.max(bubbleRX, bubbleRY) * 3.1));
-  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.28));
+  const searchRadius = Math.max(
+    14,
+    Math.round(Math.max(bubbleRX, bubbleRY) * 5.2),
+  );
+  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.32));
   const anchors = layout.answerBlocks.map((block) => {
     const markerPoint = getRawBlockMarkerPoint(markers, block, orientation);
     const marker = findBestBlockMarkerOffset(
@@ -1408,12 +1496,24 @@ function calibrateAnswerBandGrid(
       markerPoint,
       markerOffsets,
       markerBackgroundOffsets,
-      Math.max(baseRadius * 2, Math.round(maxBubbleR * 2.4)),
+      Math.max(baseRadius * 2, Math.round(maxBubbleR * 4)),
       fineStep,
     );
     markerScoreSum += markerAnchor.score;
 
-    if (markerAnchor.score >= 95) {
+    const markerAnchorDistanceFromBand = Math.hypot(
+      markerAnchor.dx - baseDx,
+      markerAnchor.dy - baseDy,
+    );
+    const maxMarkerAnchorDistance = Math.max(
+      45,
+      Math.round(maxBubbleR * 2.1),
+    );
+
+    if (
+      markerAnchor.score >= 95 &&
+      markerAnchorDistanceFromBand <= maxMarkerAnchorDistance
+    ) {
       for (let choice = 0; choice < physicalChoices; choice++) {
         colDx[firstCol + choice] = markerAnchor.dx;
       }
@@ -1506,6 +1606,604 @@ function findBestQuestionRowOffset(
   return bestOffset;
 }
 
+function histogramPercentile(histogram: readonly number[], total: number, percentile: number): number {
+  if (total <= 0) return 255;
+
+  const target = Math.max(0, Math.min(total - 1, Math.floor(total * percentile)));
+  let seen = 0;
+
+  for (let value = 0; value < histogram.length; value++) {
+    seen += histogram[value] || 0;
+    if (seen > target) return value;
+  }
+
+  return 255;
+}
+
+function buildRectifiedLumaRoi(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  orientation: PageOrientation,
+  roiX0: number,
+  roiY0: number,
+  roiX1: number,
+  roiY1: number,
+  rectWidth: number,
+  rectHeight: number,
+): { luma: Uint8Array; threshold: number } {
+  const luma = new Uint8Array(rectWidth * rectHeight);
+  const histogram = new Array(256).fill(0);
+  const roiW = roiX1 - roiX0;
+  const roiH = roiY1 - roiY0;
+
+  for (let y = 0; y < rectHeight; y++) {
+    const ny = roiY0 + ((y + 0.5) / rectHeight) * roiH;
+    for (let x = 0; x < rectWidth; x++) {
+      const nx = roiX0 + ((x + 0.5) / rectWidth) * roiW;
+      const point = mapTemplatePointToPixel(markers, nx, ny, orientation);
+      const px = clamp(Math.round(point.px), 0, width - 1);
+      const py = clamp(Math.round(point.py), 0, height - 1);
+      const value = lumaAt(pixels, width, px, py);
+      luma[y * rectWidth + x] = value;
+      histogram[value]++;
+    }
+  }
+
+  const total = rectWidth * rectHeight;
+  const median = histogramPercentile(histogram, total, 0.5);
+  const p10 = histogramPercentile(histogram, total, 0.1);
+  const p25 = histogramPercentile(histogram, total, 0.25);
+  const threshold = clamp(
+    Math.min(median - 32, p25 - 14, p10 + 52, median * 0.78),
+    72,
+    182,
+  );
+
+  return { luma, threshold };
+}
+
+function findRectifiedBubbleCandidates(
+  luma: Uint8Array,
+  rectWidth: number,
+  rectHeight: number,
+  threshold: number,
+  expectedBubblePx: number,
+): RectifiedBubbleCandidate[] {
+  const seen = new Uint8Array(luma.length);
+  const stack: number[] = [];
+  const candidates: RectifiedBubbleCandidate[] = [];
+  const minDim = Math.max(5, expectedBubblePx * 0.42);
+  const maxDim = Math.max(12, expectedBubblePx * 2.05);
+  const minArea = Math.max(8, expectedBubblePx * expectedBubblePx * 0.08);
+  const maxArea = expectedBubblePx * expectedBubblePx * 1.4;
+
+  for (let i = 0; i < luma.length; i++) {
+    if (seen[i] || luma[i] > threshold) continue;
+
+    seen[i] = 1;
+    stack.length = 0;
+    stack.push(i);
+
+    let area = 0;
+    let minX = rectWidth;
+    let maxX = 0;
+    let minY = rectHeight;
+    let maxY = 0;
+    let sumX = 0;
+    let sumY = 0;
+
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      const x = cur % rectWidth;
+      const y = Math.floor(cur / rectWidth);
+      area++;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      sumX += x;
+      sumY += y;
+
+      const neighbors = [
+        x > 0 ? cur - 1 : -1,
+        x < rectWidth - 1 ? cur + 1 : -1,
+        y > 0 ? cur - rectWidth : -1,
+        y < rectHeight - 1 ? cur + rectWidth : -1,
+      ];
+
+      for (const next of neighbors) {
+        if (next < 0 || seen[next] || luma[next] > threshold) continue;
+        seen[next] = 1;
+        stack.push(next);
+      }
+    }
+
+    const boxW = maxX - minX + 1;
+    const boxH = maxY - minY + 1;
+    const aspect = boxW / Math.max(1, boxH);
+    const density = area / Math.max(1, boxW * boxH);
+
+    if (boxW < minDim || boxH < minDim) continue;
+    if (boxW > maxDim || boxH > maxDim) continue;
+    if (area < minArea || area > maxArea) continue;
+    if (aspect < 0.55 || aspect > 1.8) continue;
+    if (density < 0.08 || density > 0.92) continue;
+
+    const avgDim = (boxW + boxH) / 2;
+    const sizeScore = Math.exp(
+      -Math.abs(Math.log(avgDim / Math.max(1, expectedBubblePx))) * 1.1,
+    );
+    const aspectScore = Math.exp(-Math.abs(Math.log(aspect)) * 1.4);
+    const densityScore = density < 0.18 ? density / 0.18 : 1;
+
+    candidates.push({
+      x: sumX / area,
+      y: sumY / area,
+      width: boxW,
+      height: boxH,
+      area,
+      density,
+      score: area * sizeScore * aspectScore * densityScore,
+    });
+  }
+
+  return candidates;
+}
+
+function clusterCandidatesByAxis(
+  candidates: readonly RectifiedBubbleCandidate[],
+  axis: "x" | "y",
+  tolerancePx: number,
+): AxisCluster[] {
+  const sorted = [...candidates].sort((a, b) => a[axis] - b[axis]);
+  const clusters: AxisCluster[] = [];
+
+  for (const candidate of sorted) {
+    const value = candidate[axis];
+    const last = clusters[clusters.length - 1];
+
+    if (last && Math.abs(value - last.center) <= tolerancePx) {
+      last.items.push(candidate);
+      last.count++;
+      last.score += candidate.score;
+      const weight = Math.max(1, candidate.score);
+      const existingWeight = Math.max(1, last.score - candidate.score);
+      last.center =
+        (last.center * existingWeight + value * weight) /
+        (existingWeight + weight);
+    } else {
+      clusters.push({
+        center: value,
+        count: 1,
+        score: candidate.score,
+        items: [candidate],
+      });
+    }
+  }
+
+  return clusters;
+}
+
+function selectAnswerRows(
+  candidates: readonly RectifiedBubbleCandidate[],
+  physicalChoices: 4 | 5,
+  expectedBubblePx: number,
+): [AxisCluster[], AxisCluster[]] | null {
+  const totalColumns = physicalChoices * 5;
+  const minRowCount = Math.max(8, Math.floor(totalColumns * 0.48));
+  const rowClusters = clusterCandidatesByAxis(
+    candidates,
+    "y",
+    Math.max(5, expectedBubblePx * 0.48),
+  ).filter((cluster) => cluster.count >= minRowCount);
+
+  if (rowClusters.length < 18) return null;
+
+  const strongestRows = [...rowClusters]
+    .sort((a, b) => b.count - a.count || b.score - a.score)
+    .slice(0, Math.min(24, rowClusters.length))
+    .sort((a, b) => a.center - b.center);
+
+  if (strongestRows.length < 20) return null;
+
+  let splitAfter = 9;
+  let largestGap = Number.NEGATIVE_INFINITY;
+
+  for (let i = 0; i < strongestRows.length - 1; i++) {
+    const gap = strongestRows[i + 1].center - strongestRows[i].center;
+    if (gap > largestGap) {
+      largestGap = gap;
+      splitAfter = i;
+    }
+  }
+
+  let topRows = strongestRows.slice(0, splitAfter + 1);
+  let bottomRows = strongestRows.slice(splitAfter + 1);
+
+  if (topRows.length < 10 || bottomRows.length < 10) {
+    topRows = strongestRows.slice(0, 10);
+    bottomRows = strongestRows.slice(strongestRows.length - 10);
+  } else {
+    topRows = topRows
+      .sort((a, b) => b.count - a.count || b.score - a.score)
+      .slice(0, 10)
+      .sort((a, b) => a.center - b.center);
+    bottomRows = bottomRows
+      .sort((a, b) => b.count - a.count || b.score - a.score)
+      .slice(0, 10)
+      .sort((a, b) => a.center - b.center);
+  }
+
+  return topRows.length === 10 && bottomRows.length === 10
+    ? [topRows, bottomRows]
+    : null;
+}
+
+function rowCandidateSubset(
+  candidates: readonly RectifiedBubbleCandidate[],
+  rows: readonly AxisCluster[],
+  expectedBubblePx: number,
+): RectifiedBubbleCandidate[] {
+  const tolerance = Math.max(5, expectedBubblePx * 0.58);
+  return candidates.filter((candidate) =>
+    rows.some((row) => Math.abs(candidate.y - row.center) <= tolerance),
+  );
+}
+
+function extractColumnGroups(
+  candidates: readonly RectifiedBubbleCandidate[],
+  rows: readonly AxisCluster[],
+  physicalChoices: 4 | 5,
+  expectedBubblePx: number,
+): { groups: AxisCluster[][]; rowCandidates: RectifiedBubbleCandidate[] } | null {
+  const rowCandidates = rowCandidateSubset(candidates, rows, expectedBubblePx);
+  const minColumnCount = Math.max(4, Math.floor(rows.length * 0.42));
+  const xClusters = clusterCandidatesByAxis(
+    rowCandidates,
+    "x",
+    Math.max(5, expectedBubblePx * 0.5),
+  )
+    .filter((cluster) => cluster.count >= minColumnCount)
+    .sort((a, b) => a.center - b.center);
+
+  const minChoiceGap = expectedBubblePx * 0.55;
+  const maxChoiceGap = expectedBubblePx * 1.85;
+  const groups: AxisCluster[][] = [];
+  let i = 0;
+
+  while (i <= xClusters.length - physicalChoices && groups.length < 5) {
+    const group = xClusters.slice(i, i + physicalChoices);
+    const gaps = group.slice(1).map((cluster, idx) => cluster.center - group[idx].center);
+    const looksLikeChoices =
+      gaps.length === physicalChoices - 1 &&
+      gaps.every((gap) => gap >= minChoiceGap && gap <= maxChoiceGap);
+
+    if (looksLikeChoices) {
+      groups.push(group);
+      i += physicalChoices;
+    } else {
+      i++;
+    }
+  }
+
+  if (groups.length === 5) {
+    return { groups, rowCandidates };
+  }
+
+  // Last resort: choose the strongest columns, then preserve physical order.
+  const expectedColumns = physicalChoices * 5;
+  if (xClusters.length >= expectedColumns) {
+    const strongest = [...xClusters]
+      .sort((a, b) => b.count - a.count || b.score - a.score)
+      .slice(0, expectedColumns)
+      .sort((a, b) => a.center - b.center);
+    return {
+      groups: Array.from({ length: 5 }, (_, groupIndex) =>
+        strongest.slice(groupIndex * physicalChoices, (groupIndex + 1) * physicalChoices),
+      ),
+      rowCandidates,
+    };
+  }
+
+  return null;
+}
+
+function findNearestRectifiedCandidate(
+  candidates: readonly RectifiedBubbleCandidate[],
+  x: number,
+  y: number,
+  radius: number,
+): RectifiedBubbleCandidate | null {
+  let best: RectifiedBubbleCandidate | null = null;
+  let bestDistance = radius;
+
+  for (const candidate of candidates) {
+    const dist = Math.hypot(candidate.x - x, candidate.y - y);
+    if (dist < bestDistance) {
+      bestDistance = dist;
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function detectAdaptiveGrid(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  physicalChoices: 4 | 5,
+  orientation: PageOrientation,
+): AdaptiveGrid | null {
+  const roiX0 = -0.02;
+  const roiX1 = 1.04;
+  const roiY0 = 0.22;
+  const roiY1 = 0.84;
+  const rectWidth = 920;
+  const frameAspect = 264 / 177;
+  const rectHeight = Math.round(
+    rectWidth * frameAspect * ((roiY1 - roiY0) / (roiX1 - roiX0)),
+  );
+  const expectedBubblePx = (3.8 / 177) * rectWidth;
+  const { luma, threshold } = buildRectifiedLumaRoi(
+    pixels,
+    width,
+    height,
+    markers,
+    orientation,
+    roiX0,
+    roiY0,
+    roiX1,
+    roiY1,
+    rectWidth,
+    rectHeight,
+  );
+  const candidates = findRectifiedBubbleCandidates(
+    luma,
+    rectWidth,
+    rectHeight,
+    threshold,
+    expectedBubblePx,
+  );
+  const rows = selectAnswerRows(candidates, physicalChoices, expectedBubblePx);
+
+  if (!rows) {
+    console.log(
+      `[200Q-FAST] Adaptive grid failed (${orientation}): components=${candidates.length}, threshold=${threshold.toFixed(0)}, rows=0`,
+    );
+    return null;
+  }
+
+  const topColumns = extractColumnGroups(
+    candidates,
+    rows[0],
+    physicalChoices,
+    expectedBubblePx,
+  );
+  const bottomColumns = extractColumnGroups(
+    candidates,
+    rows[1],
+    physicalChoices,
+    expectedBubblePx,
+  );
+
+  if (!topColumns || !bottomColumns) {
+    console.log(
+      `[200Q-FAST] Adaptive grid failed (${orientation}): components=${candidates.length}, threshold=${threshold.toFixed(0)}, topCols=${topColumns ? 5 : 0}, bottomCols=${bottomColumns ? 5 : 0}`,
+    );
+    return null;
+  }
+
+  console.log(
+    `[200Q-FAST] Adaptive grid (${orientation}): components=${candidates.length}, threshold=${threshold.toFixed(0)}, rows=${rows[0].length}+${rows[1].length}, cols=${topColumns.groups.length * physicalChoices}+${bottomColumns.groups.length * physicalChoices}`,
+  );
+
+  return {
+    orientation,
+    roiX0,
+    roiY0,
+    roiX1,
+    roiY1,
+    rectWidth,
+    rectHeight,
+    expectedBubblePx,
+    componentCount: candidates.length,
+    bands: [
+      {
+        rows: rows[0],
+        columnGroups: topColumns.groups,
+        candidates: topColumns.rowCandidates,
+      },
+      {
+        rows: rows[1],
+        columnGroups: bottomColumns.groups,
+        candidates: bottomColumns.rowCandidates,
+      },
+    ],
+  };
+}
+
+function rectifiedToTemplatePoint(
+  grid: AdaptiveGrid,
+  x: number,
+  y: number,
+): { nx: number; ny: number } {
+  return {
+    nx: grid.roiX0 + (x / grid.rectWidth) * (grid.roiX1 - grid.roiX0),
+    ny: grid.roiY0 + (y / grid.rectHeight) * (grid.roiY1 - grid.roiY0),
+  };
+}
+
+function chooseMarkedChoice(fills: BubbleInteriorSample[]): string {
+  const byBrightness = [...fills].sort(
+    (a, b) => a.brightness - b.brightness,
+  );
+  const darkest = byBrightness[0].brightness;
+  const secondDark =
+    byBrightness.length >= 2 ? byBrightness[1].brightness : 255;
+  const brightest = byBrightness[byBrightness.length - 1].brightness;
+  const brightnessSpread = brightest - darkest;
+  const mean =
+    fills.reduce((sum, item) => sum + item.brightness, 0) / fills.length;
+
+  for (const fill of fills) {
+    const relativeDarkness = Math.max(0, brightest - fill.brightness);
+    const percentileContrast = Math.max(0, fill.paperMean - fill.p25);
+    const minContrast = Math.max(0, fill.paperMean - fill.minLuma);
+    fill.score =
+      relativeDarkness * 0.45 +
+      fill.contrast +
+      percentileContrast * 0.55 +
+      fill.darkRatio * 90 +
+      minContrast * 0.06;
+  }
+
+  const sorted = [...fills].sort((a, b) => b.score - a.score);
+  const best = sorted[0];
+  const second = sorted.length >= 2 ? sorted[1] : null;
+  const worst = sorted[sorted.length - 1];
+  const scoreGap = second ? best.score - second.score : best.score;
+  const absoluteGap = secondDark - darkest;
+  const scoreSpread = best.score - worst.score;
+  const bestIsDarkest = best.choice === byBrightness[0].choice;
+
+  if (best.score >= 7 && scoreGap >= 0.35) {
+    return best.choice;
+  }
+  if (scoreGap >= 1.75 && best.contrast >= 1.5) {
+    return best.choice;
+  }
+  if (
+    bestIsDarkest &&
+    absoluteGap >= 1.25 &&
+    brightnessSpread >= 1.75 &&
+    best.score >= 2
+  ) {
+    return best.choice;
+  }
+  if (scoreSpread >= 2.25 && best.score >= 2.25 && scoreGap >= 0.12) {
+    return best.choice;
+  }
+  if (
+    bestIsDarkest &&
+    brightnessSpread >= 0.8 &&
+    best.brightness <= mean - 0.2 &&
+    best.score >= 1.25
+  ) {
+    return best.choice;
+  }
+
+  return "";
+}
+
+function scan200ItemPageWithAdaptiveGrid(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+  physicalChoices: 4 | 5,
+  centerOffsets: readonly PixelOffset[],
+  backgroundOffsets: readonly PixelOffset[],
+): StudentAnswer[] | null {
+  const grid =
+    detectAdaptiveGrid(
+      pixels,
+      width,
+      height,
+      markers,
+      physicalChoices,
+      "normal",
+    ) ??
+    detectAdaptiveGrid(
+      pixels,
+      width,
+      height,
+      markers,
+      physicalChoices,
+      "rotated180",
+    );
+
+  if (!grid) return null;
+
+  const choiceLabels = "ABCDE".slice(0, physicalChoices).split("");
+  const answers: StudentAnswer[] = [];
+  const bandStarts = [
+    [1, 21, 41, 61, 81],
+    [11, 31, 51, 71, 91],
+  ];
+  const snapRadius = Math.max(5, grid.expectedBubblePx * 0.62);
+
+  for (let bandIndex = 0; bandIndex < 2; bandIndex++) {
+    const band = grid.bands[bandIndex];
+
+    for (let blockIndex = 0; blockIndex < 5; blockIndex++) {
+      const startQ = bandStarts[bandIndex][blockIndex];
+      const columns = band.columnGroups[blockIndex];
+
+      for (let row = 0; row < 10; row++) {
+        const fills: BubbleInteriorSample[] = [];
+        const rowY = band.rows[row].center;
+
+        for (let choice = 0; choice < physicalChoices; choice++) {
+          const colX = columns[choice].center;
+          const snapped = findNearestRectifiedCandidate(
+            band.candidates,
+            colX,
+            rowY,
+            snapRadius,
+          );
+          const point = rectifiedToTemplatePoint(
+            grid,
+            snapped?.x ?? colX,
+            snapped?.y ?? rowY,
+          );
+          const pixelPoint = mapTemplatePointToPixel(
+            markers,
+            point.nx,
+            point.ny,
+            grid.orientation,
+          );
+          const sample = sampleBubbleMarkRaw(
+            pixels,
+            width,
+            height,
+            pixelPoint.px,
+            pixelPoint.py,
+            centerOffsets,
+            backgroundOffsets,
+          );
+
+          fills.push({
+            choice: choiceLabels[choice],
+            brightness: sample.mean,
+            minLuma: sample.minLuma,
+            darkRatio: sample.darkRatio,
+            paperMean: sample.paperMean,
+            contrast: sample.contrast,
+            p25: sample.p25,
+            score: 0,
+          });
+        }
+
+        const selectedChoice = chooseMarkedChoice(fills);
+        answers.push({
+          questionNumber: startQ + row,
+          selectedAnswer: selectedChoice,
+        });
+      }
+    }
+  }
+
+  console.log(
+    `[200Q-FAST] Using adaptive bubble grid (${grid.componentCount} components)`,
+  );
+
+  return answers.sort((a, b) => a.questionNumber - b.questionNumber);
+}
+
 function scan200ItemPagePixelsWithBrightness(
   pixels: Uint8Array,
   width: number,
@@ -1526,6 +2224,20 @@ function scan200ItemPagePixelsWithBrightness(
   const markerRY = bubbleRY * 0.57;
   const markerOffsets = buildSampleOffsets(markerRX, markerRY, 0.95, 2, true);
   const markerBackgroundOffsets = buildBackgroundOffsets(markerRX, markerRY);
+  const adaptiveAnswers = scan200ItemPageWithAdaptiveGrid(
+    pixels,
+    width,
+    height,
+    markers,
+    requestedChoices,
+    centerOffsets,
+    backgroundOffsets,
+  );
+
+  if (adaptiveAnswers) {
+    return adaptiveAnswers;
+  }
+
   const pageCalibration = findBestPageCalibration(
     pixels,
     width,
@@ -1552,8 +2264,33 @@ function scan200ItemPagePixelsWithBrightness(
     bubbleRX,
     bubbleRY,
   );
-  const reliableAnchorCount = blockAnchors.filter((anchor) => anchor.reliable).length;
-  const useAnchorGrid = reliableAnchorCount >= 7;
+  const reliableAnchors = blockAnchors.filter((anchor) => anchor.reliable);
+  const reliableAnchorCount = reliableAnchors.length;
+  const anchorDxValues = reliableAnchors.map((anchor) => anchor.dx);
+  const anchorDyValues = reliableAnchors.map((anchor) => anchor.dy);
+  const anchorDxRange =
+    anchorDxValues.length > 0
+      ? Math.max(...anchorDxValues) - Math.min(...anchorDxValues)
+      : Number.POSITIVE_INFINITY;
+  const anchorDyRange =
+    anchorDyValues.length > 0
+      ? Math.max(...anchorDyValues) - Math.min(...anchorDyValues)
+      : Number.POSITIVE_INFINITY;
+  const maxCoherentAnchorRange = Math.max(
+    55,
+    Math.round(Math.max(bubbleRX, bubbleRY) * 2.4),
+  );
+  const useAnchorGrid =
+    reliableAnchorCount >= 7 &&
+    anchorDxRange <= maxCoherentAnchorRange &&
+    anchorDyRange <= maxCoherentAnchorRange;
+
+  if (reliableAnchorCount >= 7 && !useAnchorGrid) {
+    console.log(
+      `[200Q-FAST] Block anchors rejected: reliable=${reliableAnchorCount}/10, dxRange=${Math.round(anchorDxRange)}, dyRange=${Math.round(anchorDyRange)}, max=${maxCoherentAnchorRange}`,
+    );
+  }
+
   const bandCalibrations = useAnchorGrid
     ? null
     : [
@@ -1597,7 +2334,7 @@ function scan200ItemPagePixelsWithBrightness(
     const bandIndex = blockIndex < 5 ? 0 : 1;
     const blockColumn = blockIndex % 5;
     const blockAnchor = blockAnchors[blockIndex];
-    const useBlockAnchor = useAnchorGrid || blockAnchor.reliable;
+    const useBlockAnchor = useAnchorGrid && blockAnchor.reliable;
     const bandCalibration = bandCalibrations?.[bandIndex] ?? null;
 
     for (let q = block.startQ; q <= block.endQ; q++) {
@@ -1860,8 +2597,8 @@ function findCornerMarker(
     }
   }
 
-  const minDim = Math.max(8, Math.min(imageW, imageH) * 0.006);
-  const maxDim = Math.min(imageW, imageH) * 0.13;
+  const minDim = Math.max(10, Math.min(imageW, imageH) * 0.012);
+  const maxDim = Math.min(imageW, imageH) * 0.09;
 
   for (let i = 0; i < dark.length; i++) {
     if (!dark[i] || seen[i]) continue;
