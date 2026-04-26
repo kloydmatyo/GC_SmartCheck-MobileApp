@@ -2,7 +2,7 @@ import { ZipgradeScanner } from "@/services/zipgradeScanner";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
@@ -20,6 +20,7 @@ export default function CameraScanner({
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
