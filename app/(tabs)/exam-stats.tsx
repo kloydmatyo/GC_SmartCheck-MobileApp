@@ -21,6 +21,7 @@ import {
   ExamDashboardStats,
 } from "@/services/dashboardService";
 import {
+  ExportableRow,
   ExportDateFilter,
   ExportFormat,
   GradeExportService,
@@ -143,6 +144,11 @@ export default function ExamStatsScreen() {
   const [reportHtml, setReportHtml] = useState("");
   const [reportViewerTitle, setReportViewerTitle] = useState("");
   const [sendScoresVisible, setSendScoresVisible] = useState(false);
+  const [studentRows, setStudentRows] = useState<ExportableRow[]>([]);
+  const [studentRowsLoading, setStudentRowsLoading] = useState(false);
+  const [exportingStudentId, setExportingStudentId] = useState<string | null>(
+    null,
+  );
 
   const unsubscribeRef = useRef<(() => void) | null>(null);
 
@@ -157,6 +163,39 @@ export default function ExamStatsScreen() {
         )
       : BASE_GRADES;
 
+  const handleStudentExport = useCallback(
+    (row: ExportableRow) => {
+      if (exportingStudentId) return;
+      Alert.alert(
+        `Export — ${row.studentId}`,
+        "Choose export format for this student's result.",
+        [
+          {
+            text: "PDF Slip",
+            onPress: async () => {
+              setExportingStudentId(row.studentId);
+              const result = await GradeExportService.exportStudentResult(
+                row,
+                title,
+                "",
+                "pdf",
+              );
+              setExportingStudentId(null);
+              Toast.show({
+                type: result.success ? "success" : "error",
+                text1: result.success ? "Exported" : "Export Failed",
+                text2: result.message,
+                visibilityTime: 3000,
+              });
+            },
+          },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+    },
+    [exportingStudentId, title],
+  );
+
   const handleExport = useCallback(() => {
     if (!examId || exporting) return;
 
@@ -168,8 +207,6 @@ export default function ExamStatsScreen() {
           : "All records";
 
     Alert.alert("Export Grades", `Format? Exporting ${filterLabel}.`, [
-      { text: "CSV", onPress: () => void doExport("csv") },
-      { text: "Excel", onPress: () => void doExport("excel") },
       { text: "PDF", onPress: () => void doExport("pdf") },
       { text: "Cancel", style: "cancel" },
     ]);
@@ -181,14 +218,17 @@ export default function ExamStatsScreen() {
     setExportPercent(0);
 
     try {
-      const result = await GradeExportService.exportExamGrades(examId as string, {
-        format,
-        dateFilter: dateFilter as ExportDateFilter,
-        onProgress: (stage, percent) => {
-          setExportStage(stage);
-          setExportPercent(percent);
+      const result = await GradeExportService.exportExamGrades(
+        examId as string,
+        {
+          format,
+          dateFilter: dateFilter as ExportDateFilter,
+          onProgress: (stage, percent) => {
+            setExportStage(stage);
+            setExportPercent(percent);
+          },
         },
-      });
+      );
 
       if (result.success) {
         Toast.show({
@@ -281,7 +321,9 @@ export default function ExamStatsScreen() {
           setRefreshing(false);
         },
         (err) => {
-          setError(err.message || "Failed to load stats. Check your connection.");
+          setError(
+            err.message || "Failed to load stats. Check your connection.",
+          );
           setLoading(false);
           setRefreshing(false);
         },
@@ -302,6 +344,26 @@ export default function ExamStatsScreen() {
       unsubscribeRef.current = null;
     };
   }, [examId, dateFilter, subscribe]);
+
+  useEffect(() => {
+    if (!examId) return;
+    setStudentRowsLoading(true);
+    GradeExportService.fetchStudentRows(examId as string)
+      .then((rows) => {
+        // Apply same date filter as the stats view
+        if (dateFilter !== "all") {
+          const now = new Date();
+          if (dateFilter === "today") now.setHours(0, 0, 0, 0);
+          else now.setDate(now.getDate() - 7);
+          const bound = now.toISOString();
+          setStudentRows(rows.filter((r) => r.dateScanned >= bound));
+        } else {
+          setStudentRows(rows);
+        }
+      })
+      .catch(() => setStudentRows([]))
+      .finally(() => setStudentRowsLoading(false));
+  }, [examId, dateFilter]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -341,7 +403,10 @@ export default function ExamStatsScreen() {
       )}
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.iconButton}
+        >
           <Ionicons name="arrow-back" size={22} color="#1F2937" />
         </TouchableOpacity>
 
@@ -372,7 +437,9 @@ export default function ExamStatsScreen() {
               <Ionicons
                 name="document-text-outline"
                 size={20}
-                color={!stats || stats.totalGraded === 0 ? "#C7CDD6" : "#20BE7B"}
+                color={
+                  !stats || stats.totalGraded === 0 ? "#C7CDD6" : "#20BE7B"
+                }
               />
             )}
           </TouchableOpacity>
@@ -463,7 +530,11 @@ export default function ExamStatsScreen() {
 
           <View style={styles.row}>
             <View style={[styles.card, styles.cardPass]}>
-              <Ionicons name="checkmark-circle-outline" size={22} color="#20BE7B" />
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={22}
+                color="#20BE7B"
+              />
               <Text style={styles.cardValue}>{stats.passCount}</Text>
               <Text style={styles.cardLabel}>Passed ({stats.passRate}%)</Text>
             </View>
@@ -472,19 +543,29 @@ export default function ExamStatsScreen() {
               <Text style={[styles.cardValue, { color: "#EF4444" }]}>
                 {stats.failCount}
               </Text>
-              <Text style={styles.cardLabel}>Failed ({100 - stats.passRate}%)</Text>
+              <Text style={styles.cardLabel}>
+                Failed ({100 - stats.passRate}%)
+              </Text>
             </View>
           </View>
 
           <View style={styles.hiloBox}>
             <View style={styles.hiloItem}>
-              <Ionicons name="arrow-up-circle-outline" size={22} color="#20BE7B" />
+              <Ionicons
+                name="arrow-up-circle-outline"
+                size={22}
+                color="#20BE7B"
+              />
               <Text style={styles.hiloValue}>{stats.highestPercentage}%</Text>
               <Text style={styles.hiloLabel}>Highest Score</Text>
             </View>
             <View style={styles.hiloDivider} />
             <View style={styles.hiloItem}>
-              <Ionicons name="arrow-down-circle-outline" size={22} color="#EF4444" />
+              <Ionicons
+                name="arrow-down-circle-outline"
+                size={22}
+                color="#EF4444"
+              />
               <Text style={[styles.hiloValue, { color: "#EF4444" }]}>
                 {stats.lowestPercentage}%
               </Text>
@@ -521,7 +602,14 @@ export default function ExamStatsScreen() {
             {(() => {
               const dist = stats.distribution;
               const total = stats.totalGraded;
-              const maxCount = Math.max(dist.A, dist.B, dist.C, dist.D, dist.F, 1);
+              const maxCount = Math.max(
+                dist.A,
+                dist.B,
+                dist.C,
+                dist.D,
+                dist.F,
+                1,
+              );
 
               return grades.map(({ label, key, color }) => (
                 <View key={key} style={styles.distRow}>
@@ -538,7 +626,8 @@ export default function ExamStatsScreen() {
                     />
                   </View>
                   <Text style={styles.distCount}>
-                    {dist[key]} ({total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
+                    {dist[key]} (
+                    {total > 0 ? Math.round((dist[key] / total) * 100) : 0}%)
                   </Text>
                 </View>
               ));
@@ -552,6 +641,71 @@ export default function ExamStatsScreen() {
               minute: "2-digit",
             })}
           </Text>
+
+          {/* ── Individual Student Results ── */}
+          <View style={styles.distBox}>
+            <View style={styles.distHeader}>
+              <Text style={styles.distTitle}>Student Results</Text>
+              {studentRowsLoading && (
+                <ActivityIndicator size="small" color="#20BE7B" />
+              )}
+            </View>
+
+            {studentRows.length === 0 && !studentRowsLoading ? (
+              <Text style={styles.emptySubtitle}>
+                No individual records found.
+              </Text>
+            ) : (
+              studentRows.map((row) => {
+                const isExporting = exportingStudentId === row.studentId;
+                const passColor = row.isPassing ? "#20BE7B" : "#EF4444";
+                return (
+                  <View key={row.studentId} style={styles.studentResultRow}>
+                    <View style={styles.studentResultInfo}>
+                      <Text style={styles.studentResultId}>
+                        {row.studentId}
+                      </Text>
+                      <Text style={styles.studentResultMeta}>
+                        {row.score}/{row.totalPoints} • {row.percentage}%
+                      </Text>
+                    </View>
+                    <View style={styles.studentResultRight}>
+                      <View
+                        style={[
+                          styles.studentGradeBadge,
+                          { borderColor: passColor },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.studentGradeText,
+                            { color: passColor },
+                          ]}
+                        >
+                          {row.gradeEquivalent}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.studentExportBtn}
+                        onPress={() => handleStudentExport(row)}
+                        disabled={!!exportingStudentId}
+                      >
+                        {isExporting ? (
+                          <ActivityIndicator size="small" color="#20BE7B" />
+                        ) : (
+                          <Ionicons
+                            name="share-outline"
+                            size={16}
+                            color="#20BE7B"
+                          />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
         </ScrollView>
       )}
     </View>
@@ -862,5 +1016,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#20BE7B",
     fontWeight: "800",
+  },
+  studentResultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F2F5",
+  },
+  studentResultInfo: {
+    flex: 1,
+  },
+  studentResultId: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+  studentResultMeta: {
+    fontSize: 11,
+    color: "#8E97A6",
+    marginTop: 2,
+  },
+  studentResultRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  studentGradeBadge: {
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  studentGradeText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  studentExportBtn: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 8,
+    backgroundColor: "#F0FBF6",
   },
 });

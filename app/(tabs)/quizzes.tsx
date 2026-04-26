@@ -1,5 +1,10 @@
 import ScanResults from "@/components/scanner/ScanResults";
 import { auth } from "@/config/firebase";
+import {
+  ExportableRow,
+  GradeExportService,
+} from "@/services/gradeExportService";
+import { GradingService } from "@/services/gradingService";
 import { ResultsService } from "@/services/resultsService";
 import { StorageService } from "@/services/storageService";
 import { GradingResult } from "@/types/scanning";
@@ -8,23 +13,24 @@ import * as FileSystem from "expo-file-system/legacy";
 import { useFocusEffect } from "expo-router";
 import * as Sharing from "expo-sharing";
 import React, {
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Modal,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import * as XLSX from "xlsx";
@@ -40,6 +46,11 @@ type ResultRow = {
   sortValue: number;
   source: "synced" | "local";
   rawLocalData?: GradingResult;
+  // fields for individual export
+  studentId: string;
+  score: number;
+  totalPoints: number;
+  dateValue: string;
 };
 
 function scoreTone(value: number) {
@@ -67,6 +78,7 @@ export default function ResultsScreen() {
   const [selectedLocalResult, setSelectedLocalResult] =
     useState<GradingResult | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const loadResults = useCallback(() => {
@@ -99,6 +111,10 @@ export default function ResultsScreen() {
           correctLabel: item.correctLabel,
           sortValue: item.sortValue,
           source: "synced" as const,
+          studentId: item.studentId,
+          score: item.score,
+          totalPoints: item.totalQuestions,
+          dateValue: item.dateValue,
         }));
 
         const mappedLocal = localData.map((item) => ({
@@ -119,6 +135,12 @@ export default function ResultsScreen() {
           sortValue: item.metadata?.timestamp || 0,
           source: "local" as const,
           rawLocalData: item,
+          studentId: item.studentId,
+          score: item.score,
+          totalPoints: item.totalPoints,
+          dateValue: item.metadata?.timestamp
+            ? new Date(item.metadata.timestamp).toISOString()
+            : "",
         }));
 
         const combined = [...mappedSynced, ...mappedLocal].sort(
@@ -250,6 +272,49 @@ export default function ResultsScreen() {
     }
   }, [filteredResults]);
 
+  const handleStudentExport = useCallback(
+    (item: ResultRow) => {
+      if (exportingId) return;
+      const row: ExportableRow = {
+        studentId: item.studentId,
+        score: item.score,
+        totalPoints: item.totalPoints,
+        percentage: item.percentage,
+        gradeEquivalent: GradingService.computeGradeEquivalent(item.percentage),
+        isPassing: GradingService.isPassing(item.percentage),
+        dateScanned: item.dateValue,
+        status: "saved",
+      };
+      Alert.alert(
+        `Export — ${item.studentId || item.studentName}`,
+        "Choose export format for this result.",
+        [
+          {
+            text: "PDF Slip",
+            onPress: async () => {
+              setExportingId(item.id);
+              const result = await GradeExportService.exportStudentResult(
+                row,
+                item.examLabel,
+                "",
+                "pdf",
+              );
+              setExportingId(null);
+              Toast.show({
+                type: result.success ? "success" : "error",
+                text1: result.success ? "Exported" : "Export Failed",
+                text2: result.message,
+                visibilityTime: 3000,
+              });
+            },
+          },
+          { text: "Cancel", style: "cancel" },
+        ],
+      );
+    },
+    [exportingId],
+  );
+
   const renderResultCard = useCallback(({ item }: { item: ResultRow }) => {
     const tone = scoreTone(item.percentage);
 
@@ -276,30 +341,20 @@ export default function ResultsScreen() {
           <View style={styles.resultFooter}>
             <Text style={styles.resultDate}>{item.dateLabel}</Text>
             <Text style={styles.resultCorrect}>{item.correctLabel}</Text>
-            {item.source === "local" && (
-              <View
-                style={[
-                  item.rawLocalData?.metadata?.isValidId
-                    ? styles.verifiedBadge
-                    : styles.unverifiedBadge,
-                  { marginLeft: "auto" },
-                ]}
-              >
-                <Text
-                  style={
-                    item.rawLocalData?.metadata?.isValidId
-                      ? styles.verifiedText
-                      : styles.unverifiedText
-                  }
-                >
-                  {item.rawLocalData?.metadata?.isValidId
-                    ? "Verified"
-                    : "Local"}
-                </Text>
-              </View>
-            )}
           </View>
         </View>
+        <TouchableOpacity
+          style={styles.cardExportBtn}
+          onPress={() => handleStudentExport(item)}
+          disabled={!!exportingId}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {exportingId === item.id ? (
+            <ActivityIndicator size="small" color="#20BE7B" />
+          ) : (
+            <Ionicons name="share-outline" size={18} color="#20BE7B" />
+          )}
+        </TouchableOpacity>
       </TouchableOpacity>
     );
   }, []);
@@ -309,7 +364,7 @@ export default function ResultsScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>All Results</Text>
         <TouchableOpacity style={styles.exportButton} onPress={handleExport}>
-          <Ionicons name="download-outline" size={18} color="#19B97C" />
+          <Ionicons name="share-outline" size={18} color="#19B97C" />
           <Text style={styles.exportText}>Export</Text>
         </TouchableOpacity>
       </View>
@@ -415,6 +470,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 56,
     paddingBottom: 14,
+    backgroundColor: "#F7F7F8",
   },
   headerTitle: {
     fontSize: 28,
@@ -422,23 +478,26 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
   exportButton: {
-    height: 40,
+    height: 36,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: "#EBFBF3",
+    backgroundColor: "#F0FBF6",
+    borderWidth: 1,
+    borderColor: "#D1F0E2",
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   exportText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
     color: "#19B97C",
   },
   searchWrap: {
-    marginHorizontal: 20,
-    height: 54,
-    borderRadius: 16,
+    marginHorizontal: 16,
+    marginTop: 4,
+    height: 48,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#E8EBF0",
     backgroundColor: "#FFFFFF",
@@ -446,30 +505,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   searchInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 14,
     color: "#111827",
-    fontWeight: "600",
+    fontWeight: "500",
   },
   chipsScroll: {
-    height: 52,
+    height: 48,
     flexGrow: 0,
     flexShrink: 0,
-    marginBottom: 8,
+    marginBottom: 4,
   },
   chipsRow: {
-    paddingHorizontal: 20,
-    gap: 10,
+    paddingHorizontal: 16,
+    gap: 8,
+    alignItems: "center",
   },
   chip: {
-    paddingHorizontal: 18,
-    height: 40,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: "#FFFFFF",
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "#E2E6EC",
     justifyContent: "center",
   },
@@ -478,7 +538,7 @@ const styles = StyleSheet.create({
     borderColor: "#20BE7B",
   },
   chipText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: "#4B5563",
   },
@@ -487,11 +547,10 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-    flexGrow: 1,
   },
   listContent: {
-    paddingHorizontal: 22,
-    paddingTop: 4,
+    paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 120,
   },
   loadingWrap: {
@@ -508,37 +567,48 @@ const styles = StyleSheet.create({
     borderColor: "#E8EBF0",
     paddingHorizontal: 14,
     paddingVertical: 14,
-    marginBottom: 14,
+    marginBottom: 10,
+    alignItems: "center",
   },
-  scoreCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  cardExportBtn: {
+    width: 34,
+    height: 34,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 14,
+    borderRadius: 10,
+    backgroundColor: "#F0FBF6",
+    marginLeft: 8,
+  },
+  scoreCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
   },
   scoreCircleText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "800",
   },
   resultBody: {
     flex: 1,
   },
   resultName: {
-    fontSize: 15,
-    fontWeight: "800",
+    fontSize: 14,
+    fontWeight: "700",
     color: "#111827",
-    marginBottom: 3,
+    marginBottom: 2,
   },
   resultMeta: {
     fontSize: 12,
     color: "#6B7280",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   resultFooter: {
     flexDirection: "row",
-    gap: 14,
+    gap: 10,
+    alignItems: "center",
   },
   resultDate: {
     fontSize: 11,
@@ -549,34 +619,6 @@ const styles = StyleSheet.create({
     color: "#19B97C",
     fontWeight: "700",
   },
-  verifiedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#EBFBF3",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  verifiedText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#19B97C",
-  },
-  unverifiedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "#FEF2F2",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  unverifiedText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#E24E5C",
-  },
   emptyState: {
     alignItems: "center",
     paddingHorizontal: 20,
@@ -585,7 +627,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     marginTop: 12,
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
     color: "#6B7280",
   },
   emptySubtitle: {
@@ -594,12 +636,11 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     textAlign: "center",
   },
-  deleteButton: {
-    backgroundColor: "#dc2626",
-  },
+  // unused legacy styles kept to avoid ref errors
+  deleteButton: { backgroundColor: "#dc2626" },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
+    backgroundColor: "rgba(0,0,0,0.7)",
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
@@ -611,9 +652,7 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignItems: "center",
   },
-  modalHeader: {
-    marginBottom: 16,
-  },
+  modalHeader: { marginBottom: 16 },
   modalTitle: {
     fontSize: 22,
     fontWeight: "bold",
@@ -626,11 +665,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: "center",
   },
-  modalButtons: {
-    flexDirection: "row",
-    gap: 12,
-    width: "100%",
-  },
+  modalButtons: { flexDirection: "row", gap: 12, width: "100%" },
   modalButton: {
     flex: 1,
     flexDirection: "row",
@@ -640,17 +675,28 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 6,
   },
-  modalButtonCancel: {
-    borderWidth: 1,
+  modalButtonCancel: { borderWidth: 1 },
+  modalButtonDelete: { backgroundColor: "#dc2626" },
+  modalButtonText: { fontSize: 16, fontWeight: "600" },
+  modalButtonDeleteText: { color: "#fff" },
+  verifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EBFBF3",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
-  modalButtonDelete: {
-    backgroundColor: "#dc2626",
+  verifiedText: { fontSize: 10, fontWeight: "700", color: "#19B97C" },
+  unverifiedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#FEF2F2",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
-  modalButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  modalButtonDeleteText: {
-    color: "#fff",
-  },
+  unverifiedText: { fontSize: 10, fontWeight: "700", color: "#E24E5C" },
 });

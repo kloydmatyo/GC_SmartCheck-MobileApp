@@ -240,7 +240,7 @@ export default function CameraScanner({
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");
-      onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
+      onScanComplete(scanResult, photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
       const message =
