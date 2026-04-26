@@ -3,23 +3,23 @@ import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import { ClassService } from "../../services/classService";
 import {
-  DuplicateScoreDetectionService,
-  DuplicateScoreMatch,
+    DuplicateScoreDetectionService,
+    DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
@@ -45,17 +45,27 @@ function resolveChoicesPerQuestion(examData: any): 4 | 5 {
     examData?.choices_per_item ??
     examData?.choicesPerItem;
   const rawChoiceFormat =
-    examData?.choiceFormat ?? examData?.choicesFormat ?? examData?.choice_format;
+    examData?.choiceFormat ??
+    examData?.choicesFormat ??
+    examData?.choice_format;
 
   if (rawChoiceCount === 5 || rawChoiceCount === "5") return 5;
   if (rawChoiceCount === 4 || rawChoiceCount === "4") return 4;
 
   if (typeof rawChoiceFormat === "string") {
     const normalized = rawChoiceFormat.trim().toUpperCase();
-    if (normalized === "A-E" || normalized === "AE" || normalized.includes("5")) {
+    if (
+      normalized === "A-E" ||
+      normalized === "AE" ||
+      normalized.includes("5")
+    ) {
       return 5;
     }
-    if (normalized === "A-D" || normalized === "AD" || normalized.includes("4")) {
+    if (
+      normalized === "A-D" ||
+      normalized === "AD" ||
+      normalized.includes("4")
+    ) {
       return 4;
     }
   }
@@ -86,7 +96,10 @@ interface Scan200PageProfile {
 
 const PHYSICAL_BLOCK_STARTS_200 = [1, 21, 41, 61, 81, 11, 31, 51, 71, 91];
 
-function find200Block(localQuestion: number): { blockIndex: number; row: number } {
+function find200Block(localQuestion: number): {
+  blockIndex: number;
+  row: number;
+} {
   for (let i = 0; i < PHYSICAL_BLOCK_STARTS_200.length; i++) {
     const start = PHYSICAL_BLOCK_STARTS_200[i];
     if (localQuestion >= start && localQuestion < start + 10) {
@@ -100,7 +113,10 @@ function find200Block(localQuestion: number): { blockIndex: number; row: number 
   };
 }
 
-function localQuestionFromPhysicalBlock(blockIndex: number, row: number): number {
+function localQuestionFromPhysicalBlock(
+  blockIndex: number,
+  row: number,
+): number {
   const safeBlock = Math.max(0, Math.min(9, blockIndex));
   const safeRow = Math.max(0, Math.min(9, row));
   return PHYSICAL_BLOCK_STARTS_200[safeBlock] + safeRow;
@@ -413,7 +429,9 @@ export default function ScannerScreen({
   const [currentState, setCurrentState] = useState<ScannerState>("exam-select");
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
-  const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(4);
+  const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(
+    4,
+  );
 
   // class/exam dropdown state
   const [classesList, setClassesList] = useState<
@@ -586,7 +604,10 @@ export default function ScannerScreen({
           let answers: string[] = [];
           if (Array.isArray(akData.answers) && akData.answers.length > 0) {
             answers = akData.answers as string[];
-          } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+          } else if (
+            Array.isArray(akData.questionSettings) &&
+            akData.questionSettings.length > 0
+          ) {
             answers = (akData.questionSettings as any[])
               .slice()
               .sort((a, b) => a.questionNumber - b.questionNumber)
@@ -598,9 +619,13 @@ export default function ScannerScreen({
 
             // Also update the Realm cache so offline scans use the fresh key
             try {
-              const { RealmService } = await import("../../services/realmService");
+              const { RealmService } =
+                await import("../../services/realmService");
               const cacheRealm = await RealmService.getCacheRealm();
-              const cached = cacheRealm.objectForPrimaryKey<any>("QuizCache", activeExamId);
+              const cached = cacheRealm.objectForPrimaryKey<any>(
+                "QuizCache",
+                activeExamId,
+              );
               if (cached) {
                 cacheRealm.write(() => {
                   cached.answerKey = JSON.stringify({ ...akData, answers });
@@ -608,7 +633,10 @@ export default function ScannerScreen({
                 });
               }
             } catch (cacheErr) {
-              console.warn("[ScannerScreen] Realm cache update skipped:", cacheErr);
+              console.warn(
+                "[ScannerScreen] Realm cache update skipped:",
+                cacheErr,
+              );
             }
           }
         } else {
@@ -668,13 +696,23 @@ export default function ScannerScreen({
           // Check the selected class roster first (fastest, no extra query)
           if (selectedClass) {
             const classSnap = await withTimeout(
-              getDocs(query(collection(db, "classes"), where("__name__", "==", selectedClass.id))),
+              getDocs(
+                query(
+                  collection(db, "classes"),
+                  where("__name__", "==", selectedClass.id),
+                ),
+              ),
               1200,
             );
             if (!classSnap.empty) {
               const classData = classSnap.docs[0].data();
               const roster: any[] = classData.students || [];
-              if (roster.some((s: any) => s.student_id === studentId || s.studentId === studentId)) {
+              if (
+                roster.some(
+                  (s: any) =>
+                    s.student_id === studentId || s.studentId === studentId,
+                )
+              ) {
                 isValidId = true;
               }
             }
@@ -683,8 +721,24 @@ export default function ScannerScreen({
           // Fallback: query the standalone students collection (both field name variants)
           if (!isValidId) {
             const [snapSnake, snapCamel] = await Promise.all([
-              withTimeout(getDocs(query(collection(db, "students"), where("student_id", "==", studentId))), 1200),
-              withTimeout(getDocs(query(collection(db, "students"), where("studentId", "==", studentId))), 1200),
+              withTimeout(
+                getDocs(
+                  query(
+                    collection(db, "students"),
+                    where("student_id", "==", studentId),
+                  ),
+                ),
+                1200,
+              ),
+              withTimeout(
+                getDocs(
+                  query(
+                    collection(db, "students"),
+                    where("studentId", "==", studentId),
+                  ),
+                ),
+                1200,
+              ),
             ]);
             isValidId = !snapSnake.empty || !snapCamel.empty;
           }
@@ -724,13 +778,17 @@ export default function ScannerScreen({
           if (!akSnap.empty) {
             let best = akSnap.docs[0];
             akSnap.docs.slice(1).forEach((d) => {
-              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+              if ((d.data().version ?? 0) > (best.data().version ?? 0))
+                best = d;
             });
             const akData = best.data();
 
             if (Array.isArray(akData.answers) && akData.answers.length > 0) {
               answerKey = akData.answers as string[];
-            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+            } else if (
+              Array.isArray(akData.questionSettings) &&
+              akData.questionSettings.length > 0
+            ) {
               answerKey = (akData.questionSettings as any[])
                 .slice()
                 .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
@@ -1050,7 +1108,6 @@ export default function ScannerScreen({
     }
   };
 
->>>>>>> origin/main
   const handleScanAnother = () => {
     // Reset 2-stage state for 200-item exams
     setTwoStageData(null);
