@@ -15,6 +15,24 @@ import { OfflineStorageService } from "./offlineStorageService";
 import { OfflineQuiz, QuizCache, RealmService } from "./realmService";
 
 export class ExamService {
+  private static toPositiveInt(value: unknown): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    const rounded = Math.floor(parsed);
+    return rounded > 0 ? rounded : 0;
+  }
+
+  private static resolveQuestionCount(
+    candidates: unknown[],
+    fallback = 20,
+  ): number {
+    for (const candidate of candidates) {
+      const count = this.toPositiveInt(candidate);
+      if (count > 0) return count;
+    }
+    return fallback;
+  }
+
   private static formatErrorForLog(error: any) {
     return {
       message: error?.message ?? String(error),
@@ -152,7 +170,10 @@ export class ExamService {
                 status: data.status || "Draft",
                 structureLocked: Boolean(data.structureLocked),
                 papersCount: data.scanned_papers || 0,
-                questionCount: data.num_items || 0,
+                questionCount: this.resolveQuestionCount(
+                  [data.num_items, data.numItems, data.questionCount],
+                  0,
+                ),
                 answerKey: akJson,
                 createdBy: data.createdBy,
                 createdAt: data.createdAt?.toDate?.() || new Date(),
@@ -160,7 +181,8 @@ export class ExamService {
                 version: data.version || 1,
                 instructorId: data.instructorId || "",
                 examCode: data.examCode || data.room || "",
-                choicesPerItem: data.choices_per_item || 4,
+                choicesPerItem:
+                  Number(data.choices_per_item ?? 4) === 5 ? 5 : 4,
               },
               Realm.UpdateMode.Modified,
             );
@@ -271,7 +293,10 @@ export class ExamService {
               status: data.status || "Draft",
               structureLocked: Boolean(data.structureLocked),
               papersCount: data.scanned_papers || 0,
-              questionCount: data.num_items || 0,
+              questionCount: this.resolveQuestionCount(
+                [data.num_items, data.numItems, data.questionCount],
+                0,
+              ),
               answerKey: akJson,
               createdBy: data.createdBy,
               createdAt: data.createdAt?.toDate?.() || new Date(),
@@ -279,7 +304,8 @@ export class ExamService {
               version: data.version || 1,
               instructorId: data.instructorId || "",
               examCode: data.examCode || data.room || "",
-              choicesPerItem: data.choices_per_item || 4,
+              choicesPerItem:
+                Number(data.choices_per_item ?? 4) === 5 ? 5 : 4,
             },
             Realm.UpdateMode.Modified,
           );
@@ -458,14 +484,19 @@ export class ExamService {
           const sQuiz = stagingRealm.create<OfflineQuiz>("OfflineQuiz", {
             title: examData.title,
             subject: examData.subject || examData.className || "General",
-            questionCount: examData.num_items,
+            questionCount: this.resolveQuestionCount([
+              examData.num_items,
+              examData.numItems,
+              examData.questionCount,
+            ]),
             status: "Draft",
             createdBy: currentUser.uid,
             createdAt: new Date(),
             answerKey: examData.answerKeyJson || "",
             instructorId: examData.instructorId || "",
             examCode: examData.examCode || "",
-            choicesPerItem: examData.choices_per_item || 4,
+            choicesPerItem:
+              Number(examData.choices_per_item ?? 4) === 5 ? 5 : 4,
           });
           newId = (sQuiz as any)._id.toHexString();
         });
@@ -494,7 +525,11 @@ export class ExamService {
             status: "Draft",
             structureLocked: Boolean(examData.structureLocked),
             papersCount: 0,
-            questionCount: examData.num_items || 0,
+            questionCount: this.resolveQuestionCount([
+              examData.num_items,
+              examData.numItems,
+              examData.questionCount,
+            ], 0),
             answerKey: "",
             createdBy: currentUser.uid,
             createdAt: new Date(),
@@ -502,7 +537,8 @@ export class ExamService {
             version: 1,
             instructorId: examData.instructorId || "",
             examCode: examData.examCode || "",
-            choicesPerItem: examData.choices_per_item || 4,
+            choicesPerItem:
+              Number(examData.choices_per_item ?? 4) === 5 ? 5 : 4,
           },
           Realm.UpdateMode.Modified,
         );
@@ -556,7 +592,11 @@ export class ExamService {
           const answerKeyData = sQuiz.answerKey
             ? JSON.parse(sQuiz.answerKey)
             : null;
-          const totalQuestions = sQuiz.questionCount || 20;
+          const totalQuestions = this.resolveQuestionCount([
+            sQuiz.questionCount,
+            answerKeyData?.questionSettings?.length,
+            answerKeyData?.answers?.length,
+          ]);
 
           const extractedAnswers: string[] = [];
           if (answerKeyData?.questionSettings) {
@@ -609,12 +649,12 @@ export class ExamService {
             templateLayout: {
               name: "Standard Template",
               totalQuestions: totalQuestions,
-              choiceFormat: sQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+              choiceFormat: Number(sQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
               columns: 2,
               questionsPerColumn: Math.ceil(totalQuestions / 2),
             },
             totalQuestions: totalQuestions,
-            choiceFormat: sQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+            choiceFormat: Number(sQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
             lastModified: sQuiz.createdAt,
           };
         }
@@ -632,7 +672,11 @@ export class ExamService {
         const answerKeyData = cachedQuiz.answerKey
           ? JSON.parse(cachedQuiz.answerKey)
           : null;
-        const totalQuestions = cachedQuiz.questionCount || 20;
+        const totalQuestions = this.resolveQuestionCount([
+          cachedQuiz.questionCount,
+          answerKeyData?.questionSettings?.length,
+          answerKeyData?.answers?.length,
+        ]);
 
         // If the cache has no answer key, fall through to Firestore so we
         // pick up an answer key that was saved from the web app after the
@@ -713,12 +757,14 @@ export class ExamService {
             templateLayout: {
               name: "Standard Template",
               totalQuestions: totalQuestions,
-              choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+              choiceFormat:
+                Number(cachedQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
               columns: 2,
               questionsPerColumn: Math.ceil(totalQuestions / 2),
             },
             totalQuestions: totalQuestions,
-            choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+            choiceFormat:
+              Number(cachedQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
             lastModified: cachedQuiz.updatedAt,
           };
         }
@@ -730,6 +776,29 @@ export class ExamService {
         console.log(
           "[ExamService] Found exam in OfflineStorageService (Persistence Path)",
         );
+        const offlineChoicesPerItem = Number(
+          (offlineExam as any)?.choicesPerItem ??
+            (offlineExam as any)?.choices_per_item ??
+            4,
+        );
+        const offlineAnswerSettingsLength = Array.isArray(
+          (offlineExam as any)?.answerKey?.questionSettings,
+        )
+          ? (offlineExam as any).answerKey.questionSettings.length
+          : 0;
+        const offlineAnswersLength = Array.isArray(
+          (offlineExam as any)?.answerKey?.answers,
+        )
+          ? (offlineExam as any).answerKey.answers.length
+          : 0;
+        const totalQuestions = this.resolveQuestionCount([
+          (offlineExam as any)?.questionCount,
+          (offlineExam as any)?.num_items,
+          (offlineExam as any)?.numItems,
+          (offlineExam as any)?.questions?.length,
+          offlineAnswerSettingsLength,
+          offlineAnswersLength,
+        ]);
         return {
           metadata: {
             examId: examId,
@@ -744,8 +813,8 @@ export class ExamService {
             updatedAt: offlineExam.updatedAt,
             createdBy: offlineExam.createdBy || "",
           },
-          totalQuestions: offlineExam.questions?.length || 0,
-          choiceFormat: "A-D",
+          totalQuestions: totalQuestions,
+          choiceFormat: offlineChoicesPerItem === 5 ? "A-E" : "A-D",
           answerKey: {
             id: `ak_${examId}_offline`,
             examId,
@@ -928,14 +997,17 @@ export class ExamService {
         }
 
         // Determine choice format
-        const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
+        const choicesPerItem = Number(examData.choices_per_item ?? 4);
+        const choiceFormat = choicesPerItem === 5 ? "A-E" : "A-D";
         // Use num_items from the exam doc as the authoritative question count.
         // Answer key arrays may be shorter if not all answers are filled in yet.
-        const totalQuestions =
-          examData.num_items ||
-          answerKeyData?.questionSettings?.length ||
-          answerKeyData?.answers?.length ||
-          20;
+        const totalQuestions = this.resolveQuestionCount([
+          examData.num_items,
+          examData.numItems,
+          examData.questionCount,
+          answerKeyData?.questionSettings?.length,
+          answerKeyData?.answers?.length,
+        ]);
 
         // Extract answers - prefer the answers array (web app format) over
         // questionSettings so web-edited keys are always reflected correctly.
@@ -1106,7 +1178,11 @@ export class ExamService {
       const answerKeyData = cachedQuiz.answerKey
         ? JSON.parse(cachedQuiz.answerKey)
         : null;
-      const totalQuestions = cachedQuiz.questionCount || 20;
+      const totalQuestions = this.resolveQuestionCount([
+        cachedQuiz.questionCount,
+        answerKeyData?.questionSettings?.length,
+        answerKeyData?.answers?.length,
+      ]);
 
       return {
         metadata: {
@@ -1149,12 +1225,14 @@ export class ExamService {
         templateLayout: {
           name: "Standard Template",
           totalQuestions: totalQuestions,
-          choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+          choiceFormat:
+            Number(cachedQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
           columns: 2,
           questionsPerColumn: Math.ceil(totalQuestions / 2),
         },
         totalQuestions: totalQuestions,
-        choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+        choiceFormat:
+          Number(cachedQuiz.choicesPerItem ?? 4) === 5 ? "A-E" : "A-D",
         lastModified: cachedQuiz.updatedAt,
       };
     }
@@ -1373,7 +1451,11 @@ export class ExamService {
               updatedAt: new Date(),
               version: newVersion,
               choicesPerItem:
-                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+                Number(
+                  updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+                ) === 5
+                  ? 5
+                  : 4,
               title: updateData.title ?? examData.title ?? "Untitled Exam",
               subject: examData.subject || examData.className || "No Subject",
               className: examData.className || "",
@@ -1588,7 +1670,11 @@ export class ExamService {
               updatedAt: new Date(),
               version: newVersion,
               choicesPerItem:
-                updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+                Number(
+                  updateData.choices_per_item ?? examData.choices_per_item ?? 4,
+                ) === 5
+                  ? 5
+                  : 4,
               title: updateData.title ?? examData.title ?? "Untitled Exam",
               subject: examData.subject || examData.className || "No Subject",
               className: examData.className || "",
