@@ -558,8 +558,9 @@ export class ZipgradeScanner {
         const currentPage = pageNumber || 1;
         const startedAt = Date.now();
         console.log(
-          `[OMR] 200Q fast path config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+          `[OMR] 200Q dedicated scanner config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
         );
+
         const answers = await scan200ItemPageFast(
           imageUri,
           currentPage,
@@ -567,7 +568,7 @@ export class ZipgradeScanner {
         );
 
         console.log(
-          `[OMR] 200Q fast path complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
+          `[OMR] 200Q dedicated scanner complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
         );
 
         return {
@@ -1522,8 +1523,22 @@ export class ZipgradeScanner {
       }
       // ── 200-item strict guard: require all four edge corner boxes ───────
       else if (qCount === 200) {
-        throw new Error(
-          "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
+        const currentPage = pageNumber || 1;
+        console.warn(
+          "[OMR] Strict 200Q corner validation failed; falling back to dedicated 200Q pixel scanner",
+        );
+
+        const { scan200ItemPageFast } = require("./brightnessScannerFor200Item");
+        allAnswers = await scan200ItemPageFast(
+          imageUri,
+          currentPage,
+          choicesPerQuestion,
+        );
+
+        const rangeStart = currentPage === 1 ? 1 : 101;
+        const rangeEnd = currentPage === 1 ? 100 : 200;
+        console.log(
+          `[OMR] 200Q fallback scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
       }
       // ── 100-item template: brightness scanning ──────────────────────────

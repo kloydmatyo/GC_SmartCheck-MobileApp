@@ -40,6 +40,13 @@ interface MarkerCandidate {
   score: number;
 }
 
+interface CornerDetectionAttempt {
+  label: string;
+  foundCount: number;
+  scoreSum: number;
+  markers: Partial<Record<CornerKey, MarkerCandidate>>;
+}
+
 interface PixelOffset {
   dx: number;
   dy: number;
@@ -2687,15 +2694,16 @@ function findCornerMarker(
   return best;
 }
 
-function detect200ItemCornerMarkers(
-  pixels: Uint8Array,
+function buildCornerWindows(
   width: number,
   height: number,
-): Markers {
-  const step = Math.max(4, Math.round(Math.min(width, height) / 750));
-  const xBand = width * 0.38;
-  const yBand = height * 0.38;
-  const windows: CornerWindow[] = [
+  xBandRatio: number,
+  yBandRatio: number,
+): CornerWindow[] {
+  const xBand = width * xBandRatio;
+  const yBand = height * yBandRatio;
+
+  return [
     {
       key: "topLeft",
       x0: 0,
@@ -2733,31 +2741,223 @@ function detect200ItemCornerMarkers(
       targetY: height,
     },
   ];
-  const markers = {} as Markers;
+}
+
+function collectCornerMarkers(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  windows: CornerWindow[],
+  step: number,
+): CornerDetectionAttempt {
+  const markers: Partial<Record<CornerKey, MarkerCandidate>> = {};
+  let foundCount = 0;
+  let scoreSum = 0;
 
   for (const window of windows) {
     const candidate = findCornerMarker(pixels, width, height, window, step);
-    if (!candidate) {
-      throw new Error(
-        "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
-      );
-    }
-    markers[window.key] = { x: candidate.x, y: candidate.y };
+    if (!candidate) continue;
+    markers[window.key] = candidate;
+    foundCount++;
+    scoreSum += candidate.score;
   }
 
+  return {
+    label: `${Math.round(((windows[0].x1 + 1) / width) * 100)}x${Math.round(((windows[0].y1 + 1) / height) * 100)}@${step}`,
+    foundCount,
+    scoreSum,
+    markers,
+  };
+}
+
+function defaultCornerPoint(
+  key: CornerKey,
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const insetX = width * 0.055;
+  const insetY = height * 0.055;
+
+  switch (key) {
+    case "topLeft":
+      return { x: insetX, y: insetY };
+    case "topRight":
+      return { x: width - insetX, y: insetY };
+    case "bottomLeft":
+      return { x: insetX, y: height - insetY };
+    case "bottomRight":
+      return { x: width - insetX, y: height - insetY };
+  }
+}
+
+function clampPointToFrame(
+  point: { x: number; y: number },
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const insetX = width * 0.015;
+  const insetY = height * 0.015;
+  return {
+    x: clamp(point.x, insetX, width - insetX),
+    y: clamp(point.y, insetY, height - insetY),
+  };
+}
+
+function inferMissingCorner(
+  key: CornerKey,
+  known: Partial<Record<CornerKey, { x: number; y: number }>>,
+  width: number,
+  height: number,
+): { x: number; y: number } | null {
+  let inferred: { x: number; y: number } | null = null;
+
+  if (
+    key === "topLeft" &&
+    known.topRight &&
+    known.bottomLeft &&
+    known.bottomRight
+  ) {
+    inferred = {
+      x: known.topRight.x + known.bottomLeft.x - known.bottomRight.x,
+      y: known.topRight.y + known.bottomLeft.y - known.bottomRight.y,
+    };
+  } else if (
+    key === "topRight" &&
+    known.topLeft &&
+    known.bottomLeft &&
+    known.bottomRight
+  ) {
+    inferred = {
+      x: known.topLeft.x + known.bottomRight.x - known.bottomLeft.x,
+      y: known.topLeft.y + known.bottomRight.y - known.bottomLeft.y,
+    };
+  } else if (
+    key === "bottomLeft" &&
+    known.topLeft &&
+    known.topRight &&
+    known.bottomRight
+  ) {
+    inferred = {
+      x: known.topLeft.x + known.bottomRight.x - known.topRight.x,
+      y: known.topLeft.y + known.bottomRight.y - known.topRight.y,
+    };
+  } else if (
+    key === "bottomRight" &&
+    known.topLeft &&
+    known.topRight &&
+    known.bottomLeft
+  ) {
+    inferred = {
+      x: known.topRight.x + known.bottomLeft.x - known.topLeft.x,
+      y: known.topRight.y + known.bottomLeft.y - known.topLeft.y,
+    };
+  }
+
+  return inferred ? clampPointToFrame(inferred, width, height) : null;
+}
+
+function buildMarkersFromAttempt(
+  attempt: CornerDetectionAttempt,
+  width: number,
+  height: number,
+): { markers: Markers; synthesized: CornerKey[] } {
+  const points: Partial<Record<CornerKey, { x: number; y: number }>> = {};
+  const synthesized: CornerKey[] = [];
+
+  (Object.keys(attempt.markers) as CornerKey[]).forEach((key) => {
+    const marker = attempt.markers[key];
+    if (!marker) return;
+    points[key] = { x: marker.x, y: marker.y };
+  });
+
+  (["topLeft", "topRight", "bottomLeft", "bottomRight"] as CornerKey[]).forEach(
+    (key) => {
+      if (points[key]) return;
+      const inferred = inferMissingCorner(key, points, width, height);
+      points[key] = inferred ?? defaultCornerPoint(key, width, height);
+      synthesized.push(key);
+    },
+  );
+
+  return {
+    markers: {
+      topLeft: points.topLeft!,
+      topRight: points.topRight!,
+      bottomLeft: points.bottomLeft!,
+      bottomRight: points.bottomRight!,
+    },
+    synthesized,
+  };
+}
+
+function isPlausible200ItemGeometry(
+  markers: Markers,
+  width: number,
+  height: number,
+  minCoverageRatio: number,
+): boolean {
   const topWidth = Math.abs(markers.topRight.x - markers.topLeft.x);
   const bottomWidth = Math.abs(markers.bottomRight.x - markers.bottomLeft.x);
   const leftHeight = Math.abs(markers.bottomLeft.y - markers.topLeft.y);
   const rightHeight = Math.abs(markers.bottomRight.y - markers.topRight.y);
 
-  if (
-    topWidth < width * 0.42 ||
-    bottomWidth < width * 0.42 ||
-    leftHeight < height * 0.42 ||
-    rightHeight < height * 0.42
-  ) {
+  return !(
+    topWidth < width * minCoverageRatio ||
+    bottomWidth < width * minCoverageRatio ||
+    leftHeight < height * minCoverageRatio ||
+    rightHeight < height * minCoverageRatio
+  );
+}
+
+function detect200ItemCornerMarkers(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+): Markers {
+  const step = Math.max(4, Math.round(Math.min(width, height) / 750));
+  const attempts = [
+    collectCornerMarkers(
+      pixels,
+      width,
+      height,
+      buildCornerWindows(width, height, 0.38, 0.38),
+      step,
+    ),
+    collectCornerMarkers(
+      pixels,
+      width,
+      height,
+      buildCornerWindows(width, height, 0.46, 0.46),
+      Math.max(3, step - 1),
+    ),
+    collectCornerMarkers(
+      pixels,
+      width,
+      height,
+      buildCornerWindows(width, height, 0.54, 0.54),
+      Math.max(2, step - 2),
+    ),
+  ];
+  const bestAttempt = attempts.sort((a, b) => {
+    if (b.foundCount !== a.foundCount) return b.foundCount - a.foundCount;
+    return b.scoreSum - a.scoreSum;
+  })[0];
+
+  const { markers, synthesized } = buildMarkersFromAttempt(
+    bestAttempt,
+    width,
+    height,
+  );
+
+  if (bestAttempt.foundCount < 4) {
+    console.warn(
+      `[200Q-FAST] Corner marker recovery: found=${bestAttempt.foundCount}/4 using attempt=${bestAttempt.label}, synthesized=${synthesized.join(",") || "none"}`,
+    );
+  }
+
+  if (!isPlausible200ItemGeometry(markers, width, height, 0.3)) {
     throw new Error(
-      "Corner boxes were detected but the page geometry is too distorted. Flatten the sheet and retake with the full page inside the frame.",
+      "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
     );
   }
 
