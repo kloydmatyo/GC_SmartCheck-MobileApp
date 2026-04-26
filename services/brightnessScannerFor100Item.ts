@@ -176,9 +176,7 @@ function get100ItemTemplateLayout(): TemplateLayout {
   const rSpacingNY = 5.2 / fh;   // 0.018246 — vertical gap between question rows
 
   // Exact first-bubble NX per column (A-choice center, derived from template source)
-  // Col 4 is nudged slightly left (-0.015) because its E-bubble lands near the right
-  // frame edge (NX≈0.95) and gets clipped when the sheet isn't perfectly framed.
-  const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.82549];
+  const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.84049];
   // Exact first-bubble NY per row (first question row center, derived from template source)
   const rowNY = [0.28070, 0.49825];
 
@@ -210,7 +208,7 @@ function get100ItemTemplateLayout(): TemplateLayout {
 
   return {
     answerBlocks,
-    bubbleDiameterNX: 3.5 / fw,
+    bubbleDiameterNX: 3.5 / fw,  // slightly wider than physical (3.5mm) to tolerate small offsets
     bubbleDiameterNY: 3.5 / fh,
   };
 }
@@ -348,22 +346,23 @@ function detectAnswersFromImage(
       const absoluteGap = secondDark - darkest;
       const gapFromThird = thirdDark - darkest;
 
-      // Detection tuned for high sensitivity while keeping guard rails.
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
       const spread = brightest - darkest;
 
+      // Tier 1: clearly filled (strong contrast)
       if (darkRatio < 0.68) {
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.88 && gapRatio > 0.12) {
+      // Tier 2: moderately filled
+      } else if (darkRatio < 0.88 && gapRatio > 0.10) {
         selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 10) {
+      // Tier 3: lightly filled but gap is clear
+      } else if (darkRatio < 0.95 && absoluteGap >= 8) {
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 18 && gapFromThird >= 8) {
+      // Tier 4: very light fill — darkest is meaningfully darker than the rest
+      } else if (absoluteGap >= 5 && darkest < median - 1) {
         selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 3 && darkest < median - 2 && spread >= 6) {
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 1 && darkest < brightest && spread >= 5) {
-        // Preserve very light pencil fill detection, but avoid completely flat/noisy picks.
+      // Tier 5: minimal signal — only pick if there's any spread at all
+      } else if (spread >= 4 && absoluteGap >= 3) {
         selectedChoice = sorted[0].choice;
       }
 

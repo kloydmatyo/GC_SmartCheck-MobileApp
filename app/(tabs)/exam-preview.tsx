@@ -257,7 +257,7 @@ export default function ExamPreviewScreen() {
     return {
       name: exam.metadata.title || "Exam",
       numQuestions: totalQuestions as 20 | 50 | 100 | 150 | 200,
-      choicesPerQuestion: exam.choiceFormat === "A-E" ? 5 : 4,
+      choicesPerQuestion: exam.choiceFormat === "A-D" ? 4 : 5,
       examCode: exam.metadata.examCode,
       institutionName: "Gordon College",
       logoBase64: previewLogoBase64,

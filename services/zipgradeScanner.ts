@@ -1515,6 +1515,7 @@ export class ZipgradeScanner {
           imageUri,
           markers,
           choicesPerQuestion,
+          true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
         );
 
         console.log(
