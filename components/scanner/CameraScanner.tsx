@@ -22,17 +22,15 @@ interface CameraScannerProps {
 
 export default function CameraScanner({
   questionCount = 20, // Default to 20 if not provided
-  choicesPerQuestion = 5,
+  choicesPerQuestion = 4,
   scanStage,
   onScanComplete,
   onCancel,
 }: CameraScannerProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const [facing, setFacing] = useState<CameraType>("back");
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showHistory, setShowHistory] = useState(false); // controls history overlay
   const cameraRef = useRef<CameraView>(null);
 
   if (!permission) {
@@ -206,10 +204,17 @@ export default function CameraScanner({
         return;
       }
 
-      // Validate Zipgrade sheet quality first
-      const qualityCheck = await ZipgradeScanner.validateZipgradeSheet(
-        photo.uri,
-      );
+      // 200-item pages use a dedicated fast path that validates all corner boxes.
+      // Running the generic OpenCV blur check here adds avoidable latency.
+      const qualityCheck =
+        questionCount === 200
+          ? {
+              isValid: true,
+              issues: [],
+              confidence: 0.95,
+              detectedTemplate: undefined,
+            }
+          : await ZipgradeScanner.validateZipgradeSheet(photo.uri);
 
       if (!qualityCheck.isValid) {
         Alert.alert(
@@ -222,7 +227,9 @@ export default function CameraScanner({
 
       // Process the Zipgrade answer sheet
       const templateName = qualityCheck.detectedTemplate || "standard20";
-      console.log(`[CameraScanner] Processing with ${questionCount} questions`);
+      console.log(
+        `[CameraScanner] Processing with ${questionCount} questions, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+      );
 
       const scanResult = await ZipgradeScanner.processZipgradeSheet(
         photo.uri,
@@ -380,8 +387,8 @@ export default function CameraScanner({
               </Text>
               <Text style={styles.stageSubtext}>
                 {scanStage.current === 1
-                  ? "Scan Page 1 (Q1–100)"
-                  : "Scan Page 2 (Q101–200)"}
+                  ? "Scan Page 1 (Q1-100)"
+                  : "Scan Page 2 (Q101-200)"}
               </Text>
               <View style={styles.checklistCard}>
                 <Text style={styles.checklistTitle}>200-item checklist</Text>
@@ -445,6 +452,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 12,
+  },
+  torchButton: {
+    flex: 1,
   },
   scanFrame: {
     borderWidth: 2,

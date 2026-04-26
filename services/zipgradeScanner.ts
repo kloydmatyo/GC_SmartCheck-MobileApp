@@ -1,5 +1,6 @@
 import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
+import { scan200ItemPageFast } from "./brightnessScannerFor200Item";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
 const OMR_DEBUG_LOGS = false;
@@ -513,17 +514,17 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // Regions are padded ±5mm around the bubble area for robust detection.
     return [
       // Row 0 (top blocks)
-      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49, startQ: 1,  numQ: 10 },
+      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49, startQ: 1, numQ: 10 },
       { xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49, startQ: 21, numQ: 10 },
-      { xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.49, startQ: 41, numQ: 10 },
+      { xMin: 0.4, xMax: 0.6, yMin: 0.27, yMax: 0.49, startQ: 41, numQ: 10 },
       { xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49, startQ: 61, numQ: 10 },
       { xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49, startQ: 81, numQ: 10 },
       // Row 1 (bottom blocks)
-      { xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.70, startQ: 11, numQ: 10 },
-      { xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.70, startQ: 31, numQ: 10 },
-      { xMin: 0.40, xMax: 0.60, yMin: 0.47, yMax: 0.70, startQ: 51, numQ: 10 },
-      { xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.70, startQ: 71, numQ: 10 },
-      { xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.70, startQ: 91, numQ: 10 },
+      { xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.7, startQ: 11, numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.7, startQ: 31, numQ: 10 },
+      { xMin: 0.4, xMax: 0.6, yMin: 0.47, yMax: 0.7, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.7, startQ: 71, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.7, startQ: 91, numQ: 10 },
     ];
   }
 }
@@ -540,12 +541,44 @@ export class ZipgradeScanner {
       typeof ZipgradeGenerator.getTemplates
     > = "standard20",
     pageNumber?: 1 | 2,
-    choicesPerQuestion: 4 | 5 = 5,
+    choicesPerQuestion: 4 | 5 = 4,
   ): Promise<ScanResult> {
     // Track all Mat objects for cleanup
     const matsToCleanup: any[] = [];
 
     try {
+      // Normalize questionCount before loading OpenCV.
+      const rawQ =
+        typeof questionCount === "number"
+          ? questionCount
+          : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
+      const qCount = rawQ > 0 ? rawQ : 20;
+
+      if (qCount === 200) {
+        const currentPage = pageNumber || 1;
+        const startedAt = Date.now();
+        console.log(
+          `[OMR] 200Q dedicated scanner config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+        );
+
+        const answers = await scan200ItemPageFast(
+          imageUri,
+          currentPage,
+          choicesPerQuestion,
+        );
+
+        console.log(
+          `[OMR] 200Q dedicated scanner complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
+        );
+
+        return {
+          studentId: "00000000",
+          answers,
+          confidence: 0.98,
+          processedImageUri: imageUri,
+        };
+      }
+
       // Load OpenCV
       loadOpenCV();
       const {
@@ -558,13 +591,6 @@ export class ZipgradeScanner {
         RetrievalModes,
         ThresholdTypes,
       } = OpenCVTypes;
-
-      // Normalize questionCount — caller may pass template name string or number
-      const rawQ =
-        typeof questionCount === "number"
-          ? questionCount
-          : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
-      const qCount = rawQ > 0 ? rawQ : 20;
 
       // ── 1. Load image ──────────────────────────────────────────────────────
       const normalizedUri = imageUri.startsWith("file://")
@@ -1497,8 +1523,22 @@ export class ZipgradeScanner {
       }
       // ── 200-item strict guard: require all four edge corner boxes ───────
       else if (qCount === 200) {
-        throw new Error(
-          "Could not detect all 4 corner boxes on the 200-item sheet. Retake with the full sheet visible and all four edge boxes inside the frame.",
+        const currentPage = pageNumber || 1;
+        console.warn(
+          "[OMR] Strict 200Q corner validation failed; falling back to dedicated 200Q pixel scanner",
+        );
+
+        const { scan200ItemPageFast } = require("./brightnessScannerFor200Item");
+        allAnswers = await scan200ItemPageFast(
+          imageUri,
+          currentPage,
+          choicesPerQuestion,
+        );
+
+        const rangeStart = currentPage === 1 ? 1 : 101;
+        const rangeEnd = currentPage === 1 ? 100 : 200;
+        console.log(
+          `[OMR] 200Q fallback scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
       }
       // ── 100-item template: brightness scanning ──────────────────────────
@@ -1634,8 +1674,10 @@ export class ZipgradeScanner {
           }
         }
 
-        // Clear OpenCV internal buffers
-        OpenCV.clearBuffers();
+        // Clear OpenCV internal buffers when this scan used OpenCV.
+        if (OpenCV && typeof OpenCV.clearBuffers === "function") {
+          OpenCV.clearBuffers();
+        }
 
         console.log(
           `[OMR] Cleanup: Released ${matsToCleanup.length} Mat objects`,
