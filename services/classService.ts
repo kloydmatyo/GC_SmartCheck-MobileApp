@@ -546,12 +546,40 @@ export class ClassService {
       }
 
       const docRef = doc(db, this.COLLECTION, classId);
-      await updateDoc(docRef, {
+      const updatePayload = {
         ...updates,
         // Normalize year to short format to stay consistent with web app
         ...(updates.year !== undefined && { year: yearToShort(updates.year) }),
         updatedAt: Timestamp.now(),
-      });
+      };
+
+      try {
+        const timeoutMs = 5000;
+        const timeoutError = new Error("Network error: Request timed out");
+        
+        await Promise.race([
+          updateDoc(docRef, updatePayload),
+          new Promise<never>((_, reject) => setTimeout(() => reject(timeoutError), timeoutMs))
+        ]);
+      } catch (fbError: any) {
+        const errText = [fbError?.message, fbError?.code, String(fbError)].join(" ").toLowerCase();
+        const isNetwork = errText.includes("network") || errText.includes("offline") || errText.includes("timeout");
+        
+        if (isNetwork) {
+          console.warn("[ClassService] Network failed during update, falling back to offline queue.");
+          await OfflineStorageService.queueUpdate(
+            classId,
+            "update",
+            {
+              ...updates,
+              ...(updates.year !== undefined && { year: yearToShort(updates.year) }),
+            },
+            "classes",
+          );
+        } else {
+          throw fbError;
+        }
+      }
 
       if (cached) {
         cacheRealm.write(() => {

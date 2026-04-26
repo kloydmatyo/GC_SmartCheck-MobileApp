@@ -18,6 +18,7 @@ import {
     ActivityIndicator,
     FlatList,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -65,6 +66,7 @@ export default function ResultsScreen() {
   const [classFilters, setClassFilters] = useState<string[]>(["All Classes"]);
   const [selectedLocalResult, setSelectedLocalResult] =
     useState<GradingResult | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const listRef = useRef<FlatList>(null);
 
   const loadResults = useCallback(() => {
@@ -155,6 +157,16 @@ export default function ResultsScreen() {
       return loadResults();
     }, [loadResults]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadResults();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadResults, refreshing]);
 
   const filteredResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -360,6 +372,14 @@ export default function ResultsScreen() {
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#20BE7B"
+              colors={["#20BE7B"]}
+            />
+          }
         />
       )}
 

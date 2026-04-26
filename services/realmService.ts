@@ -115,6 +115,7 @@ export class OfflinePendingUpdate extends Realm.Object<OfflinePendingUpdate> {
   data!: string; // JSON string
   timestamp!: Date;
   retryCount!: number;
+  collection?: string;
 
   static schema: Realm.ObjectSchema = {
     name: "OfflinePendingUpdate",
@@ -127,6 +128,7 @@ export class OfflinePendingUpdate extends Realm.Object<OfflinePendingUpdate> {
       data: "string",
       timestamp: "date",
       retryCount: { type: "int", default: 0 },
+      collection: "string?",
     },
   };
 }
@@ -320,7 +322,7 @@ const STAGING_CONFIG: Realm.Configuration = {
     SystemKV,
     ScanHistory,
   ],
-  schemaVersion: 12,
+  schemaVersion: 13,
   onMigration: (oldRealm: any, newRealm: any) => {
     if (oldRealm.schemaVersion < 8) {
       const oldObjects = oldRealm.objects("OfflineClass");

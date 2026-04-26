@@ -1,11 +1,11 @@
 import { auth, db } from "@/config/firebase";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  where,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    where,
 } from "firebase/firestore";
 import Realm from "realm";
 import { ExamPreviewData } from "../types/exam";
@@ -364,7 +364,6 @@ export class ExamService {
       if (!isOnline) {
         // Queue for sync if it's a Firestore ID but we're offline
         console.log("[ExamService] Offline. Queueing answer key update...");
-        const stagingRealm = await RealmService.getStagingRealm();
         // We'll reuse OfflineQuiz staging if possible, or we need a new PendingUpdate schema
         // For now, let's just use the existing OfflineStorageService for updates if it's not a staging quiz
         await OfflineStorageService.queueUpdate(examId, "update", {
@@ -635,66 +634,94 @@ export class ExamService {
           : null;
         const totalQuestions = cachedQuiz.questionCount || 20;
 
-        const extractedAnswers: string[] = [];
-        if (answerKeyData?.questionSettings) {
-          for (let i = 0; i < totalQuestions; i++) {
-            const setting = answerKeyData.questionSettings.find(
-              (qs: any) => qs.questionNumber === i + 1,
-            );
-            extractedAnswers.push(setting?.correctAnswer || "");
-          }
-        } else if (
-          answerKeyData?.answers &&
-          Array.isArray(answerKeyData.answers)
-        ) {
-          for (let i = 0; i < totalQuestions; i++) {
-            extractedAnswers.push(answerKeyData.answers[i] || "");
-          }
-        } else {
-          for (let i = 0; i < totalQuestions; i++) {
-            extractedAnswers.push("");
-          }
-        }
+        // If the cache has no answer key, fall through to Firestore so we
+        // pick up an answer key that was saved from the web app after the
+        // cache was last populated.
+        const hasAnswers =
+          answerKeyData &&
+          ((Array.isArray(answerKeyData.answers) &&
+            answerKeyData.answers.some((a: string) => a)) ||
+            (Array.isArray(answerKeyData.questionSettings) &&
+              answerKeyData.questionSettings.some(
+                (q: any) => q.correctAnswer,
+              )));
 
-        return {
-          metadata: {
-            examId: cachedQuiz.id,
-            title: cachedQuiz.title,
-            subject: cachedQuiz.subject,
-            section: "",
-            date: cachedQuiz.createdAt.toISOString(),
-            examCode: cachedQuiz.examCode || "N/A",
-            status: cachedQuiz.status as any,
-            structureLocked: Boolean(cachedQuiz.structureLocked),
-            createdAt: cachedQuiz.createdAt,
-            updatedAt: cachedQuiz.updatedAt,
-            createdBy: cachedQuiz.createdBy,
-            version: cachedQuiz.version || 1,
-          },
-          answerKey: answerKeyData
-            ? {
-                id: answerKeyData.id || "",
-                examId: examId,
-                answers: extractedAnswers,
-                questionSettings: answerKeyData.questionSettings || [],
-                locked: answerKeyData.locked || false,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-                createdBy: "",
-                version: 1,
-              }
-            : (null as any),
-          templateLayout: {
-            name: "Standard Template",
+        const { NetworkService } = await import("./networkService");
+        const isOnline = await NetworkService.isOnline();
+
+        if (!hasAnswers && isOnline) {
+          console.log(
+            "[ExamService] Cache has no answer key — falling through to Firestore for live fetch.",
+          );
+          // Don't return here; fall through to the Firestore path below.
+        } else {
+          const extractedAnswers: string[] = [];
+          // Prefer the answers array (web app format) over questionSettings
+          // (mobile format) so web-edited keys are always reflected correctly.
+          if (
+            answerKeyData?.answers &&
+            Array.isArray(answerKeyData.answers) &&
+            answerKeyData.answers.some((a: string) => a)
+          ) {
+            for (let i = 0; i < totalQuestions; i++) {
+              extractedAnswers.push(answerKeyData.answers[i] || "");
+            }
+          } else if (
+            answerKeyData?.questionSettings &&
+            Array.isArray(answerKeyData.questionSettings)
+          ) {
+            for (let i = 0; i < totalQuestions; i++) {
+              const setting = answerKeyData.questionSettings.find(
+                (qs: any) => qs.questionNumber === i + 1,
+              );
+              extractedAnswers.push(setting?.correctAnswer || "");
+            }
+          } else {
+            for (let i = 0; i < totalQuestions; i++) {
+              extractedAnswers.push("");
+            }
+          }
+
+          return {
+            metadata: {
+              examId: cachedQuiz.id,
+              title: cachedQuiz.title,
+              subject: cachedQuiz.subject,
+              section: "",
+              date: cachedQuiz.createdAt.toISOString(),
+              examCode: cachedQuiz.examCode || "N/A",
+              status: cachedQuiz.status as any,
+              structureLocked: Boolean(cachedQuiz.structureLocked),
+              createdAt: cachedQuiz.createdAt,
+              updatedAt: cachedQuiz.updatedAt,
+              createdBy: cachedQuiz.createdBy,
+              version: cachedQuiz.version || 1,
+            },
+            answerKey: answerKeyData
+              ? {
+                  id: answerKeyData.id || "",
+                  examId: examId,
+                  answers: extractedAnswers,
+                  questionSettings: answerKeyData.questionSettings || [],
+                  locked: answerKeyData.locked || false,
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                  createdBy: "",
+                  version: 1,
+                }
+              : null,
+            templateLayout: {
+              name: "Standard Template",
+              totalQuestions: totalQuestions,
+              choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
+              columns: 2,
+              questionsPerColumn: Math.ceil(totalQuestions / 2),
+            },
             totalQuestions: totalQuestions,
             choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
-            columns: 2,
-            questionsPerColumn: Math.ceil(totalQuestions / 2),
-          },
-          totalQuestions: totalQuestions,
-          choiceFormat: cachedQuiz.choicesPerItem === 5 ? "A-E" : "A-D",
-          lastModified: cachedQuiz.updatedAt,
-        };
+            lastModified: cachedQuiz.updatedAt,
+          };
+        }
       }
 
       // 1.5. Check OfflineStorageService (Legacy/Persistence Fallback) - FAST
@@ -748,7 +775,15 @@ export class ExamService {
       // 2. Fetch from Firebase (Always if online, or fallback if cache miss)
       try {
         const examRef = doc(db, "exams", examId);
-        const examSnap = await getDoc(examRef);
+        const timeoutMs = 3000;
+        const timeoutError = new Error("Network request timed out");
+
+        const examSnap = (await Promise.race([
+          getDoc(examRef),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ])) as any;
 
         if (!examSnap.exists()) {
           console.log("[ExamService] Exam document not found in Firestore");
@@ -776,7 +811,12 @@ export class ExamService {
           collection(db, "answerKeys"),
           where("examId", "==", examId),
         );
-        const answerKeysSnapshot = await getDocs(answerKeysQuery);
+        const answerKeysSnapshot = (await Promise.race([
+          getDocs(answerKeysQuery),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ])) as any;
 
         if (!answerKeysSnapshot.empty) {
           let selected = answerKeysSnapshot.docs[0];
@@ -784,7 +824,7 @@ export class ExamService {
             Number(selected.data().updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
             Number(selected.data().version ?? 1);
 
-          answerKeysSnapshot.docs.slice(1).forEach((candidate) => {
+          answerKeysSnapshot.docs.slice(1).forEach((candidate: any) => {
             const data = candidate.data();
             const score =
               Number(data.updatedAt?.toMillis?.() ?? 0) * 1_000_000 +
@@ -889,19 +929,46 @@ export class ExamService {
 
         // Determine choice format
         const choiceFormat = examData.choices_per_item === 5 ? "A-E" : "A-D";
+        // Use num_items from the exam doc as the authoritative question count.
+        // Answer key arrays may be shorter if not all answers are filled in yet.
         const totalQuestions =
+          examData.num_items ||
           answerKeyData?.questionSettings?.length ||
           answerKeyData?.answers?.length ||
-          examData.num_items ||
           20;
 
-        // Extract answers - support both mobile and web formats
+        // Extract answers - prefer the answers array (web app format) over
+        // questionSettings so web-edited keys are always reflected correctly.
         const extractedAnswers: string[] = [];
 
-        if (answerKeyData?.questionSettings) {
+        if (
+          answerKeyData?.answers &&
+          Array.isArray(answerKeyData.answers) &&
+          answerKeyData.answers.some((a: string) => a)
+        ) {
+          // Web app format (or mobile format after our fix): plain answers array
+          console.log(
+            "[ExamService] Using answers array:",
+            answerKeyData.answers.length,
+          );
+          for (let i = 0; i < totalQuestions; i++) {
+            const answer = answerKeyData.answers[i] || "";
+            extractedAnswers.push(answer);
+            if (i < 5) {
+              console.log(`[ExamService] Q${i + 1}: ${answer}`);
+            }
+          }
+          console.log(
+            "[ExamService] Total answers extracted:",
+            extractedAnswers.filter((a) => a).length,
+          );
+        } else if (
+          answerKeyData?.questionSettings &&
+          Array.isArray(answerKeyData.questionSettings)
+        ) {
           // Mobile app format: questionSettings array
           console.log(
-            "[ExamService] Using mobile format (questionSettings):",
+            "[ExamService] Using questionSettings:",
             answerKeyData.questionSettings.length,
           );
           for (let i = 0; i < totalQuestions; i++) {
@@ -918,30 +985,10 @@ export class ExamService {
             "[ExamService] Total answers extracted:",
             extractedAnswers.filter((a) => a).length,
           );
-        } else if (
-          answerKeyData?.answers &&
-          Array.isArray(answerKeyData.answers)
-        ) {
-          // Web app format: answers array
-          console.log(
-            "[ExamService] Using web format (answers array):",
-            answerKeyData.answers.length,
-          );
-          for (let i = 0; i < totalQuestions; i++) {
-            const answer = answerKeyData.answers[i] || "";
-            extractedAnswers.push(answer);
-            if (i < 5) {
-              console.log(`[ExamService] Q${i + 1}: ${answer}`);
-            }
-          }
-          console.log(
-            "[ExamService] Total answers extracted:",
-            extractedAnswers.filter((a) => a).length,
-          );
         } else {
           // No answers found - use empty array
           console.log(
-            "[ExamService] No questionSettings or answers array found, using empty answers",
+            "[ExamService] No answers or questionSettings found, using empty answers",
           );
           for (let i = 0; i < totalQuestions; i++) {
             extractedAnswers.push("");
@@ -949,6 +996,34 @@ export class ExamService {
         }
 
         // Transform to ExamPreviewData format
+        // Update the Realm cache with the fresh answer key so offline reads
+        // have it available and the cache-hit path won't fall through again.
+        if (answerKeyData) {
+          try {
+            const cacheRealmForUpdate = await RealmService.getCacheRealm();
+            const cachedEntry =
+              cacheRealmForUpdate.objectForPrimaryKey<QuizCache>(
+                "QuizCache",
+                examSnap.id,
+              );
+            if (cachedEntry) {
+              cacheRealmForUpdate.write(() => {
+                cachedEntry.answerKey = JSON.stringify({
+                  id: answerKeyId,
+                  ...answerKeyData,
+                  answers: extractedAnswers,
+                });
+                cachedEntry.updatedAt = new Date();
+              });
+            }
+          } catch (cacheWriteErr) {
+            console.warn(
+              "[ExamService] Failed to update Realm cache with answer key:",
+              cacheWriteErr,
+            );
+          }
+        }
+
         return {
           metadata: {
             examId: examSnap.id,
@@ -1134,7 +1209,14 @@ export class ExamService {
         return false;
       }
 
-      const examSnap = await getDoc(doc(db, "exams", examId));
+      const timeoutMs = 3000;
+      const timeoutError = new Error("Network request timed out");
+      const examSnap = (await Promise.race([
+        getDoc(doc(db, "exams", examId)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(timeoutError), timeoutMs),
+        ),
+      ])) as any;
       if (!examSnap.exists()) return false;
 
       const examData = examSnap.data();
@@ -1212,8 +1294,31 @@ export class ExamService {
         throw new Error("User not authenticated");
       }
 
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (!isOnline) {
+        throw new Error("Network error: Device is offline.");
+      }
+
+      // Handle staging exams (offline created)
+      if (examId.startsWith("staging_")) {
+        console.log("[ExamService] Offline edit for staging exam:", examId);
+        // Throw a network error to trigger the offline fallback catch block immediately
+        throw new Error("Network error: Cannot update staging exam online.");
+      }
+
       const examRef = doc(db, "exams", examId);
-      const examSnap = await getDoc(examRef);
+      // Add a 5 second timeout to prevent hanging if Firebase is stuck waiting for network
+      const timeoutMs = 5000;
+      const timeoutError = new Error("Network error: Request timed out");
+
+      const examSnap = (await Promise.race([
+        getDoc(examRef),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(timeoutError), timeoutMs),
+        ),
+      ])) as any;
 
       if (!examSnap.exists()) {
         throw new Error("Exam not found");
@@ -1240,11 +1345,16 @@ export class ExamService {
       const newVersion = currentVersion + 1;
 
       try {
-        await updateDoc(examRef, {
-          ...updateData,
-          version: newVersion,
-          updatedAt: serverTimestamp(),
-        });
+        await Promise.race([
+          updateDoc(examRef, {
+            ...updateData,
+            version: newVersion,
+            updatedAt: serverTimestamp(),
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(timeoutError), timeoutMs),
+          ),
+        ]);
 
         const cacheRealm = await RealmService.getCacheRealm();
         const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
@@ -1291,13 +1401,11 @@ export class ExamService {
         throw updateError;
       }
     } catch (error: any) {
-      console.error("Error updating exam:", error);
-
       // Re-throw with more context
       if (this.isNetworkRelatedError(error)) {
         console.warn(
           "[ExamService] Network failed before update completed. Falling back to offline queue.",
-          error,
+          error.message || error,
         );
         await OfflineStorageService.queueUpdate(
           examId,
@@ -1496,15 +1604,17 @@ export class ExamService {
             Realm.UpdateMode.Modified,
           );
         });
-        console.log("[ExamService] ✅ Cache updated");
+        console.log("[ExamService] Cache updated");
         console.log(
-          `[ExamService] ✅ Online update complete (version: ${newVersion})\n`,
+          `[ExamService] Online update complete (version: ${newVersion})\n`,
         );
 
         return newVersion;
       } catch (updateError: any) {
-        console.error("\n❌ [ExamService] Firebase update failed:");
-        console.error("Error:", updateError);
+        if (!this.isNetworkRelatedError(updateError)) {
+          console.error("\n[ExamService] Firebase update failed:");
+          console.error("Error:", updateError);
+        }
 
         // Handle network errors specifically
         if (this.isNetworkRelatedError(updateError)) {
@@ -1541,17 +1651,13 @@ export class ExamService {
             });
           }
 
-          console.log(
-            "[ExamService] ✅ Fallback to offline queue successful\n",
-          );
+          console.log("[ExamService] Fallback to offline queue successful\n");
           return (existingCachedExam?.version || 1) + 1;
         }
         throw updateError;
       }
     } catch (error: any) {
-      console.error(
-        "\n❌ [ExamService] updateExam FAILED - FULL ERROR DETAILS:",
-      );
+      console.error("\n[ExamService] updateExam FAILED - FULL ERROR DETAILS:");
       console.error("════════════════════════════════════════════════════════");
       console.error("Exam ID:", examId);
       console.error("Update Data:", updateData);
@@ -1598,6 +1704,43 @@ export class ExamService {
     } catch (error) {
       console.error("Error checking scan sessions:", error);
       return false;
+    }
+  }
+
+  /**
+   * Delete an exam and remove from local cache
+   */
+  static async deleteExam(examId: string): Promise<void> {
+    try {
+      // Handle staging exams
+      if (examId.startsWith("staging_")) {
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = examId.replace("staging_", "");
+        const sQuiz = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+          "OfflineQuiz",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sQuiz) {
+          stagingRealm.write(() => stagingRealm.delete(sQuiz));
+        }
+        return;
+      }
+
+      const { deleteDoc, doc } = await import("firebase/firestore");
+      await deleteDoc(doc(db, "exams", examId));
+
+      // Remove from local cache
+      const cacheRealm = await RealmService.getCacheRealm();
+      const cached = cacheRealm.objectForPrimaryKey<QuizCache>(
+        "QuizCache",
+        examId,
+      );
+      if (cached) {
+        cacheRealm.write(() => cacheRealm.delete(cached));
+      }
+    } catch (error) {
+      console.error("Error deleting exam:", error);
+      throw error;
     }
   }
 

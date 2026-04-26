@@ -565,11 +565,60 @@ export default function ScannerScreen({
     let cancelled = false;
     const prefetchAnswerKey = async () => {
       try {
-        const { ExamService } = await import("../../services/examService");
-        const examData = await ExamService.getExamById(activeExamId);
+        // Always fetch directly from Firestore so we pick up any edits made
+        // from the web app without waiting for the Realm cache to refresh.
+        const akQuery = query(
+          collection(db, "answerKeys"),
+          where("examId", "==", activeExamId),
+        );
+        const akSnap = await getDocs(akQuery);
         if (cancelled) return;
-        if (Array.isArray(examData?.answerKey?.answers)) {
-          setCachedAnswerKey(examData.answerKey.answers);
+
+        if (!akSnap.empty) {
+          // Pick the highest-version doc (same logic as ExamService)
+          let best = akSnap.docs[0];
+          akSnap.docs.slice(1).forEach((d) => {
+            if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+          });
+          const akData = best.data();
+
+          // Prefer the answers array; fall back to questionSettings
+          let answers: string[] = [];
+          if (Array.isArray(akData.answers) && akData.answers.length > 0) {
+            answers = akData.answers as string[];
+          } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+            answers = (akData.questionSettings as any[])
+              .slice()
+              .sort((a, b) => a.questionNumber - b.questionNumber)
+              .map((q) => String(q.correctAnswer ?? ""));
+          }
+
+          if (answers.length > 0) {
+            setCachedAnswerKey(answers);
+
+            // Also update the Realm cache so offline scans use the fresh key
+            try {
+              const { RealmService } = await import("../../services/realmService");
+              const cacheRealm = await RealmService.getCacheRealm();
+              const cached = cacheRealm.objectForPrimaryKey<any>("QuizCache", activeExamId);
+              if (cached) {
+                cacheRealm.write(() => {
+                  cached.answerKey = JSON.stringify({ ...akData, answers });
+                  cached.updatedAt = new Date();
+                });
+              }
+            } catch (cacheErr) {
+              console.warn("[ScannerScreen] Realm cache update skipped:", cacheErr);
+            }
+          }
+        } else {
+          // No answer key in Firestore yet — fall back to cached ExamService
+          const { ExamService } = await import("../../services/examService");
+          const examData = await ExamService.getExamById(activeExamId);
+          if (cancelled) return;
+          if (Array.isArray(examData?.answerKey?.answers)) {
+            setCachedAnswerKey(examData.answerKey.answers);
+          }
         }
       } catch (error) {
         console.warn("[ScannerScreen] answer key prefetch skipped:", error);
@@ -616,12 +665,29 @@ export default function ScannerScreen({
       if (netState.isConnected && netState.isInternetReachable) {
         console.log(`[Firestore] Verifying student ID: ${studentId}...`);
         try {
-          const q = query(
-            collection(db, "students"),
-            where("studentId", "==", studentId),
-          );
-          const snap = await withTimeout(getDocs(q), 1200);
-          isValidId = !snap.empty;
+          // Check the selected class roster first (fastest, no extra query)
+          if (selectedClass) {
+            const classSnap = await withTimeout(
+              getDocs(query(collection(db, "classes"), where("__name__", "==", selectedClass.id))),
+              1200,
+            );
+            if (!classSnap.empty) {
+              const classData = classSnap.docs[0].data();
+              const roster: any[] = classData.students || [];
+              if (roster.some((s: any) => s.student_id === studentId || s.studentId === studentId)) {
+                isValidId = true;
+              }
+            }
+          }
+
+          // Fallback: query the standalone students collection (both field name variants)
+          if (!isValidId) {
+            const [snapSnake, snapCamel] = await Promise.all([
+              withTimeout(getDocs(query(collection(db, "students"), where("student_id", "==", studentId))), 1200),
+              withTimeout(getDocs(query(collection(db, "students"), where("studentId", "==", studentId))), 1200),
+            ]);
+            isValidId = !snapSnake.empty || !snapCamel.empty;
+          }
         } catch (err) {
           console.warn(
             "[ScannerScreen] Student verification timed out. Assuming valid.",
@@ -647,13 +713,32 @@ export default function ScannerScreen({
 
       if (answerKey.length === 0) {
         try {
-          const { ExamService } = await import("../../services/examService");
-          const examData = await withTimeout(
-            ExamService.getExamById(activeExamId),
-            2500,
+          // Go directly to Firestore so we always use the latest answer key,
+          // even if the web app edited it after the Realm cache was last synced.
+          const akQuery = query(
+            collection(db, "answerKeys"),
+            where("examId", "==", activeExamId),
           );
-          if (examData?.answerKey?.answers) {
-            answerKey = examData.answerKey.answers;
+          const akSnap = await withTimeout(getDocs(akQuery), 2500);
+
+          if (!akSnap.empty) {
+            let best = akSnap.docs[0];
+            akSnap.docs.slice(1).forEach((d) => {
+              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+            });
+            const akData = best.data();
+
+            if (Array.isArray(akData.answers) && akData.answers.length > 0) {
+              answerKey = akData.answers as string[];
+            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+              answerKey = (akData.questionSettings as any[])
+                .slice()
+                .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+                .map((q: any) => String(q.correctAnswer ?? ""));
+            }
+          }
+
+          if (answerKey.length > 0) {
             setCachedAnswerKey(answerKey);
           } else {
             throw new Error("Missing key");
@@ -728,6 +813,12 @@ export default function ScannerScreen({
               text1: "Queued Offline",
               text2: "Data saved in RealmDB for later sync.",
             });
+          } else if (saveResult.status === "error") {
+            Toast.show({
+              type: "error",
+              text1: "Save Failed",
+              text2: saveResult.message || "Could not save to server.",
+            });
           }
         },
       );
@@ -762,7 +853,10 @@ export default function ScannerScreen({
     } else {
       // Stage 2: Merge with Page 1 data
       if (!twoStageData?.page1Result) {
-        Alert.alert("Error", "Page 1 data is missing. Please restart the scan.");
+        Alert.alert(
+          "Error",
+          "Page 1 data is missing. Please restart the scan.",
+        );
         setTwoStageCurrent(1);
         setTwoStageData(null);
         return;
@@ -863,6 +957,100 @@ export default function ScannerScreen({
     }
   };
 
+  const handleConfirmExam = async () => {
+    const code = examIdInput.trim();
+    if (!code) return;
+    setIsValidatingExam(true);
+
+    try {
+      const { auth } = await import("../../config/firebase");
+      if (!auth.currentUser) {
+        Alert.alert("Auth Required", "Please sign in to search for exams.");
+        return;
+      }
+
+      let foundExamId: string | null = null;
+      let questionCount = 20;
+      let choicesPerQuestion: 4 | 5 = 5;
+
+      // 1. Check Staging Realm (Offline creations)
+      const { RealmService, OfflineQuiz, QuizCache } =
+        await import("../../services/realmService");
+      const stagingRealm = await RealmService.getStagingRealm();
+      const sQuizzes = stagingRealm
+        .objects<any>("OfflineQuiz")
+        .filtered(`examCode == "${code}"`);
+      if (sQuizzes.length > 0) {
+        const sQuiz = sQuizzes[0];
+        foundExamId = `staging_${sQuiz._id.toHexString()}`;
+        questionCount = sQuiz.questionCount || 20;
+        choicesPerQuestion = sQuiz.choiceFormat === "A-D" ? 4 : 5;
+      }
+
+      // 2. Check Cache Realm (Downloaded/Synced exams)
+      if (!foundExamId) {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cQuizzes = cacheRealm
+          .objects<any>("QuizCache")
+          .filtered(`examCode == "${code}"`);
+        if (cQuizzes.length > 0) {
+          const cQuiz = cQuizzes[0];
+          foundExamId = cQuiz.id;
+          questionCount = cQuiz.questionCount || 20;
+          choicesPerQuestion = cQuiz.choiceFormat === "A-D" ? 4 : 5;
+        }
+      }
+
+      // 3. Check Firestore (Online)
+      if (!foundExamId) {
+        const netState = await NetInfo.fetch();
+        if (netState.isConnected && netState.isInternetReachable) {
+          try {
+            const examsRef = collection(db, "exams");
+            const q = query(examsRef, where("examCode", "==", code));
+            // Use withTimeout to prevent hanging if connection is flaky
+            const snap = await withTimeout(getDocs(q), 5000);
+
+            if (!snap.empty) {
+              const data = snap.docs[0].data();
+              foundExamId = snap.docs[0].id;
+              questionCount = data.num_items || 20;
+              choicesPerQuestion = data.choiceFormat === "A-D" ? 4 : 5;
+            }
+          } catch (firestoreErr) {
+            console.warn(
+              "[ScannerScreen] Firestore query failed:",
+              firestoreErr,
+            );
+            // Ignore - we will handle the null foundExamId below
+          }
+        }
+      }
+
+      // Setup scanner or show error
+      if (foundExamId) {
+        setExamQuestionCount(questionCount);
+        setExamChoicesPerQuestion(choicesPerQuestion);
+        setActiveExamId(foundExamId);
+        setCurrentState("camera");
+      } else {
+        Alert.alert(
+          "Error",
+          "Exam not found. Please check the code and try again.",
+        );
+      }
+    } catch (err) {
+      console.error("[ScannerScreen] Error validating exam code:", err);
+      Alert.alert(
+        "Error",
+        "An unexpected error occurred while searching for the exam.",
+      );
+    } finally {
+      setIsValidatingExam(false);
+    }
+  };
+
+>>>>>>> origin/main
   const handleScanAnother = () => {
     // Reset 2-stage state for 200-item exams
     setTwoStageData(null);

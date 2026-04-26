@@ -24,6 +24,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -81,6 +82,8 @@ export default function CreateQuizScreen() {
   const [reviewVisible, setReviewVisible] = useState(false);
   const [reviewExamCode, setReviewExamCode] = useState<string | null>(null);
   const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const createLockRef = useRef(false);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
@@ -97,6 +100,8 @@ export default function CreateQuizScreen() {
   // Reset form when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      const forceRefreshTick = refreshNonce;
+      void forceRefreshTick;
       (async () => {
         try {
           const savedDarkMode = await AsyncStorage.getItem(
@@ -199,8 +204,15 @@ export default function CreateQuizScreen() {
       };
 
       loadClasses();
-    }, [classIdParam]),
+    }, [classIdParam, refreshNonce]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshNonce((value) => value + 1);
+    setTimeout(() => setRefreshing(false), 500);
+  }, [refreshing]);
 
   const colors = darkModeEnabled
     ? {
@@ -394,6 +406,8 @@ export default function CreateQuizScreen() {
           updatedAt: serverTimestamp(),
           locked: false,
           version: 1,
+          // answers array — required by the web app's AnswerKeyService
+          answers: Array.from({ length: numQuestions }, () => ""),
           questionSettings: Array.from({ length: numQuestions }, (_, i) => ({
             questionNumber: i + 1,
             correctAnswer: "",
@@ -509,6 +523,14 @@ export default function CreateQuizScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
       >
         <View style={styles.section}>
           <Text style={styles.formLabel}>Exam Name</Text>
