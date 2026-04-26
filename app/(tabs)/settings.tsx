@@ -10,6 +10,7 @@ import React from "react";
 import {
   DeviceEventEmitter,
   Image,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
@@ -22,6 +23,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [darkModeEnabled, setDarkModeEnabled] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = React.useState(false);
   const [statusModal, setStatusModal] = React.useState<{
     visible: boolean;
@@ -65,6 +67,16 @@ export default function SettingsScreen() {
     );
     return () => subscription.remove();
   }, []);
+
+  const handleRefresh = React.useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadDarkModePreference();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadDarkModePreference, refreshing]);
 
   const handleDarkModeToggle = async (value: boolean) => {
     setDarkModeEnabled(value);
@@ -244,6 +256,14 @@ export default function SettingsScreen() {
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor="#20BE7B"
+          colors={["#20BE7B"]}
+        />
+      }
     >
       {/* Header */}
       <View

@@ -28,6 +28,7 @@ import {
   FlatList,
   InteractionManager,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -168,6 +169,7 @@ export default function EditAnswerKeyScreen() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [answers, setAnswers] = useState<QuestionAnswer[]>([]);
   const [examTitle, setExamTitle] = useState("Untitled Exam");
   const [examCode, setExamCode] = useState("");
@@ -527,6 +529,16 @@ export default function EditAnswerKeyScreen() {
       setLoading(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing || saving) return;
+    setRefreshing(true);
+    try {
+      await loadAnswerKey();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAnswerKey, refreshing, saving]);
 
   const handleAnswerSelect = useCallback((questionNumber: number, answer: string) => {
     setHasLocalChanges(true);
@@ -1130,6 +1142,14 @@ export default function EditAnswerKeyScreen() {
         maxToRenderPerBatch={20}
         windowSize={11}
         removeClippedSubviews={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#20BE7B"
+            colors={["#20BE7B"]}
+          />
+        }
         onScrollBeginDrag={() => {
           if (highlightedQuestionNumber !== null) {
             setHighlightedQuestionNumber(null);

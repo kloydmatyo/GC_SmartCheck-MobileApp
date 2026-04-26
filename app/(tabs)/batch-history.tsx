@@ -16,6 +16,7 @@ import {
     ActivityIndicator,
     Dimensions,
     Modal,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Text,
@@ -93,6 +94,7 @@ export default function ArchivedScreen() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadArchivedItems = useCallback(() => {
     let active = true;
@@ -227,6 +229,16 @@ export default function ArchivedScreen() {
   }, []);
 
   useFocusEffect(loadArchivedItems);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await loadArchivedItems();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadArchivedItems, refreshing]);
 
   const filteredClasses = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -432,7 +444,17 @@ export default function ArchivedScreen() {
           <ActivityIndicator size="large" color="#20BE7B" />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.listContent}>
+        <ScrollView
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#20BE7B"
+              colors={["#20BE7B"]}
+            />
+          }
+        >
           {mode === "classes"
             ? filteredClasses.map((item) => (
                 <View key={item.id} style={styles.card}>

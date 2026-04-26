@@ -258,6 +258,11 @@ function drawMiniSheet(
   doc.setFontSize(6);
   doc.setFont("helvetica", "bold");
   doc.text("Student ZipGrade ID", idContentXMini + 1, currentY + 2);
+  doc.setFontSize(5.2);
+  doc.setFont("helvetica", "normal");
+  doc.text("e.g. 202300109", idBorderXMini + idBorderWMini - 1.5, currentY + 2, {
+    align: "right",
+  });
   currentY += 4.5;
 
   const idBoxWidth = 4.2;
@@ -560,6 +565,11 @@ function drawFullSheet(
   doc.setFontSize(5.5);
   doc.setFont("helvetica", "bold");
   doc.text("Student ZipGrade ID", idContentX + 1, currentY + 3);
+  doc.setFontSize(5.2);
+  doc.setFont("helvetica", "normal");
+  doc.text("e.g. 202300109", idBorderX + idBorderW - 1.5, currentY + 3, {
+    align: "right",
+  });
   currentY += 5.5;
 
   const idBoxW = 4.2;
@@ -1058,6 +1068,16 @@ function renderMiniSheetSvg(
       "bold",
     ),
   );
+  parts.push(
+    svgText(
+      "e.g. 202300109",
+      idBorderXMini + idBorderWMini - 1.5,
+      currentY + 2,
+      2.0,
+      "normal",
+      "end",
+    ),
+  );
   currentY += 4.5;
 
   const idBoxWidth = 4.2;
@@ -1320,6 +1340,16 @@ function renderFullSheetSvg(
   const idTopY = currentY;
   parts.push(
     svgText("Student ZipGrade ID", idContentX + 1, currentY + 3, 2.2, "bold"),
+  );
+  parts.push(
+    svgText(
+      "e.g. 202300109",
+      idBorderX + idBorderW - 1.5,
+      currentY + 3,
+      2.0,
+      "normal",
+      "end",
+    ),
   );
   currentY += 5.5;
 

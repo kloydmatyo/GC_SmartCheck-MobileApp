@@ -477,7 +477,7 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     //
     // NOTE: The scanner receives a cropped image of ONE mini-sheet (half the A4 page).
     return [
-      { xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97, startQ: 1,  numQ: 10 },
+      { xMin: 0.1, xMax: 0.23, yMin: 0.52, yMax: 0.97, startQ: 1, numQ: 10 },
       { xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97, startQ: 11, numQ: 10 },
       { xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97, startQ: 21, numQ: 10 },
       { xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97, startQ: 31, numQ: 10 },
@@ -485,7 +485,7 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     ];
   } else {
     // ── 100-question layout ─────────────────────────────────────────────────
-    // Template: full A4 page (210 × 297mm), drawFullSheet()
+    // Template: full A4 page (210 × 297mm), drawFullSheet() in templatePdfGenerator.ts
     //
     // Grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
     //   Col 0: Q1-10  (row 0), Q11-20  (row 1)
@@ -496,33 +496,34 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     //
     // Physical measurements (mm, page = 210 × 297):
     //   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
-    //   qBlockW = 10 + 4×5.5 + 3.5 = 35.5mm
-    //   totalGridW = 5 × 35.5 = 177.5mm
-    //   colGap = (190 - 177.5) / 6 ≈ 2.08mm
-    //   bx[col] = 10 + 2.08 + col × (35.5 + 2.08) = 12.08 + col × 37.58
-    //     Col 0: bx=12.08  → xEnd=47.58  → fracs 0.058–0.227
-    //     Col 1: bx=49.67  → xEnd=85.17  → fracs 0.237–0.406
-    //     Col 2: bx=87.25  → xEnd=122.75 → fracs 0.416–0.585
-    //     Col 3: bx=124.83 → xEnd=160.33 → fracs 0.595–0.763
-    //     Col 4: bx=162.42 → xEnd=197.92 → fracs 0.774–0.942
+    //   qBlockW = 10 + (5-1)×5.5 + 3.5 = 35.5mm
+    //   colGap = (190 - 5×35.5) / 6 ≈ 2.0833mm
+    //   bx[col] = 10 + 2.0833 + col×37.5833
+    //     Col 0: bx=12.08  → xEnd=47.58  → page fracs 0.058–0.227
+    //     Col 1: bx=49.67  → xEnd=85.17  → page fracs 0.237–0.406
+    //     Col 2: bx=87.25  → xEnd=122.75 → page fracs 0.416–0.585
+    //     Col 3: bx=124.83 → xEnd=160.33 → page fracs 0.595–0.763
+    //     Col 4: bx=162.42 → xEnd=197.92 → page fracs 0.774–0.942
     //
-    //   Answer Y start (currentY after header+ID): ≈ 87mm
+    //   currentY after header+ID ≈ 81mm; drawQBlock adds 5mm header row
+    //   Row 0 bubbles: Y 86–138mm  → page fracs 0.290–0.465
     //   blockVGap = 10×5.2 + 10 = 62mm
-    //   Row 0: Y 87–139mm  → fracs 0.293–0.468
-    //   Row 1: Y 149–201mm → fracs 0.502–0.677
+    //   Row 1 bubbles: Y 148–200mm → page fracs 0.499–0.673
+    //
+    // Regions are padded ±5mm around the bubble area for robust detection.
     return [
       // Row 0 (top blocks)
-      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.50, startQ: 1,  numQ: 10 },
-      { xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.50, startQ: 21, numQ: 10 },
-      { xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.50, startQ: 41, numQ: 10 },
-      { xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.50, startQ: 61, numQ: 10 },
-      { xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.50, startQ: 81, numQ: 10 },
+      { xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49, startQ: 1,  numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49, startQ: 21, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.49, startQ: 41, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49, startQ: 61, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49, startQ: 81, numQ: 10 },
       // Row 1 (bottom blocks)
-      { xMin: 0.04, xMax: 0.24, yMin: 0.48, yMax: 0.72, startQ: 11, numQ: 10 },
-      { xMin: 0.22, xMax: 0.42, yMin: 0.48, yMax: 0.72, startQ: 31, numQ: 10 },
-      { xMin: 0.40, xMax: 0.60, yMin: 0.48, yMax: 0.72, startQ: 51, numQ: 10 },
-      { xMin: 0.58, xMax: 0.78, yMin: 0.48, yMax: 0.72, startQ: 71, numQ: 10 },
-      { xMin: 0.76, xMax: 0.96, yMin: 0.48, yMax: 0.72, startQ: 91, numQ: 10 },
+      { xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.70, startQ: 11, numQ: 10 },
+      { xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.70, startQ: 31, numQ: 10 },
+      { xMin: 0.40, xMax: 0.60, yMin: 0.47, yMax: 0.70, startQ: 51, numQ: 10 },
+      { xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.70, startQ: 71, numQ: 10 },
+      { xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.70, startQ: 91, numQ: 10 },
     ];
   }
 }
@@ -1065,7 +1066,10 @@ export class ZipgradeScanner {
 
           if (bestIdx < 0) return null;
           chosenIndices.add(bestIdx);
-          chosen[target.key] = { x: regMarks[bestIdx].x, y: regMarks[bestIdx].y };
+          chosen[target.key] = {
+            x: regMarks[bestIdx].x,
+            y: regMarks[bestIdx].y,
+          };
         }
 
         const tl = chosen.topLeft;
@@ -1116,7 +1120,8 @@ export class ZipgradeScanner {
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
       // Use strict corner markers for 200-item sheets.
-      const strict200Corners = qCount === 200 ? getStrict200CornerMarkers() : null;
+      const strict200Corners =
+        qCount === 200 ? getStrict200CornerMarkers() : null;
 
       if (qCount === 200 && strict200Corners) {
         paperLeft = Math.max(
@@ -1126,7 +1131,8 @@ export class ZipgradeScanner {
             strict200Corners.bottomLeft.x,
             strict200Corners.topRight.x,
             strict200Corners.bottomRight.x,
-          ) - medianW * 2,
+          ) -
+            medianW * 2,
         );
         paperRight = Math.min(
           imgWidth,
@@ -1135,7 +1141,8 @@ export class ZipgradeScanner {
             strict200Corners.bottomLeft.x,
             strict200Corners.topRight.x,
             strict200Corners.bottomRight.x,
-          ) + medianW * 2,
+          ) +
+            medianW * 2,
         );
         paperTop = Math.max(
           0,
@@ -1144,7 +1151,8 @@ export class ZipgradeScanner {
             strict200Corners.topRight.y,
             strict200Corners.bottomLeft.y,
             strict200Corners.bottomRight.y,
-          ) - medianH * 2,
+          ) -
+            medianH * 2,
         );
         paperBottom = Math.min(
           imgHeight,
@@ -1153,7 +1161,8 @@ export class ZipgradeScanner {
             strict200Corners.topRight.y,
             strict200Corners.bottomLeft.y,
             strict200Corners.bottomRight.y,
-          ) + medianH * 2,
+          ) +
+            medianH * 2,
         );
         console.log(
           `[OMR] 200q strict crop from 4 corners: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
@@ -1203,7 +1212,9 @@ export class ZipgradeScanner {
         grid[yi][xi]++;
       }
       if (OMR_DEBUG_LOGS) {
-        console.log(`[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`);
+        console.log(
+          `[OMR] bubble density grid (rows=Y 0-100%, cols=X 0-100%):`,
+        );
         grid.forEach((row, yi) => {
           const label = `y${yi * 10}-${yi * 10 + 10}%`;
           const cells = row
@@ -1504,6 +1515,7 @@ export class ZipgradeScanner {
           imageUri,
           markers,
           choicesPerQuestion,
+          true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
         );
 
         console.log(
@@ -1560,7 +1572,8 @@ export class ZipgradeScanner {
       const finalAnswers: StudentAnswer[] = [];
       // For 200-item, pad only the current page's range
       const padStart = qCount === 200 ? ((pageNumber || 1) === 1 ? 1 : 101) : 1;
-      const padEnd = qCount === 200 ? ((pageNumber || 1) === 1 ? 100 : 200) : detectedQ;
+      const padEnd =
+        qCount === 200 ? ((pageNumber || 1) === 1 ? 100 : 200) : detectedQ;
       for (let q = padStart; q <= padEnd; q++) {
         finalAnswers.push(
           answerMap.get(q) ?? { questionNumber: q, selectedAnswer: "" },

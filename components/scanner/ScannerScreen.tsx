@@ -194,7 +194,7 @@ export default function ScannerScreen({
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
       setExamQuestionCount(questionCount);
-      setExamChoicesPerQuestion(selectedExam.choiceFormat === "A-E" ? 5 : 4);
+      setExamChoicesPerQuestion(selectedExam.choiceFormat === "A-D" ? 4 : 5);
       setCachedAnswerKey(
         Array.isArray(selectedExam.answerKey?.answers)
           ? selectedExam.answerKey.answers
@@ -623,7 +623,7 @@ export default function ScannerScreen({
         const sQuiz = sQuizzes[0];
         foundExamId = `staging_${sQuiz._id.toHexString()}`;
         questionCount = sQuiz.questionCount || 20;
-        choicesPerQuestion = sQuiz.choiceFormat === "A-E" ? 5 : 4;
+        choicesPerQuestion = sQuiz.choiceFormat === "A-D" ? 4 : 5;
       }
 
       // 2. Check Cache Realm (Downloaded/Synced exams)
@@ -636,7 +636,7 @@ export default function ScannerScreen({
           const cQuiz = cQuizzes[0];
           foundExamId = cQuiz.id;
           questionCount = cQuiz.questionCount || 20;
-          choicesPerQuestion = cQuiz.choiceFormat === "A-E" ? 5 : 4;
+          choicesPerQuestion = cQuiz.choiceFormat === "A-D" ? 4 : 5;
         }
       }
 
@@ -654,7 +654,7 @@ export default function ScannerScreen({
               const data = snap.docs[0].data();
               foundExamId = snap.docs[0].id;
               questionCount = data.num_items || 20;
-              choicesPerQuestion = data.choiceFormat === "A-E" ? 5 : 4;
+              choicesPerQuestion = data.choiceFormat === "A-D" ? 4 : 5;
             }
           } catch (firestoreErr) {
             console.warn(
