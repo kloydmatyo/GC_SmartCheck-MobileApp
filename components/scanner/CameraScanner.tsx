@@ -3,12 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import {
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    Alert,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
@@ -158,17 +158,17 @@ export default function CameraScanner({
       // Derived from drawFullSheet() physical measurements in templatePdfGenerator.ts
       return [
         // Row 0 (top)
-        { label: "Q1–10",   xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49 },
-        { label: "Q21–30",  xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49 },
-        { label: "Q41–50",  xMin: 0.40, xMax: 0.60, yMin: 0.27, yMax: 0.49 },
-        { label: "Q61–70",  xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49 },
-        { label: "Q81–90",  xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49 },
+        { label: "Q1–10", xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49 },
+        { label: "Q21–30", xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49 },
+        { label: "Q41–50", xMin: 0.4, xMax: 0.6, yMin: 0.27, yMax: 0.49 },
+        { label: "Q61–70", xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49 },
+        { label: "Q81–90", xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49 },
         // Row 1 (bottom)
-        { label: "Q11–20",  xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.70 },
-        { label: "Q31–40",  xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.70 },
-        { label: "Q51–60",  xMin: 0.40, xMax: 0.60, yMin: 0.47, yMax: 0.70 },
-        { label: "Q71–80",  xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.70 },
-        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.70 },
+        { label: "Q11–20", xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.7 },
+        { label: "Q31–40", xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.7 },
+        { label: "Q51–60", xMin: 0.4, xMax: 0.6, yMin: 0.47, yMax: 0.7 },
+        { label: "Q71–80", xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.7 },
+        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.7 },
       ];
     }
   };
@@ -233,7 +233,7 @@ export default function CameraScanner({
       );
 
       console.log("[CameraScanner] Scan complete, calling onScanComplete");
-      onScanComplete(scanResult, scanResult.processedImageUri || photo.uri);
+      onScanComplete(scanResult, photo.uri);
     } catch (error) {
       console.error("Error taking picture:", error);
       const message =

@@ -288,6 +288,13 @@ export default function TabLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="email-preview"
+        options={{
+          href: null,
+          tabBarStyle: { display: "none" },
+        }}
+      />
     </Tabs>
   );
 }
