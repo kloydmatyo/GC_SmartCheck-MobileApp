@@ -17,6 +17,7 @@ interface CameraScannerProps {
   choicesPerQuestion?: 4 | 5; // Expected answer choices for this exam
   scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
   onScanComplete: (result: ScanResult, imageUri: string) => void;
+  onScanError?: (message: string) => void;
   onCancel: () => void;
 }
 
@@ -25,6 +26,7 @@ export default function CameraScanner({
   choicesPerQuestion = 4,
   scanStage,
   onScanComplete,
+  onScanError,
   onCancel,
 }: CameraScannerProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -247,6 +249,16 @@ export default function CameraScanner({
         error instanceof Error && error.message
           ? error.message
           : "Failed to process Zipgrade answer sheet. Please try again.";
+
+      const isCornerBoxDetectionError =
+        questionCount === 200 &&
+        /could not detect all 4 corner boxes/i.test(message);
+
+      if (isCornerBoxDetectionError && onScanError) {
+        onScanError(message);
+        return;
+      }
+
       Alert.alert("Error", message);
     } finally {
       setIsProcessing(false);

@@ -315,10 +315,27 @@ function normalize200ScanMapping(
   let bestAnswers = scanResult.answers;
   let bestScore = baselineScore;
   let bestMode = "global";
+  let secondBestScore = Number.NEGATIVE_INFINITY;
+  let secondBestLabel = "none";
+
+  const trackScore = (score: number, label: string) => {
+    if (score > bestScore) {
+      secondBestScore = bestScore;
+      secondBestLabel = `${bestMode}:${bestCandidate.name}`;
+      return;
+    }
+
+    if (score > secondBestScore) {
+      secondBestScore = score;
+      secondBestLabel = label;
+    }
+  };
 
   for (const candidate of candidates) {
     const mappedAnswers = remap200Answers(scanResult.answers, candidate);
     const score = scoreAnswersAgainstKey(mappedAnswers, answerKey);
+    trackScore(score, `global:${candidate.name}`);
+
     if (score > bestScore) {
       bestCandidate = candidate;
       bestAnswers = mappedAnswers;
@@ -378,6 +395,9 @@ function normalize200ScanMapping(
       (a, b) => a.questionNumber - b.questionNumber,
     );
     const combinedScore = bestPage0Score + bestPage1Score;
+    const combinedLabel = `per-page:page1:${bestPage0Profile.name}|page2:${bestPage1Profile.name}${swapPages ? "|swapPages" : ""}`;
+    trackScore(combinedScore, combinedLabel);
+
     if (combinedScore > bestScore) {
       bestCandidate = {
         name: `page1:${bestPage0Profile.name}|page2:${bestPage1Profile.name}${swapPages ? "|swapPages" : ""}`,
@@ -392,11 +412,26 @@ function normalize200ScanMapping(
     }
   }
 
+  const keyCoverage = Math.min(200, answerKey.length);
+  const bestPct = bestScore / Math.max(1, keyCoverage);
   const improvement = bestScore - baselineScore;
-  const shouldApply = false;
+  const marginVsSecond =
+    secondBestScore === Number.NEGATIVE_INFINITY
+      ? improvement
+      : bestScore - secondBestScore;
+  const isIdentityMapping =
+    bestMode === "global" &&
+    bestCandidate.swapPages === false &&
+    bestCandidate.mirrorChoices === false &&
+    bestCandidate.localTransform === "identity";
+  const hasLargeGain = improvement >= 30;
+  const hasConfidentBest = bestPct >= 0.55;
+  const hasClearWinner = marginVsSecond >= 12;
+  const shouldApply =
+    !isIdentityMapping && hasLargeGain && hasConfidentBest && hasClearWinner;
 
   console.log(
-    `[ScannerScreen] 200Q mapping diagnostic: baseline=${baselineScore}/200, best=${bestScore}/200 (${bestMode}:${bestCandidate.name}), improvement=${improvement}, applied=${shouldApply}`,
+    `[ScannerScreen] 200Q mapping diagnostic: baseline=${baselineScore}/200, best=${bestScore}/200 (${bestMode}:${bestCandidate.name}), second=${secondBestScore === Number.NEGATIVE_INFINITY ? "n/a" : `${secondBestScore}/200 (${secondBestLabel})`}, improvement=${improvement}, margin=${marginVsSecond}, applied=${shouldApply}`,
   );
 
   return shouldApply
@@ -461,6 +496,7 @@ export default function ScannerScreen({
       setTwoStageData(null);
       setTwoStageCurrent(1);
       setShowPage1Confirmation(false);
+      setCornerBoxErrorModal({ visible: false, message: "" });
       // stay in camera mode but clear selections
     }
   }, [resetFlag]);
@@ -498,6 +534,13 @@ export default function ScannerScreen({
     pendingScan: null,
     pendingImage: "",
     input: "",
+  });
+  const [cornerBoxErrorModal, setCornerBoxErrorModal] = useState<{
+    visible: boolean;
+    message: string;
+  }>({
+    visible: false,
+    message: "",
   });
 
   // ----- new behaviour for class/exam selection UI -----
@@ -817,6 +860,23 @@ export default function ScannerScreen({
         correctAnswer: answer,
         points: 1,
       }));
+
+      if (examQuestionCount === 200 && usedDefaultAnswerKey) {
+        Alert.alert(
+          "Answer Key Unavailable",
+          "Could not load the official 200-item answer key. Please reconnect to the internet or sync this exam first, then scan again.",
+        );
+        return;
+      }
+
+      if (examQuestionCount === 200 && answerKey.length < 200) {
+        Alert.alert(
+          "Incomplete Answer Key",
+          `This exam is set to 200 items, but only ${answerKey.length} answer-key entries were loaded. Please complete/sync the answer key before scanning.`,
+        );
+        return;
+      }
+
       const normalizedScanResult =
         examQuestionCount === 200 && !usedDefaultAnswerKey
           ? normalize200ScanMapping(scanResult, answerKey)
@@ -1015,104 +1075,12 @@ export default function ScannerScreen({
     }
   };
 
-  const handleConfirmExam = async () => {
-    const code = examIdInput.trim();
-    if (!code) return;
-    setIsValidatingExam(true);
-
-    try {
-      const { auth } = await import("../../config/firebase");
-      if (!auth.currentUser) {
-        Alert.alert("Auth Required", "Please sign in to search for exams.");
-        return;
-      }
-
-      let foundExamId: string | null = null;
-      let questionCount = 20;
-      let choicesPerQuestion: 4 | 5 = 5;
-
-      // 1. Check Staging Realm (Offline creations)
-      const { RealmService, OfflineQuiz, QuizCache } =
-        await import("../../services/realmService");
-      const stagingRealm = await RealmService.getStagingRealm();
-      const sQuizzes = stagingRealm
-        .objects<any>("OfflineQuiz")
-        .filtered(`examCode == "${code}"`);
-      if (sQuizzes.length > 0) {
-        const sQuiz = sQuizzes[0];
-        foundExamId = `staging_${sQuiz._id.toHexString()}`;
-        questionCount = sQuiz.questionCount || 20;
-        choicesPerQuestion = sQuiz.choiceFormat === "A-D" ? 4 : 5;
-      }
-
-      // 2. Check Cache Realm (Downloaded/Synced exams)
-      if (!foundExamId) {
-        const cacheRealm = await RealmService.getCacheRealm();
-        const cQuizzes = cacheRealm
-          .objects<any>("QuizCache")
-          .filtered(`examCode == "${code}"`);
-        if (cQuizzes.length > 0) {
-          const cQuiz = cQuizzes[0];
-          foundExamId = cQuiz.id;
-          questionCount = cQuiz.questionCount || 20;
-          choicesPerQuestion = cQuiz.choiceFormat === "A-D" ? 4 : 5;
-        }
-      }
-
-      // 3. Check Firestore (Online)
-      if (!foundExamId) {
-        const netState = await NetInfo.fetch();
-        if (netState.isConnected && netState.isInternetReachable) {
-          try {
-            const examsRef = collection(db, "exams");
-            const q = query(examsRef, where("examCode", "==", code));
-            // Use withTimeout to prevent hanging if connection is flaky
-            const snap = await withTimeout(getDocs(q), 5000);
-
-            if (!snap.empty) {
-              const data = snap.docs[0].data();
-              foundExamId = snap.docs[0].id;
-              questionCount = data.num_items || 20;
-              choicesPerQuestion = data.choiceFormat === "A-D" ? 4 : 5;
-            }
-          } catch (firestoreErr) {
-            console.warn(
-              "[ScannerScreen] Firestore query failed:",
-              firestoreErr,
-            );
-            // Ignore - we will handle the null foundExamId below
-          }
-        }
-      }
-
-      // Setup scanner or show error
-      if (foundExamId) {
-        setExamQuestionCount(questionCount);
-        setExamChoicesPerQuestion(choicesPerQuestion);
-        setActiveExamId(foundExamId);
-        setCurrentState("camera");
-      } else {
-        Alert.alert(
-          "Error",
-          "Exam not found. Please check the code and try again.",
-        );
-      }
-    } catch (err) {
-      console.error("[ScannerScreen] Error validating exam code:", err);
-      Alert.alert(
-        "Error",
-        "An unexpected error occurred while searching for the exam.",
-      );
-    } finally {
-      setIsValidatingExam(false);
-    }
-  };
-
   const handleScanAnother = () => {
     // Reset 2-stage state for 200-item exams
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
+    setCornerBoxErrorModal({ visible: false, message: "" });
     setScanCount((prev) => prev + 1);
     setCurrentState("camera");
   };
@@ -1125,6 +1093,7 @@ export default function ScannerScreen({
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
+    setCornerBoxErrorModal({ visible: false, message: "" });
     setExamChoicesPerQuestion(4);
     setCachedAnswerKey(null);
     // clear selection so reopening starts fresh
@@ -1166,6 +1135,22 @@ export default function ScannerScreen({
     handleScanComplete(correctedScan, pendingImage);
   };
 
+  const handleScannerError = (message: string) => {
+    if (
+      examQuestionCount === 200 &&
+      /could not detect all 4 corner boxes/i.test(message)
+    ) {
+      setCornerBoxErrorModal({ visible: true, message });
+      return;
+    }
+
+    Alert.alert("Error", message);
+  };
+
+  const handleDismissCornerBoxModal = () => {
+    setCornerBoxErrorModal({ visible: false, message: "" });
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
@@ -1185,6 +1170,7 @@ export default function ScannerScreen({
               ? handleTwoStageScanComplete
               : handleScanComplete
           }
+          onScanError={handleScannerError}
           onCancel={handleClose}
         />
       )}
@@ -1440,6 +1426,68 @@ export default function ScannerScreen({
                 onPress={handlePage1ConfirmScanPage2}
               >
                 <Text style={styles.modalConfirmText}>Scan Page 2</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 200-item corner box detection error modal ── */}
+      <Modal
+        visible={cornerBoxErrorModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleDismissCornerBoxModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.manualIdModalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="scan-circle" size={28} color="#d35400" />
+              <Text style={styles.modalTitle}>Sheet Alignment Needed</Text>
+            </View>
+
+            <Text style={styles.modalMessage}>
+              We could not detect all 4 corner boxes for this 200-item page.
+            </Text>
+
+            {cornerBoxErrorModal.message ? (
+              <Text style={styles.cornerErrorDetailText}>
+                {cornerBoxErrorModal.message}
+              </Text>
+            ) : null}
+
+            <View style={styles.cornerErrorTipsCard}>
+              <Text style={styles.cornerErrorTipsTitle}>Before retaking:</Text>
+              <Text style={styles.cornerErrorTipText}>
+                1. Keep all four edge corner boxes inside the guide frame.
+              </Text>
+              <Text style={styles.cornerErrorTipText}>
+                2. Flatten the paper and avoid shadows on the corners.
+              </Text>
+              <Text style={styles.cornerErrorTipText}>
+                3. Hold the phone in portrait and keep the whole page visible.
+              </Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSummaryCancel]}
+                onPress={() => {
+                  handleDismissCornerBoxModal();
+                  setCurrentState("camera");
+                }}
+              >
+                <Text style={styles.modalCancelText}>Close</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalVerifyConfirm]}
+                onPress={() => {
+                  handleDismissCornerBoxModal();
+                  setScanCount((prev) => prev + 1);
+                }}
+              >
+                <Text style={styles.modalConfirmText}>Retake Scan</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1712,5 +1760,35 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "600",
+  },
+  cornerErrorTipsCard: {
+    width: "100%",
+    backgroundColor: "#fff7ef",
+    borderWidth: 1,
+    borderColor: "#fde2cc",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+  },
+  cornerErrorDetailText: {
+    width: "100%",
+    fontSize: 12,
+    color: "#8f8f8f",
+    textAlign: "center",
+    marginBottom: 12,
+    lineHeight: 17,
+  },
+  cornerErrorTipsTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#a54900",
+    marginBottom: 8,
+  },
+  cornerErrorTipText: {
+    fontSize: 13,
+    color: "#7a4b24",
+    lineHeight: 19,
+    marginBottom: 3,
   },
 });
