@@ -171,6 +171,34 @@ export class OfflineStorageService {
         });
       });
       console.log("Update queued for sync in Realm");
+
+      // OPTIMISTIC CACHE UPDATE: Prevent "Ghosting"
+      const cacheRealm = await RealmService.getCacheRealm();
+      const collectionMap = {
+        exams: "QuizCache",
+        classes: "ClassCache",
+      };
+      const type = collectionMap[collection];
+
+      if (type) {
+        const cachedItem = cacheRealm.objectForPrimaryKey(type, examId);
+        if (cachedItem) {
+          cacheRealm.write(() => {
+            if (action === "delete") {
+              cacheRealm.delete(cachedItem);
+              console.log(`[Optimistic] Deleted ${examId} from ${type}`);
+            } else if (action === "update") {
+              // Apply basic field updates
+              Object.keys(data).forEach((key) => {
+                if (key in cachedItem && key !== "id" && key !== "_id") {
+                  (cachedItem as any)[key] = data[key];
+                }
+              });
+              console.log(`[Optimistic] Updated ${examId} in ${type}`);
+            }
+          });
+        }
+      }
     } catch (error) {
       console.error("Error queuing update:", error);
       throw error;
