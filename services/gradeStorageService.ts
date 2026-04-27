@@ -122,7 +122,7 @@ export class GradeStorageService {
         { studentId },
       );
       return false;
-    } catch (error) {
+    } catch (_error) {
       // Allow if validation fails — don't block save
       return true;
     }
@@ -170,7 +170,7 @@ export class GradeStorageService {
         const cacheRealm = await RealmService.getCacheRealm();
         const cached = cacheRealm.objectForPrimaryKey("QuizCache", examId);
         return !!cached;
-      } catch (cacheError) {
+      } catch (_cacheError) {
         LogService.error(
           "EXAM_ID_INVALID",
           "Failed to validate exam ID anywhere",
@@ -307,7 +307,7 @@ export class GradeStorageService {
           message: `Student ID "${result.studentId}" was not found in the database.`,
         };
       }
-    } catch (err) {
+    } catch (_err) {
       console.warn(
         "[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.",
       );
@@ -326,7 +326,7 @@ export class GradeStorageService {
           message: `Exam ID "${resolvedExamId}" is not active or does not exist.`,
         };
       }
-    } catch (err) {
+    } catch (_err) {
       console.warn(
         "[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.",
       );
@@ -349,7 +349,7 @@ export class GradeStorageService {
           message: `A grade for Student ${result.studentId} in this exam already exists.`,
         };
       }
-    } catch (err) {
+    } catch (_err) {
       console.warn(
         "[GradeStorageService] Duplicate check timed out. Proceeding.",
       );
@@ -505,6 +505,8 @@ export class GradeStorageService {
           status: "pending",
           scannedBy: record.scannedBy,
           createdAt: record.createdAt,
+          answers: JSON.stringify(record.answers ?? []),
+          isNullId: record.isNullId ?? false,
         });
       });
 
@@ -696,7 +698,7 @@ export class GradeStorageService {
           correctAnswers: record.correctAnswers,
           totalQuestions: record.totalQuestions,
           dateScanned: record.dateScanned,
-          answers: record.answers ?? [],
+          answers: record.answers ? JSON.parse(record.answers) : [],
           isNullId: record.isNullId ?? false,
           status: "saved",
           scannedBy: record.scannedBy,

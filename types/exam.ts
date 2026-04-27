@@ -34,7 +34,7 @@ export interface AnswerKeyData {
 
 export interface ExamConfiguration {
   metadata: ExamMetadata;
-  answerKey: AnswerKeyData;
+  answerKey: AnswerKeyData | null;
   templateLayout?: {
     name: string;
     totalQuestions: number;
@@ -48,4 +48,38 @@ export interface ExamPreviewData extends ExamConfiguration {
   totalQuestions: number;
   choiceFormat: "A-D" | "A-E";
   lastModified: Date;
+  description?: string;
+  notes?: string;
+}
+
+export interface AuditLogEntry {
+  action: string;
+  timestamp: string;
+  actor?: string;
+  metadata?: any;
+  [key: string]: any; // Allow for flexible audit log structures
+}
+
+export interface EditableExamFields {
+  title?: string;
+  subject?: string;
+  examDate?: string;
+  description?: string;
+  notes?: string;
+  expectedVersion?: number;
+}
+
+export class ExamPreviewError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.name = 'ExamPreviewError';
+  }
+}
+
+export interface ExamPreviewResult {
+  data?: ExamPreviewData;
+  error?: string;
+  fromCache?: boolean;
 }
