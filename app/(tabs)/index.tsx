@@ -169,6 +169,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const syncBannerOffset = useState(new Animated.Value(-16))[0];
   const syncBannerOpacity = useState(new Animated.Value(0))[0];
+  const [now, setNow] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<SummaryStats>(emptyStats);
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
@@ -399,6 +400,16 @@ export default function HomeScreen() {
 
   useFocusEffect(loadHome);
 
+  useEffect(() => {
+    const updateNow = () => setNow(new Date());
+    updateNow();
+    const interval = setInterval(updateNow, 60000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
   const syncVisual = (() => {
     if (!isOnline) {
       return {
@@ -532,20 +543,29 @@ export default function HomeScreen() {
             ) : (
               <View style={styles.topSpacer} />
             )}
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={() => setSettingsMenuVisible(true)}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="settings-outline" size={20} color="#111827" />
-            </TouchableOpacity>
+            <View style={styles.topActions}>
+              <TouchableOpacity
+                style={styles.settingsButton}
+                onPress={() => {}}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="sync-outline" size={20} color="#111827" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsButton}
+                onPress={() => setSettingsMenuVisible(true)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="settings-outline" size={20} color="#111827" />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.greetingBlock}>
-            <Text style={styles.dateText}>{formatHeaderDate(new Date())}</Text>
+            <Text style={styles.dateText}>{formatHeaderDate(now)}</Text>
             <Text style={styles.greetingText}>
               {(() => {
-                const h = new Date().getHours();
+                const h = now.getHours();
                 if (h < 12) return `Good morning, ${teacherName}`;
                 if (h < 18) return `Good afternoon, ${teacherName}`;
                 return `Good evening, ${teacherName}`;
@@ -766,6 +786,11 @@ const styles = StyleSheet.create({
     height: 32,
     alignItems: "center",
     justifyContent: "center",
+  },
+  topActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   menuOverlay: {
     flex: 1,
