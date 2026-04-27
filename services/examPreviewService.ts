@@ -75,7 +75,7 @@ export async function getCachedExamPreview(examId: string): Promise<ExamPreviewD
 
 async function upsertCachedExamPreview(data: ExamPreviewData): Promise<void> {
   const map = await readCacheMap();
-  map[data.id] = data;
+  map[data.metadata.examId] = data;
   await writeCacheMap(map);
 }
 
@@ -114,7 +114,7 @@ function validatePreviewState(exam: ExamPreviewData): void {
 }
 
 function validateDraftState(exam: ExamPreviewData): void {
-  if (exam.status !== 'Draft') {
+  if (exam.metadata.status !== 'Draft') {
     throw new ExamPreviewError('STATUS_CHANGED', 'Editing is only allowed while exam is Draft.');
   }
 }
@@ -125,43 +125,49 @@ function validateEditableFields(changes: EditableExamFields): void {
     throw new ExamPreviewError('VALIDATION', 'Title must be between 3 and 120 characters.');
   }
 
-  const dt = Date.parse(changes.examDate);
+  const dt = Date.parse(changes.examDate || "");
   if (Number.isNaN(dt)) {
     throw new ExamPreviewError('VALIDATION', 'Please enter a valid exam date.');
   }
 }
 
 function toExamPreviewData(raw: any): ExamPreviewData {
+  const metadata = {
+    examId: String(raw.id || raw.examId || ""),
+    title: String(raw.title || ""),
+    subject: String(raw.subject || ""),
+    section: String(raw.section || ""),
+    date: String(raw.examDate || raw.date || ""),
+    examCode: String(raw.examCode || ""),
+    status: (raw.status || "Draft") as any,
+    createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
+    updatedAt: raw.updatedAt ? new Date(raw.updatedAt) : new Date(),
+    createdBy: String(raw.createdBy || ""),
+    version: Number(raw.version || 1),
+  };
+
+  const totalQuestions = Number(raw.questionCount || raw.totalQuestions || 0);
+
   return {
-    id: String(raw.id),
-    title: String(raw.title ?? ''),
-    subject: String(raw.subject ?? ''),
-    section: String(raw.section ?? ''),
-    examDate: String(raw.examDate ?? ''),
-    status: raw.status,
-    questionCount: Number(raw.questionCount ?? 0),
-    choicesFormat: raw.choicesFormat,
-    answerKey: Array.isArray(raw.answerKey) ? raw.answerKey.map((v: string) => String(v)) : [],
-    examCode: String(raw.examCode ?? ''),
-    template: {
-      id: String(raw.template?.id ?? ''),
-      name: String(raw.template?.name ?? ''),
-      omrLayout: String(raw.template?.omrLayout ?? ''),
-      columns: Number(raw.template?.columns ?? 0),
-      questionsPerColumn: Number(raw.template?.questionsPerColumn ?? 0),
-      totalQuestions: Number(raw.template?.totalQuestions ?? 0),
-    },
-    description: raw.description ? String(raw.description) : undefined,
-    notes: raw.notes ? String(raw.notes) : undefined,
-    version: Number(raw.version ?? 1),
-    lastModified: String(raw.lastModified ?? new Date().toISOString()),
+    metadata,
+    answerKey: null, // Basic sync doesn't fetch full key here usually
+    totalQuestions,
+    choiceFormat: raw.choicesFormat === "A-E" ? "A-E" : "A-D",
+    lastModified: raw.lastModified ? new Date(raw.lastModified) : new Date(),
+    templateLayout: raw.template ? {
+      name: String(raw.template.name || ""),
+      totalQuestions: Number(raw.template.totalQuestions || totalQuestions),
+      choiceFormat: raw.template.choiceFormat === "A-E" ? "A-E" : "A-D",
+      columns: Number(raw.template.columns || 2),
+      questionsPerColumn: Number(raw.template.questionsPerColumn || Math.ceil(totalQuestions / 2)),
+    } : undefined
   };
 }
 
 async function fetchPreviewFromApi(examId: string, token: string, timeoutMs: number): Promise<ExamPreviewData> {
   const baseUrl = process.env.EXPO_PUBLIC_EXAM_API_BASE_URL;
   if (!baseUrl) {
-    const local = MOCK_EXAM_PREVIEWS.find((e) => e.id === examId);
+    const local = MOCK_EXAM_PREVIEWS.find((e) => e.metadata.examId === examId);
     await new Promise((resolve) => setTimeout(resolve, 650));
     if (!local) {
       throw new ExamPreviewError('NOT_FOUND', 'Exam not found.');
@@ -261,15 +267,18 @@ async function postAuditLog(baseUrl: string, token: string, entry: AuditLogEntry
 }
 
 function applyOptimisticPatch(exam: ExamPreviewData, changes: EditableExamFields): ExamPreviewData {
-  const nowIso = new Date().toISOString();
+  const now = new Date();
   return {
     ...exam,
-    title: changes.title.trim(),
-    examDate: changes.examDate,
+    metadata: {
+      ...exam.metadata,
+      title: (changes.title || exam.metadata.title).trim(),
+      date: changes.examDate,
+      version: exam.metadata.version + 1,
+    },
     description: changes.description,
     notes: changes.notes,
-    version: exam.version + 1,
-    lastModified: nowIso,
+    lastModified: now,
   };
 }
 
@@ -370,9 +379,12 @@ export async function updateExamDraftFields(input: {
   validateEditableFields(changes);
 
   const latest = await getExamPreview({ examId, session: validSession, preferCache: !isConnected });
+  if (!latest.data) {
+    throw new ExamPreviewError('NOT_FOUND', 'Exam data not available.');
+  }
   validateDraftState(latest.data);
 
-  if (latest.data.version !== expectedVersion) {
+  if (expectedVersion !== latest.data.metadata.version) {
     throw new ExamPreviewError('CONFLICT', 'Exam version changed. Refresh and retry your edit.');
   }
 
@@ -390,7 +402,7 @@ export async function updateExamDraftFields(input: {
 
     updateMockExamPreview(examId, {
       ...changes,
-      version: optimistic.version,
+      version: optimistic.metadata.version,
       lastModified: optimistic.lastModified,
     });
 
@@ -420,7 +432,7 @@ export async function updateExamDraftFields(input: {
   await upsertCachedExamPreview(updated);
   updateMockExamPreview(examId, {
     ...changes,
-    version: updated.version,
+    version: updated.metadata.version,
     lastModified: updated.lastModified,
   });
 
