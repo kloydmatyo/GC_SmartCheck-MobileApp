@@ -593,7 +593,7 @@ export default function ScannerScreen({
       if (foundExamId) {
         setExamQuestionCount(questionCount);
         setActiveExamId(foundExamId);
-        setCurrentState("camera");
+        setCurrentState("camera-stage1");
       } else {
         Alert.alert(
           "Error",
@@ -613,13 +613,13 @@ export default function ScannerScreen({
 
   const handleScanAnother = () => {
     setScanCount((prev) => prev + 1);
-    setCurrentState("camera");
+    setCurrentState("camera-stage1");
   };
 
   const handleClose = () => {
     setGradingResult(null);
     setScannedImage(undefined);
-    setCurrentState("camera");
+    setCurrentState("camera-stage1");
     // clear selection so reopening starts fresh
     setSelectedClass(null);
     setSelectedExam(null);
@@ -932,7 +932,7 @@ export default function ScannerScreen({
                     pendingImage: "",
                     input: "",
                   });
-                  setCurrentState("camera");
+                  setCurrentState("camera-stage1");
                 }}
               >
                 <Text style={styles.modalCancelText}>Cancel Scan</Text>

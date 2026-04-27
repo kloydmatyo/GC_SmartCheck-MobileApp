@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Brightness-Based Scanner for 100-Item Templates
  * 
  * This scanner uses brightness sampling instead of contour detection
@@ -39,6 +39,28 @@ interface TemplateLayout {
   bubbleDiameterNY: number;
 }
 
+function normalizeMarkers(markers: Markers): Markers {
+  const pts = [
+    { ...markers.topLeft },
+    { ...markers.topRight },
+    { ...markers.bottomLeft },
+    { ...markers.bottomRight },
+  ];
+  // Order corners by sum/diff so steep perspective does not swap top/bottom lanes.
+  // This is more stable than simple Y-splitting for heavily tilted captures.
+  const sum = (p: { x: number; y: number }) => p.x + p.y;
+  const diff = (p: { x: number; y: number }) => p.x - p.y;
+  const sortedBySum = [...pts].sort((a, b) => sum(a) - sum(b));
+  const sortedByDiff = [...pts].sort((a, b) => diff(a) - diff(b));
+
+  const topLeft = sortedBySum[0];
+  const bottomRight = sortedBySum[sortedBySum.length - 1];
+  const bottomLeft = sortedByDiff[0];
+  const topRight = sortedByDiff[sortedByDiff.length - 1];
+
+  return { topLeft, topRight, bottomLeft, bottomRight };
+}
+
 // ─── COORDINATE MAPPING ───
 // Maps normalized coordinates (0-1) to pixel coordinates
 // Handles perspective distortion using bilinear interpolation
@@ -77,6 +99,7 @@ function sampleBubbleAt(
   // Sample the center of the bubble using an elliptical mask
   // Use inner 50% to safely avoid the printed circle outline
   let sum = 0, count = 0;
+  // Use 100% of the provided radius (which is already scaled safely from the printed outline)
   const innerRX = radiusX * 0.50;
   const innerRY = radiusY * 0.50;
   const step = Math.max(1, Math.floor(Math.min(innerRX, innerRY) / 4));
@@ -198,54 +221,74 @@ function get100ItemTemplateLayout(): TemplateLayout {
 }
 
 // 150-item template layout for brightness scanning
-// Frame dimensions: 194mm × 281mm (usable A4 area)
-// Grid layout: 3 rows × 5 columns (15 blocks of 10 questions each)
-// FIXED: Removed overlapping Y-coordinates, now uses proper 3-row spacing
+// IMPORTANT: Frame = distance between corner marker CENTERS, not usable area.
+// Corner markers: 6mm squares at 2mm from edges → centers at 5mm from edges.
+// Usable area: 194×281mm. Marker centers: (5,5) to (189,276).
+// Effective frame: fw=184mm, fh=271mm.
+// All coordinates below are relative to top-left marker center.
 function get150ItemTemplateLayout(): TemplateLayout {
-  const fw = 194, fh = 281;
+  const fw = 184, fh = 271;
   
-  // 5-column grid with consistent X spacing
-  const col0X = 20 / fw;   // Column 0
-  const col1X = 60 / fw;   // Column 1
-  const col2X = 100 / fw;  // Column 2
-  const col3X = 140 / fw;  // Column 3
-  const col4X = 180 / fw;  // Column 4
+  // 5-column X positions — EMPIRICAL from contour centroid pixel data
+  // (CSS calculation was wrong; actual print has wider bubble spacing)
+  // Source centroids: Q21+[16,42,68,94,121], Q71+[254,283,311,340,368],
+  //   Q101+[379,407,436,464,493], Q131+[502,528,554,580,606]
+  // At ~623px image width → 3.386 px/mm
+  const col0X = 4.7 / fw;    // 16px / 3.386
+  const col1X = 39.9 / fw;   // ~135px / 3.386 (interpolated)
+  const col2X = 75.0 / fw;   // 254px / 3.386
+  const col3X = 111.9 / fw;  // 379px / 3.386
+  const col4X = 148.2 / fw;  // 502px / 3.386
   
-  // 3 physical rows with proper vertical separation (avoid overlap)
-  // Each block height: 10 questions × 4.6mm spacing = 46mm
-  // Row spacing: ~50mm between row starts (46mm block + ~4mm gap)
+  const row1Y = 86 / fh;
+  const row2Y = 139 / fh;
+  const row3Y = 192 / fh;
   
+  // Bubble spacing: ~28px at 623px width = 8.3mm (NOT 3.5mm from CSS)
+  const rSpacingY = 4.2 / fh;
+
+  console.log('[TEMPLATE] Block positions:');
+  const blocks = [
+    { q: 1,   nx: 0.046 }, { q: 31,  nx: 0.232 }, { q: 61,  nx: 0.418 },
+    { q: 91,  nx: 0.604 }, { q: 121, nx: 0.790 },
+    { q: 11,  nx: 0.046 }, { q: 41,  nx: 0.232 }, { q: 71,  nx: 0.418 },
+    { q: 101, nx: 0.604 }, { q: 131, nx: 0.790 },
+    { q: 21,  nx: 0.046 }, { q: 51,  nx: 0.232 }, { q: 81,  nx: 0.418 },
+    { q: 111, nx: 0.604 }, { q: 141, nx: 0.790 },
+  ];
+  blocks.forEach(b => {
+    const a=b.nx, bx=b.nx+0.037, c=b.nx+0.074, d=b.nx+0.111, e=b.nx+0.148;
+    console.log(`Q${b.q}: A=${a.toFixed(3)} B=${bx.toFixed(3)} C=${c.toFixed(3)} D=${d.toFixed(3)} E=${e.toFixed(3)}`);
+  });
+
   return {
     answerBlocks: [
       // ═══════════════════════════════════════════════════════════════
-      // ROW 1: Y = 18mm (top of page after margin)
-      // Blocks: Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
+      // ROW 1 (Y ≈ 90mm): Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
       // ═══════════════════════════════════════════════════════════════
-      { startQ: 1, endQ: 10, firstBubbleNX: col0X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 31, endQ: 40, firstBubbleNX: col1X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 61, endQ: 70, firstBubbleNX: col2X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 91, endQ: 100, firstBubbleNX: col3X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 121, endQ: 130, firstBubbleNX: col4X, firstBubbleNY: 18 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 1, endQ: 10, firstBubbleNX: 0.046, firstBubbleNY: 0.326, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 31, endQ: 40, firstBubbleNX: 0.232, firstBubbleNY: 0.326, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 61, endQ: 70, firstBubbleNX: 0.418, firstBubbleNY: 0.326, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 91, endQ: 100, firstBubbleNX: 0.604, firstBubbleNY: 0.326, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 121, endQ: 130, firstBubbleNX: 0.790, firstBubbleNY: 0.326, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
       
       // ═══════════════════════════════════════════════════════════════
-      // ROW 2: Y = 68mm (separated by 50mm from Row 1)
-      // Blocks: Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
+      // ROW 2 (Y ≈ 148mm): Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
       // ═══════════════════════════════════════════════════════════════
-      { startQ: 11, endQ: 20, firstBubbleNX: col0X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 41, endQ: 50, firstBubbleNX: col1X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 71, endQ: 80, firstBubbleNX: col2X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 101, endQ: 110, firstBubbleNX: col3X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 131, endQ: 140, firstBubbleNX: col4X, firstBubbleNY: 68 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 11, endQ: 20, firstBubbleNX: 0.046, firstBubbleNY: 0.492, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 41, endQ: 50, firstBubbleNX: 0.232, firstBubbleNY: 0.492, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 71, endQ: 80, firstBubbleNX: 0.418, firstBubbleNY: 0.492, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 101, endQ: 110, firstBubbleNX: 0.604, firstBubbleNY: 0.492, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 131, endQ: 140, firstBubbleNX: 0.790, firstBubbleNY: 0.492, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
       
       // ═══════════════════════════════════════════════════════════════
-      // ROW 3: Y = 118mm (separated by 50mm from Row 2)
-      // Blocks: Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
+      // ROW 3 (Y ≈ 206mm): Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
       // ═══════════════════════════════════════════════════════════════
-      { startQ: 21, endQ: 30, firstBubbleNX: col0X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 51, endQ: 60, firstBubbleNX: col1X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 81, endQ: 90, firstBubbleNX: col2X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 111, endQ: 120, firstBubbleNX: col3X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
-      { startQ: 141, endQ: 150, firstBubbleNX: col4X, firstBubbleNY: 118 / fh, bubbleSpacingNX: 4.2 / fw, rowSpacingNY: 4.6 / fh },
+      { startQ: 21, endQ: 30, firstBubbleNX: 0.046, firstBubbleNY: 0.658, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 51, endQ: 60, firstBubbleNX: 0.232, firstBubbleNY: 0.658, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 81, endQ: 90, firstBubbleNX: 0.418, firstBubbleNY: 0.658, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 111, endQ: 120, firstBubbleNX: 0.604, firstBubbleNY: 0.658, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
+      { startQ: 141, endQ: 150, firstBubbleNX: 0.790, firstBubbleNY: 0.658, bubbleSpacingNX: 0.037, rowSpacingNY: 0.015 },
     ],
     bubbleDiameterNX: 3.2 / fw,
     bubbleDiameterNY: 3.2 / fh,
@@ -265,44 +308,309 @@ function detectAnswersFromImage(
 ): StudentAnswer[] {
   const answers: StudentAnswer[] = [];
   const choiceLabels = 'ABCDE'.slice(0, choicesPerQuestion).split('');
+  const is150 = numQuestions === 150;
+  const logPrefix = is150 ? '150Q-BRIGHTNESS' : '100Q-BRIGHTNESS';
 
-  const frameW = markers.topRight.x - markers.topLeft.x;
-  const frameH = markers.bottomLeft.y - markers.topLeft.y;
+  const normalizedMarkers = normalizeMarkers(markers);
+  let safeMarkers = normalizedMarkers;
+
+  // Coordinate transform helper (kept for API compatibility)
+  // NOTE: Always use 'identity' — zipgradeScanner.ts already handles rotation
+  // before calling this function. Auto-detecting rotation here was redundant
+  // and wasted ~200ms per scan.
+  type CoordTransform = 'identity' | 'rot90' | 'rot180' | 'rot270';
+  const applyTransform = (nx: number, ny: number, t: CoordTransform) => {
+    switch (t) {
+      case 'rot90':
+        return { nx: ny, ny: 1 - nx };
+      case 'rot180':
+        return { nx: 1 - nx, ny: 1 - ny };
+      case 'rot270':
+        return { nx: 1 - ny, ny: nx };
+      default:
+        return { nx, ny };
+    }
+  };
+
+  const selectedTransform: CoordTransform = 'identity';
+  console.log(`[${logPrefix}] Using identity transform (rotation handled upstream)`);
+
+  const markerXsRaw = [
+    safeMarkers.topLeft.x,
+    safeMarkers.topRight.x,
+    safeMarkers.bottomLeft.x,
+    safeMarkers.bottomRight.x,
+  ];
+  const markerYsRaw = [
+    safeMarkers.topLeft.y,
+    safeMarkers.topRight.y,
+    safeMarkers.bottomLeft.y,
+    safeMarkers.bottomRight.y,
+  ];
+  const rawMinX = Math.min(...markerXsRaw);
+  const rawMaxX = Math.max(...markerXsRaw);
+  const rawMinY = Math.min(...markerYsRaw);
+  const rawMaxY = Math.max(...markerYsRaw);
+  const frameWEstimate = Math.max(
+    Math.hypot(
+      safeMarkers.topRight.x - safeMarkers.topLeft.x,
+      safeMarkers.topRight.y - safeMarkers.topLeft.y,
+    ),
+    Math.hypot(
+      safeMarkers.bottomRight.x - safeMarkers.bottomLeft.x,
+      safeMarkers.bottomRight.y - safeMarkers.bottomLeft.y,
+    ),
+  );
+  const frameHEstimate = Math.max(
+    Math.hypot(
+      safeMarkers.bottomLeft.x - safeMarkers.topLeft.x,
+      safeMarkers.bottomLeft.y - safeMarkers.topLeft.y,
+    ),
+    Math.hypot(
+      safeMarkers.bottomRight.x - safeMarkers.topRight.x,
+      safeMarkers.bottomRight.y - safeMarkers.topRight.y,
+    ),
+  );
+  const frameAspect = frameHEstimate > 0 ? frameWEstimate / frameHEstimate : 0;
+  const invalidMarkerGeometry =
+    frameWEstimate < 120 ||
+    frameHEstimate < 160 ||
+    frameAspect < 0.42 ||
+    frameAspect > 0.95;
+
+  if (is150 && invalidMarkerGeometry) {
+    // Fallback to axis-aligned marker box if corner ordering/selection is unreliable.
+    safeMarkers = {
+      topLeft: { x: rawMinX, y: rawMinY },
+      topRight: { x: rawMaxX, y: rawMinY },
+      bottomLeft: { x: rawMinX, y: rawMaxY },
+      bottomRight: { x: rawMaxX, y: rawMaxY },
+    };
+    console.warn(
+      `[150Q-BRIGHTNESS] Marker geometry fallback applied (w=${Math.round(frameWEstimate)}, h=${Math.round(frameHEstimate)}, aspect=${frameAspect.toFixed(2)})`,
+    );
+  }
+
+  const frameW = Math.max(
+    1,
+    Math.hypot(
+      safeMarkers.topRight.x - safeMarkers.topLeft.x,
+      safeMarkers.topRight.y - safeMarkers.topLeft.y,
+    ),
+  );
+  const frameH = Math.max(
+    1,
+    Math.hypot(
+      safeMarkers.bottomLeft.x - safeMarkers.topLeft.x,
+      safeMarkers.bottomLeft.y - safeMarkers.topLeft.y,
+    ),
+  );
   const bubbleRX = (layout.bubbleDiameterNX * frameW) / 2;
   const bubbleRY = (layout.bubbleDiameterNY * frameH) / 2;
 
-  console.log(`[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`);
+  const markerXs = [
+    safeMarkers.topLeft.x,
+    safeMarkers.topRight.x,
+    safeMarkers.bottomLeft.x,
+    safeMarkers.bottomRight.x,
+  ];
+  const markerYs = [
+    safeMarkers.topLeft.y,
+    safeMarkers.topRight.y,
+    safeMarkers.bottomLeft.y,
+    safeMarkers.bottomRight.y,
+  ];
+  const markerMinX = Math.min(...markerXs);
+  const markerMaxX = Math.max(...markerXs);
+  const markerMinY = Math.min(...markerYs);
+  const markerMaxY = Math.max(...markerYs);
+  const sheetLeft = markerMinX;
+  const sheetRight = markerMaxX;
+  const sheetWidth = markerMaxX - markerMinX;
+  console.log(`[CALIBRATE] Sheet bounds: left=${Math.round(sheetLeft)}px  right=${Math.round(sheetRight)}px  width=${Math.round(sheetWidth)}px`);
+
+  const edgeMarginLeft = 4;
+  const edgeMarginRight = 4;
+  const edgeMarginY = Math.max(4, Math.abs(frameH) * 0.03);
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  const medianOf = (values: number[]): number => {
+    if (values.length === 0) return 0;
+    const sortedVals = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sortedVals.length / 2);
+    return sortedVals.length % 2 === 0
+      ? (sortedVals[mid - 1] + sortedVals[mid]) / 2
+      : sortedVals[mid];
+  };
+
+  console.log(`[${logPrefix}] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`);
 
   for (const block of layout.answerBlocks) {
-    const firstPx = mapToPixel(markers, block.firstBubbleNX, block.firstBubbleNY);
-    console.log(`[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`);
+    const transformedFirst = applyTransform(block.firstBubbleNX, block.firstBubbleNY, selectedTransform);
+    const firstPx = mapToPixel(safeMarkers, transformedFirst.nx, transformedFirst.ny);
+    console.log(`[${logPrefix}] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`);
+
+    const sampledQuestions: {
+      questionNumber: number;
+      fills: { choice: string; brightness: number }[];
+    }[] = [];
+
+    const sampleRX = Math.round(bubbleRX * 0.8);
+    const sampleRY = Math.round(bubbleRY * 0.8);
 
     for (let q = block.startQ; q <= block.endQ && q <= numQuestions; q++) {
       const rowInBlock = q - block.startQ;
       const fills: { choice: string; brightness: number }[] = [];
+      const colXs: number[] = [];
+
+      let firstPy = 0;
 
       // Sample all choices for this question
       for (let c = 0; c < choicesPerQuestion; c++) {
         const nx = block.firstBubbleNX + c * block.bubbleSpacingNX;
         const ny = block.firstBubbleNY + rowInBlock * block.rowSpacingNY;
-        const { px, py } = mapToPixel(markers, nx, ny);
-        const brightness = sampleBubbleAt(grayscale, width, height, px, py, bubbleRX, bubbleRY);
-        fills.push({ choice: choiceLabels[c], brightness });
+        const transformed = applyTransform(nx, ny, selectedTransform);
+
+        // Guard against out-of-frame sampling caused by layout drift.
+        if (
+          transformed.nx <= 0.01 ||
+          transformed.nx >= 0.995 ||
+          transformed.ny <= 0.01 ||
+          transformed.ny >= 0.99
+        ) {
+          fills.push({ choice: choiceLabels[c], brightness: 255 });
+          colXs.push(0);
+          continue;
+        }
+
+        const { px, py } = mapToPixel(
+          safeMarkers,
+          transformed.nx,
+          transformed.ny,
+        );
+        colXs.push(px);
+        if (c === 0) firstPy = py;
+
+        // Avoid sampling near sheet edges
+        if (
+          px <= markerMinX + edgeMarginLeft ||
+          px >= markerMaxX - edgeMarginRight ||
+          py <= markerMinY + edgeMarginY ||
+          py >= markerMaxY - edgeMarginY
+        ) {
+          fills.push({ choice: choiceLabels[c], brightness: 255 });
+          continue;
+        }
+
+        const rawBrightness = sampleBubbleAt(grayscale, width, height, px, py, sampleRX, sampleRY);
+        
+        const offsetDir = c === choicesPerQuestion - 1 ? -0.5 : 0.5;
+        const bgNx = transformed.nx + offsetDir * block.bubbleSpacingNX;
+        const bgPx = mapToPixel(safeMarkers, bgNx, transformed.ny);
+        const bgBrightness = sampleBubbleAt(grayscale, width, height, bgPx.px, bgPx.py, sampleRX, sampleRY);
+
+        // Normalize against the safe background point for this row
+        const invariantBrightness = Math.max(0, Math.min(255, 255 - Math.max(0, bgBrightness - rawBrightness)));
+
+        fills.push({ choice: choiceLabels[c], brightness: invariantBrightness });
       }
+
+
+
+      if (q === block.startQ) {
+        console.log(`[CALIBRATE] Block Q${block.startQ}: firstBubble px=(${Math.round(colXs[0])},${Math.round(firstPy)})  colA_x=${Math.round(colXs[0])}  colB_x=${Math.round(colXs[1])}  colC_x=${Math.round(colXs[2])}  colD_x=${Math.round(colXs[3])}  colE_x=${Math.round(colXs[4])}`);
+        console.log(`[VERIFY] Block Q${block.startQ}: \n    colA=${Math.round(colXs[0])} colE=${Math.round(colXs[4])} \n    sheetRight=${Math.round(markerMaxX)} margin=${edgeMarginRight}`);
+      }
+
+      sampledQuestions.push({ questionNumber: q, fills });
+    }
+
+    const laneOffsets = new Array(choicesPerQuestion).fill(0);
+    if (false && is150 && sampledQuestions.length >= 4) {
+      const laneBaselines = new Array(choicesPerQuestion).fill(0);
+
+      for (let c = 0; c < choicesPerQuestion; c++) {
+        const laneValues = sampledQuestions
+          .map((row) => row.fills[c]?.brightness ?? 255)
+          // Ignore out-of-frame placeholders when estimating lane baseline
+          .filter((v) => v < 250)
+          .sort((a, b) => a - b);
+
+        if (laneValues.length > 0) {
+          // FIX: Use brightest 25% (was 45%) to avoid contamination when
+          // a column has many filled marks (e.g., answer key is all "A").
+          // The old 45% threshold pulled filled marks into the baseline,
+          // causing the lane offset to make filled bubbles appear brighter.
+          const brightStart = Math.floor(laneValues.length * 0.75);
+          const brightSubset = laneValues.slice(brightStart);
+          const baselineSamples = brightSubset.length >= 2 ? brightSubset : laneValues;
+          laneBaselines[c] = medianOf(baselineSamples);
+        }
+      }
+
+      const validBaselines = laneBaselines.filter((v) => v > 0);
+      if (validBaselines.length >= 3) {
+        const globalBaseline = medianOf(validBaselines);
+        const baselineSpread = Math.max(...validBaselines) - Math.min(...validBaselines);
+        // Large spread often means baselines are contaminated by many filled marks.
+        // In that case, minimize normalization to avoid injecting false lane bias.
+        const spreadScale = baselineSpread > 6 ? 6 / baselineSpread : 1;
+        // FIX: Reduced maxOffset from 3.5 to 2.0 to prevent over-normalization
+        // that can invert correct detections in heavily-filled columns.
+        const maxOffset = baselineSpread > 6 ? 1.5 : 2.0;
+
+        for (let c = 0; c < choicesPerQuestion; c++) {
+          if (laneBaselines[c] > 0) {
+            const rawOffset = (laneBaselines[c] - globalBaseline) * spreadScale;
+            laneOffsets[c] = clamp(rawOffset, -maxOffset, maxOffset);
+          }
+        }
+        console.log(
+          `[${logPrefix}] Block Q${block.startQ}-${block.endQ}: laneOffsets=${choiceLabels
+            .map((label, i) => `${label}:${laneOffsets[i].toFixed(1)}`)
+            .join(' ')}`,
+        );
+      }
+    }
+
+    for (const sampled of sampledQuestions) {
+      const q = sampled.questionNumber;
+      const fills = sampled.fills;
+
+      const normalizedFills = fills.map((f, i) => ({
+        choice: f.choice,
+        brightness: Math.max(0, Math.min(255, f.brightness - laneOffsets[i])),
+      }));
 
       // Debug: Log all brightness values for first question in each block
       if (q === block.startQ) {
-        console.log(`[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
+        console.log(`[${logPrefix}] Q${q} all choices: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
+        if (is150) {
+          console.log(`[${logPrefix}] Q${q} normalized: ${normalizedFills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`);
+        }
       }
 
       // Sort ascending by brightness — darkest (most filled) first
-      const sorted = [...fills].sort((a, b) => a.brightness - b.brightness);
+      const sorted = [...normalizedFills].sort((a, b) => a.brightness - b.brightness);
       const darkest = sorted[0].brightness;
       const secondDark = sorted.length >= 2 ? sorted[1].brightness : 255;
       const thirdDark = sorted.length >= 3 ? sorted[2].brightness : 255;
       const brightest = sorted[sorted.length - 1].brightness;
 
+      // Keep raw metrics to ensure normalization does not invent weak winners.
+      const rawSorted = [...fills].sort((a, b) => a.brightness - b.brightness);
+      const rawDarkest = rawSorted[0].brightness;
+      const rawSecondDark = rawSorted.length >= 2 ? rawSorted[1].brightness : 255;
+      const rawBrightest = rawSorted[rawSorted.length - 1].brightness;
+      const rawAbsoluteGap = rawSecondDark - rawDarkest;
+      const rawMean = fills.reduce((s, f) => s + f.brightness, 0) / fills.length;
+      const rawVariance =
+        fills.reduce((s, f) => s + Math.pow(f.brightness - rawMean, 2), 0) /
+        Math.max(1, fills.length - 1);
+      const rawStdDev = Math.sqrt(rawVariance);
+      const rawDarkRatio = rawBrightest > 20 ? rawDarkest / rawBrightest : 1;
+
       let selectedChoice = '';
+      let usedPairTieRecovery = false;
 
       // Use the brightest bubble as the "unfilled" reference
       const ref = brightest;
@@ -320,30 +628,49 @@ function detectAnswersFromImage(
       // Quinary: very light fills - absolute gap >= 3 AND darkest is clearly below median
       // Final: extremely light fills - any detectable difference (catches 1-unit differences)
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
+      const mean = normalizedFills.reduce((s, f) => s + f.brightness, 0) / normalizedFills.length;
+      const variance =
+        normalizedFills.reduce((s, f) => s + Math.pow(f.brightness - mean, 2), 0) /
+        Math.max(1, normalizedFills.length - 1);
+      const stdDev = Math.sqrt(variance);
+      const zScore = stdDev > 0.5 ? (mean - darkest) / stdDev : 0;
       
-      if (darkRatio < 0.68) {
-        // Strong fill: darkest is 32%+ darker than brightest
-        selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.88 && gapRatio > 0.12) {
-        // Clear fill: darkest is 12%+ darker AND has strong separation from 2nd
-        selectedChoice = sorted[0].choice;
-      } else if (darkRatio < 0.93 && gapRatio > 0.07 && absoluteGap >= 12) {
-        // Light fill: darkest is 7%+ darker AND has absolute gap of 12+ units
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 18 && gapFromThird >= 8) {
-        // Noise handling: clear separation from both 2nd and 3rd darkest
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 3 && darkest < median - 2) {
-        // Very light fill: at least 3 units darker AND clearly below median
-        selectedChoice = sorted[0].choice;
-      } else if (absoluteGap >= 1 && darkest < brightest) {
-        // Extremely light fill: any detectable 1+ unit difference (catches very light pencil marks)
-        selectedChoice = sorted[0].choice;
+      const spread = brightest - darkest;
+
+      if (is150) {
+        const spread150 = rawBrightest - rawDarkest;
+        const darkestVal = sorted[0].brightness;
+        const secondDarkest = sorted[1].brightness;
+        const absGap = secondDarkest - darkestVal;
+
+        if (spread150 < 12) {
+          selectedChoice = "";
+        } else if (absGap < 8) {
+          selectedChoice = "";
+        } else {
+          selectedChoice = sorted[0].choice;
+        }
+      } else {
+        if (spread < 12) {
+          selectedChoice = "";
+        } else if (darkRatio < 0.75) {
+          selectedChoice = sorted[0].choice;
+        } else if (darkRatio < 0.90 && gapRatio > 0.08) {
+          selectedChoice = sorted[0].choice;
+        } else if (darkRatio < 0.95 && gapRatio > 0.05 && absoluteGap >= 5) {
+          selectedChoice = sorted[0].choice;
+        } else if (absoluteGap >= 10 && gapFromThird >= 5) {
+          selectedChoice = sorted[0].choice;
+        } else if (absoluteGap >= 6 && darkest < median - 6) {
+          selectedChoice = sorted[0].choice;
+        }
       }
 
       // Log first few questions per block for debugging
       if (q <= block.startQ + 2 || q === block.endQ || !selectedChoice) {
-        console.log(`[100Q-BRIGHTNESS] Q${q}: ${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`);
+        const baseLog = `${fills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ')}`;
+        const normLog = normalizedFills.map(f => `${f.choice}=${f.brightness.toFixed(0)}`).join(', ');
+        console.log(`[${logPrefix}] Q${q}: ${baseLog}${is150 ? ` | norm ${normLog}` : ''} → ${selectedChoice || '?'} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} std=${stdDev.toFixed(1)} ref=${ref.toFixed(0)})`);
       }
 
       answers.push({
@@ -410,6 +737,21 @@ export async function scan100ItemWithBrightness(
       grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
     }
     
+    let finalWidth = width;
+    let finalHeight = height;
+    if (width > height) {
+      console.log(`[${templateType}-BRIGHTNESS] Landscape detected. Rotating 90° CW.`);
+      const rotated = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          rotated[x * height + (height - 1 - y)] = grayscale[y * width + x];
+        }
+      }
+      finalWidth = height;
+      finalHeight = width;
+      grayscale.set(rotated);
+    }
+    
     console.log(`[${templateType}-BRIGHTNESS] Converted to grayscale`);
     
     // Detect answers using brightness sampling
@@ -418,8 +760,8 @@ export async function scan100ItemWithBrightness(
     
     const answers = detectAnswersFromImage(
       grayscale,
-      width,
-      height,
+      finalWidth,
+      finalHeight,
       markers,
       layout,
       numQuestions,
@@ -432,7 +774,19 @@ export async function scan100ItemWithBrightness(
     return answers;
     
   } catch (error) {
-    console.error(`[${templateType}-BRIGHTNESS] Error:`, error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`[${templateType}-BRIGHTNESS] Error: ${errorMessage}`);
+    if (error instanceof Error && error.stack) {
+      console.error(`[${templateType}-BRIGHTNESS] Stack:`, error.stack);
+    }
+    
+    // Log Skia/FileSystem availability for debugging
+    try {
+      const { Skia } = require('@shopify/react-native-skia');
+      console.error(`[${templateType}-BRIGHTNESS] Skia is available`);
+    } catch (e) {
+      console.error(`[${templateType}-BRIGHTNESS] Skia not available:`, e instanceof Error ? e.message : String(e));
+    }
     
     // Return empty answers on error
     return Array.from({ length: numQuestions }, (_, i) => ({
@@ -490,6 +844,21 @@ export async function scan150ItemWithBrightness(
       grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
     }
     
+    let finalWidth = width;
+    let finalHeight = height;
+    if (width > height) {
+      console.log('[150Q-BRIGHTNESS] Landscape detected. Rotating 90° CW.');
+      const rotated = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          rotated[x * height + (height - 1 - y)] = grayscale[y * width + x];
+        }
+      }
+      finalWidth = height;
+      finalHeight = width;
+      grayscale.set(rotated);
+    }
+    
     console.log('[150Q-BRIGHTNESS] Converted to grayscale');
     
     // Detect answers using brightness sampling
@@ -498,8 +867,8 @@ export async function scan150ItemWithBrightness(
     
     const answers = detectAnswersFromImage(
       grayscale,
-      width,
-      height,
+      finalWidth,
+      finalHeight,
       markers,
       layout,
       150,

@@ -89,6 +89,8 @@ type Bubble = {
   fill: number;
 };
 
+type CornerPoint = { x: number; y: number };
+
 // Physical dimensions of Zipgrade answer sheets (in mm)
 // These are used to validate detected registration marks and paper aspect ratio
 const SHEET_SPECS = {
@@ -138,15 +140,16 @@ function clusterByY<T extends { y: number }>(
   const sorted = [...bubbles].sort((a, b) => a.y - b.y);
   const rows: T[][] = [];
   let currentRow = [sorted[0]];
-  let rowMeanY = sorted[0].y;
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].y - rowMeanY < maxGap) {
+    // FIX: Compare against PREVIOUS bubble's Y, not running mean.
+    // Mean-based comparison drifts when rows have many bubbles,
+    // causing it to absorb bubbles from adjacent rows → fullRows=0
+    // because real rows get merged into oversized groups (>7 bubbles).
+    if (sorted[i].y - sorted[i - 1].y < maxGap) {
       currentRow.push(sorted[i]);
-      rowMeanY = currentRow.reduce((s, b) => s + b.y, 0) / currentRow.length;
     } else {
       rows.push(currentRow);
       currentRow = [sorted[i]];
-      rowMeanY = sorted[i].y;
     }
   }
   rows.push(currentRow);
@@ -157,53 +160,63 @@ function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
   if (rows.length < 2) return [];
   
   // Sort each row by X position (left to right)
+  // Each index represents a column: row[0]=A, row[1]=B, row[2]=C, etc.
   const sortedRows = rows.map((r) => [...r].sort((a, b) => a.x - b.x));
   
-  // Calculate span of each row (distance from leftmost to rightmost bubble)
+  // STEP 1: Find rows close to full (4-5 bubbles) - these are most reliable
+  const fullRows = sortedRows.filter((r) => r.length >= targetCols - 1);
+  
+  if (fullRows.length >= 2) {
+    // FULL ROWS AVAILABLE: Use index-based approach (proven to work)
+    // For each column index (0-4), average X positions of that indexed bubble across rows
+    const centroids: number[] = [];
+    for (let col = 0; col < targetCols; col++) {
+      const xs = fullRows.filter((r) => r.length > col).map((r) => r[col].x);
+      if (xs.length > 0) {
+        centroids.push(xs.reduce((a, b) => a + b, 0) / xs.length);
+      }
+    }
+    
+    if (centroids.length === targetCols) {
+      return centroids.sort((a, b) => a - b);
+    }
+  }
+  
+  // STEP 2: No full rows - use all rows with position-based mapping (fallback)
   const spans = sortedRows.map((r) => 
     r.length > 1 ? r[r.length - 1].x - r[0].x : 0
   );
   
-  // Get median span (excluding zero spans)
   const validSpans = spans.filter((s) => s > 0).sort((a, b) => a - b);
   if (validSpans.length === 0) return [];
   
   const medianSpan = validSpans[Math.floor(validSpans.length / 2)];
-  const minValidSpan = medianSpan * 0.6; // At least 60% of median
-  const maxValidSpan = medianSpan * 1.4; // At most 140% of median
+  const minValidSpan = medianSpan * 0.4;
+  const maxValidSpan = medianSpan * 1.6;
   
-  // Use rows with consistent, reasonable spans
   const cleanRows = sortedRows.filter(
     (_, i) => spans[i] >= minValidSpan && spans[i] <= maxValidSpan,
   );
   
-  if (cleanRows.length < 2) return [];
+  if (cleanRows.length === 0) return [];
   
-  // POSITION-BASED MAPPING: Map each bubble to column based on X position within row
-  // This works for rows with any number of bubbles (1-5)
+  // Position-based mapping: map each bubble to column by X position within row
   const centroids: number[] = Array(targetCols).fill(0);
   const counts: number[] = Array(targetCols).fill(0);
   
   for (const row of cleanRows) {
-    if (row.length === 0) continue;
+    if (row.length < 2) continue; // Need at least 2 bubbles to determine span
     
     const minX = row[0].x;
     const maxX = row[row.length - 1].x;
     const span = maxX - minX;
+    if (span === 0) continue;
     
-    if (span === 0) {
-      // Single bubble - can't determine column
-      continue;
-    }
-    
-    // Calculate column width assuming equal spacing
     const colWidth = span / (targetCols - 1);
     
     for (const bubble of row) {
       const relativeX = bubble.x - minX;
       let colIdx = Math.round(relativeX / colWidth);
-      
-      // Clamp to valid range
       colIdx = Math.max(0, Math.min(targetCols - 1, colIdx));
       
       centroids[colIdx] += bubble.x;
@@ -211,7 +224,6 @@ function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
     }
   }
   
-  // Average each column's X position
   const result: number[] = [];
   for (let i = 0; i < targetCols; i++) {
     if (counts[i] > 0) {
@@ -219,10 +231,8 @@ function deriveColumnCentroids(rows: Bubble[][], targetCols: number): number[] {
     }
   }
   
-  // Must have all 5 column centroids
-  if (result.length !== targetCols) {
-    return [];
-  }
+  // Accept if we have at least 4 centroids
+  if (result.length < 4) return [];
   
   return result.sort((a, b) => a - b);
 }
@@ -244,6 +254,149 @@ function findModalClusterMedian(values: number[], windowRatio = 0.4): number {
   return bestMedian;
 }
 
+function deriveCentroidsFromXDistribution(
+  values: number[],
+  targetCols: number,
+): number[] {
+  if (values.length === 0 || targetCols <= 0) return [];
+
+  const xs = [...values].sort((a, b) => a - b);
+  if (xs.length < targetCols) return [];
+
+  const minX = xs[0];
+  const maxX = xs[xs.length - 1];
+  if (maxX - minX < 6) return [];
+
+  // Seed from quantiles so sparse one-mark-per-row regions still produce 5 lanes.
+  const centers: number[] = [];
+  for (let i = 0; i < targetCols; i++) {
+    const q = (i + 0.5) / targetCols;
+    const idx = Math.max(0, Math.min(xs.length - 1, Math.round(q * (xs.length - 1))));
+    centers.push(xs[idx]);
+  }
+
+  // 1D k-means refinement (small fixed iterations for stability).
+  for (let iter = 0; iter < 6; iter++) {
+    const buckets: number[][] = Array.from({ length: targetCols }, () => []);
+
+    for (const x of xs) {
+      let bestIdx = 0;
+      let bestDist = Math.abs(x - centers[0]);
+      for (let i = 1; i < centers.length; i++) {
+        const d = Math.abs(x - centers[i]);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      buckets[bestIdx].push(x);
+    }
+
+    for (let i = 0; i < buckets.length; i++) {
+      if (buckets[i].length > 0) {
+        centers[i] = buckets[i].reduce((a, b) => a + b, 0) / buckets[i].length;
+      }
+    }
+
+    centers.sort((a, b) => a - b);
+  }
+
+  // Keep roughly-even spacing; if too collapsed, let caller use geometric fallback.
+  const gaps = centers.slice(1).map((c, i) => c - centers[i]);
+  const minGap = gaps.length > 0 ? Math.min(...gaps) : 0;
+  const avgGap = gaps.length > 0 ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
+  if (avgGap > 0 && minGap < avgGap * 0.35) return [];
+
+  return centers;
+}
+
+function deriveTemplateGuidedCentroidsFor150(
+  region: AnswerRegion,
+  paperW: number,
+  _regionBubbles?: { x: number; fill: number }[],
+): number[] {
+  // Template-guided lane anchors — evenly space across region with inset.
+  const widthNorm = Math.max(0.001, region.xMax - region.xMin);
+  const insetNorm = widthNorm * 0.12;
+  const laneMin = region.xMin + insetNorm;
+  const laneMax = region.xMax - insetNorm;
+  const laneStep = (laneMax - laneMin) / 4;
+  return [0, 1, 2, 3, 4].map((i) => (laneMin + i * laneStep) * paperW);
+}
+
+function buildCornerMarkersFromRegMarks(regMarks: CornerPoint[]): {
+  topLeft: CornerPoint;
+  topRight: CornerPoint;
+  bottomLeft: CornerPoint;
+  bottomRight: CornerPoint;
+} | null {
+  if (regMarks.length < 3) return null;
+
+  const sorted = [...regMarks].sort((a, b) => a.y - b.y || a.x - b.x);
+
+  if (sorted.length >= 4) {
+    const topMarks = sorted.slice(0, 2).sort((a, b) => a.x - b.x);
+    const bottomMarks = sorted.slice(-2).sort((a, b) => a.x - b.x);
+
+    return {
+      topLeft: { x: topMarks[0].x, y: topMarks[0].y },
+      topRight: { x: topMarks[1].x, y: topMarks[1].y },
+      bottomLeft: { x: bottomMarks[0].x, y: bottomMarks[0].y },
+      bottomRight: { x: bottomMarks[1].x, y: bottomMarks[1].y },
+    };
+  }
+
+  const marks = [...sorted];
+  const yDiffs = [
+    { idx: [0, 1], diff: Math.abs(marks[0].y - marks[1].y) },
+    { idx: [0, 2], diff: Math.abs(marks[0].y - marks[2].y) },
+    { idx: [1, 2], diff: Math.abs(marks[1].y - marks[2].y) },
+  ];
+  yDiffs.sort((a, b) => a.diff - b.diff);
+
+  const edgePair = yDiffs[0].idx;
+  const loneIdx = [0, 1, 2].find((i) => !edgePair.includes(i))!;
+
+  const edge1 = marks[edgePair[0]];
+  const edge2 = marks[edgePair[1]];
+  const lone = marks[loneIdx];
+
+  const [edgeLeft, edgeRight] = edge1.x < edge2.x ? [edge1, edge2] : [edge2, edge1];
+  const edgeIsTop = (edgeLeft.y + edgeRight.y) / 2 < lone.y;
+
+  if (edgeIsTop) {
+    const missingX = lone.x < (edgeLeft.x + edgeRight.x) / 2 ? edgeRight.x : edgeLeft.x;
+
+    return {
+      topLeft: { x: edgeLeft.x, y: edgeLeft.y },
+      topRight: { x: edgeRight.x, y: edgeRight.y },
+      bottomLeft:
+        lone.x < (edgeLeft.x + edgeRight.x) / 2
+          ? { x: lone.x, y: lone.y }
+          : { x: missingX, y: lone.y },
+      bottomRight:
+        lone.x >= (edgeLeft.x + edgeRight.x) / 2
+          ? { x: lone.x, y: lone.y }
+          : { x: missingX, y: lone.y },
+    };
+  }
+
+  const missingX = lone.x < (edgeLeft.x + edgeRight.x) / 2 ? edgeRight.x : edgeLeft.x;
+
+  return {
+    topLeft:
+      lone.x < (edgeLeft.x + edgeRight.x) / 2
+        ? { x: lone.x, y: lone.y }
+        : { x: missingX, y: lone.y },
+    topRight:
+      lone.x >= (edgeLeft.x + edgeRight.x) / 2
+        ? { x: lone.x, y: lone.y }
+        : { x: missingX, y: lone.y },
+    bottomLeft: { x: edgeLeft.x, y: edgeLeft.y },
+    bottomRight: { x: edgeRight.x, y: edgeRight.y },
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BAND-BASED EXTRACTION (for sparse regions like 150q templates)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,6 +409,7 @@ function extractAnswersFromRegionBandBased(
   region: AnswerRegion,
   paperW: number,
   paperH: number,
+  is150Template: boolean = false,
 ): StudentAnswer[] {
   const { xMin, xMax, yMin, yMax, startQ, numQ } = region;
   const empty = Array.from({ length: numQ }, (_, i) => ({
@@ -280,26 +434,66 @@ function extractAnswersFromRegionBandBased(
 
   // STEP 1: Derive column centroids from FULL rows
   // Filter to rows with 4-6 bubbles (assuming these are complete marked rows)
-  const rowGap = Math.max(paperH * 0.01, 5); // Small gap threshold for initial clustering
+  // FIX: Doubled rowGap (0.01→0.02) — bubbles in the same row can have Y-variance
+  // >8px due to printing skew, causing rows to fragment and fullRows=0.
+  const rowGap = Math.max(paperH * 0.02, 10);
+  // FIX: Lowered full-row threshold from 4 to 3 — on well-filled sheets,
+  // only the marked bubble + adjacent unfilled may be detected (3 bubbles).
   const fullRows = clusterByY(regionBubbles, rowGap).filter(
-    (r) => r.length >= 4 && r.length <= 7,
+    (r) => r.length >= 3 && r.length <= 7,
   );
-  const colCentroids = deriveColumnCentroids(fullRows, 5);
+  let colCentroids = deriveColumnCentroids(fullRows, 5);
+  const templateCentroids150 = is150Template
+    ? deriveTemplateGuidedCentroidsFor150(region, paperW, regionBubbles)
+    : [];
+  const laneStep150 =
+    templateCentroids150.length === 5
+      ? Math.abs(templateCentroids150[1] - templateCentroids150[0])
+      : 0;
+  const centroidsLookCollapsed = (() => {
+    if (colCentroids.length !== 5) return true;
+    const gaps = [
+      colCentroids[1] - colCentroids[0],
+      colCentroids[2] - colCentroids[1],
+      colCentroids[3] - colCentroids[2],
+      colCentroids[4] - colCentroids[3],
+    ];
+    const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+    const minGap = Math.min(...gaps);
+    return avgGap <= 0 || minGap < avgGap * 0.45;
+  })();
+
+  // For sparse/noisy 150Q regions, template-guided lanes are more stable than
+  // distribution-derived centroids that can collapse toward one side.
+  if (is150Template && templateCentroids150.length === 5 && centroidsLookCollapsed) {
+    colCentroids = templateCentroids150;
+    console.warn(
+      `[OMR] Q${startQ}+ band-based centroidDriftFallbackApplied: template-guided centroids`,
+    );
+  }
 
   if (colCentroids.length < 3) {
+    if (is150Template && templateCentroids150.length === 5) {
+      colCentroids = templateCentroids150;
+      console.warn(
+        `[OMR] Q${startQ}+ band-based using template-guided centroids:`,
+        colCentroids.map((c) => Math.round(c)),
+      );
+    } else {
     // Fallback: evenly space centroids across X range (5 choice columns)
-    const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
-    const xSpanMin = allXs[0];
-    const xSpanMax = allXs[allXs.length - 1];
-    const step = (xSpanMax - xSpanMin) / 4; // Divide into 5 regions (step between them)
-    colCentroids.length = 0;
-    for (let i = 0; i < 5; i++) {
-      colCentroids.push(xSpanMin + step * i);
+      const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
+      const xSpanMin = allXs[0];
+      const xSpanMax = allXs[allXs.length - 1];
+      const step = (xSpanMax - xSpanMin) / 4; // Divide into 5 regions (step between them)
+      colCentroids.length = 0;
+      for (let i = 0; i < 5; i++) {
+        colCentroids.push(xSpanMin + step * i);
+      }
+      console.log(
+        `[OMR] Q${startQ} band-based fallback centroids:`,
+        colCentroids.map((c) => Math.round(c)),
+      );
     }
-    console.log(
-      `[OMR] Q${startQ} band-based fallback centroids:`,
-      colCentroids.map((c) => Math.round(c)),
-    );
   }
 
   console.log(
@@ -310,6 +504,111 @@ function extractAnswersFromRegionBandBased(
   // STEP 2: Divide region into numQ equal Y-bands (one per question)
   const bandHeight = (yMax - yMin) / numQ;
   const answers: StudentAnswer[] = [];
+
+  const evaluate150BandCandidate = (
+    fills: number[],
+  ): {
+    accepted: boolean;
+    reason: string;
+    topFill: number;
+    secondFill: number;
+    thirdFill: number;
+    topGap: number;
+    gapFromThird: number;
+    stdDev: number;
+  } => {
+    const sorted = [...fills].sort((a, b) => b - a);
+    const topFill = sorted[0] ?? 0;
+    const secondFill = sorted[1] ?? 0;
+    const thirdFill = sorted[2] ?? 0;
+    const topGap = topFill - secondFill;
+    const gapFromThird = topFill - thirdFill;
+    const mean = fills.length
+      ? fills.reduce((sum, v) => sum + v, 0) / fills.length
+      : 0;
+    const variance = fills.length
+      ? fills.reduce((sum, v) => sum + (v - mean) * (v - mean), 0) / fills.length
+      : 0;
+    const stdDev = Math.sqrt(Math.max(0, variance));
+
+    if (topFill < 0.42) {
+      return {
+        accepted: false,
+        reason: "low-top-fill",
+        topFill,
+        secondFill,
+        thirdFill,
+        topGap,
+        gapFromThird,
+        stdDev,
+      };
+    }
+
+    if (topGap >= 0.07 && gapFromThird >= 0.1) {
+      return {
+        accepted: true,
+        reason: "clear-gap",
+        topFill,
+        secondFill,
+        thirdFill,
+        topGap,
+        gapFromThird,
+        stdDev,
+      };
+    }
+
+    if (topGap >= 0.04 && gapFromThird >= 0.08 && stdDev >= 0.04) {
+      return {
+        accepted: true,
+        reason: "moderate-gap-stddev",
+        topFill,
+        secondFill,
+        thirdFill,
+        topGap,
+        gapFromThird,
+        stdDev,
+      };
+    }
+
+    if (topFill >= 0.56 && topGap >= 0.02 && gapFromThird >= 0.05) {
+      return {
+        accepted: true,
+        reason: "strong-fill",
+        topFill,
+        secondFill,
+        thirdFill,
+        topGap,
+        gapFromThird,
+        stdDev,
+      };
+    }
+
+    // FIX: Accept ties (gap=0.00) — pick the best bubble and let centroid
+    // snapping resolve the column. Blanking ties throws away valid data.
+    if (topFill >= 0.50 && topGap >= 0.00) {
+      return {
+        accepted: true,
+        reason: "tie-accept",
+        topFill,
+        secondFill,
+        thirdFill,
+        topGap,
+        gapFromThird,
+        stdDev,
+      };
+    }
+
+    return {
+      accepted: false,
+      reason: "ambiguous",
+      topFill,
+      secondFill,
+      thirdFill,
+      topGap,
+      gapFromThird,
+      stdDev,
+    };
+  };
 
   for (let qIdx = 0; qIdx < numQ; qIdx++) {
     const qNum = startQ + qIdx;
@@ -335,25 +634,35 @@ function extractAnswersFromRegionBandBased(
       `[OMR] Q${qNum} band: ${bandBubbles.length} bubble(s) - ${bubbleDetails}`,
     );
 
-    // Find highest-fill bubble
-    let bestBubble: Bubble | null = null;
-    let bestFill = 0;
-    for (const b of bandBubbles) {
-      if (b.fill > bestFill) {
-        bestFill = b.fill;
-        bestBubble = b;
-      }
-    }
+    const sortedBandBubbles = [...bandBubbles].sort((a, b) => b.fill - a.fill);
+    const bestBubble = sortedBandBubbles[0] ?? null;
+    const bestFill = bestBubble?.fill ?? 0;
 
-    // Threshold: 0.50 fill ratio (reject artifacts/erasures for accurate recognition)
-    // Band-based extraction is for sparse regions, so slightly more lenient than row-based
-    // but still strict enough to reject obvious artifacts
-    if (!bestBubble || bestFill < 0.50) {
+    // Threshold: keep conservative but slightly more lenient for 150Q sparse regions.
+    const minBandFill = is150Template ? 0.44 : 0.5;
+    if (!bestBubble || bestFill < minBandFill) {
       console.log(
-        `[OMR] Q${qNum}: best fill ${bestFill.toFixed(2)} < 0.50 threshold (rejecting artifact)`,
+        `[OMR] Q${qNum}: best fill ${bestFill.toFixed(2)} < ${minBandFill.toFixed(2)} threshold (rejecting artifact)`,
       );
       answers.push({ questionNumber: qNum, selectedAnswer: "" });
       continue;
+    }
+
+    if (is150Template) {
+      const confidence = evaluate150BandCandidate(
+        sortedBandBubbles.map((b) => b.fill),
+      );
+      if (!confidence.accepted) {
+        console.log(
+          `[OMR] Q${qNum}: 150 band reject (${confidence.reason}) top=${confidence.topFill.toFixed(2)} gap=${confidence.topGap.toFixed(2)} thirdGap=${confidence.gapFromThird.toFixed(2)} stdDev=${confidence.stdDev.toFixed(2)}`,
+        );
+        answers.push({ questionNumber: qNum, selectedAnswer: "" });
+        continue;
+      }
+
+      console.log(
+        `[OMR] Q${qNum}: 150 band accept (${confidence.reason}) top=${confidence.topFill.toFixed(2)} gap=${confidence.topGap.toFixed(2)} thirdGap=${confidence.gapFromThird.toFixed(2)} stdDev=${confidence.stdDev.toFixed(2)}`,
+      );
     }
 
     // Map bubble X coordinate to nearest column centroid
@@ -368,6 +677,15 @@ function extractAnswersFromRegionBandBased(
     }
 
     const options = ["A", "B", "C", "D", "E"];
+    const laneTolerancePx =
+      is150Template && laneStep150 > 0 ? laneStep150 * 0.9 : Number.POSITIVE_INFINITY;
+    if (bestDist > laneTolerancePx) {
+      console.log(
+        `[OMR] Q${qNum}: band candidate too far from lane centroid (dist=${Math.round(bestDist)} > ${Math.round(laneTolerancePx)}), rejecting`,
+      );
+      answers.push({ questionNumber: qNum, selectedAnswer: "" });
+      continue;
+    }
     const choice = options[Math.min(bestColIdx, options.length - 1)];
     console.log(
       `[OMR] Q${qNum}: → ${choice} (x=${Math.round(bestBubble.x)}, fill=${bestFill.toFixed(2)}, dist-to-centroid=${Math.round(bestDist)})`,
@@ -385,6 +703,7 @@ function extractAnswersFromRegion(
   paperW: number,
   paperH: number,
   medianH: number,
+  is150Template: boolean = false,
 ): StudentAnswer[] {
   const { xMin, xMax, yMin, yMax, startQ, numQ } = region;
   const empty = Array.from({ length: numQ }, (_, i) => ({
@@ -423,8 +742,114 @@ function extractAnswersFromRegion(
   // Rows with 4-6 bubbles are "full rows" — used to derive reliable column centroids.
   // Rows with 1-3 bubbles are "sparse rows" — only the filled bubble detected (empty ones
   // may be missing because their fill is too low). We still answer these using centroids.
-  const fullRows = rows.filter((r) => r.length >= 4 && r.length <= 7);
+  const fullRows = rows.filter((r) => r.length >= 3 && r.length <= 7);
   const allRows = rows.filter((r) => r.length >= 1); // every detected row
+
+  // Very sparse 150Q regions with no reliable full rows tend to hallucinate columns.
+  // Use band-only extraction in this case so contour noise does not dominate merges.
+  const lowEvidence150Region =
+    is150Template && fullRows.length <= 1 && regionBubbles.length < numQ * 2;
+  if (lowEvidence150Region) {
+    const bandOnlyAnswers = extractAnswersFromRegionBandBased(
+      bubbles,
+      region,
+      paperW,
+      paperH,
+      true,
+    );
+    const bandOnlyDetected = bandOnlyAnswers.filter((a) => a.selectedAnswer).length;
+    console.warn(
+      `[OMR] Q${startQ}+ low-evidence region (bubbles=${regionBubbles.length}, fullRows=${fullRows.length}); using band-only extraction ${bandOnlyDetected}/${numQ}`,
+    );
+    return bandOnlyAnswers;
+  }
+
+  // Sparse-row fallback for 150Q: row clustering may miss many questions.
+  // Use band-based extraction and merge it as a backfill source.
+  const useBandFallback =
+    is150Template &&
+    (allRows.length < Math.ceil(numQ * 0.8) || regionBubbles.length < numQ * 1.7);
+
+  if (useBandFallback) {
+    const templateGuidedCentroids = is150Template
+      ? deriveTemplateGuidedCentroidsFor150(region, paperW, regionBubbles)
+      : [];
+    const distributionCentroids = deriveCentroidsFromXDistribution(
+      regionBubbles.map((b) => b.x),
+      5,
+    );
+    const rowBasedAnswers = extractWithCentroids(
+      allRows,
+      distributionCentroids.length >= 4
+        ? distributionCentroids
+        : is150Template
+          ? templateGuidedCentroids
+        : (() => {
+            const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
+            const xSpanMin = allXs[0];
+            const xSpanMax = allXs[allXs.length - 1];
+            const step = (xSpanMax - xSpanMin) / 4;
+            return [0, 1, 2, 3, 4].map((i) => xSpanMin + step * i);
+          })(),
+      startQ,
+      numQ,
+      yMin < 0.4,
+      yMin * paperH,
+      yMax * paperH,
+      is150Template,
+    );
+
+    const bandAnswers = extractAnswersFromRegionBandBased(
+      bubbles,
+      region,
+      paperW,
+      paperH,
+      true,
+    );
+
+    const preferBandPrimary = is150Template && fullRows.length === 0;
+
+    const merged = rowBasedAnswers.map((a, i) => {
+      const b = bandAnswers[i];
+      const bandAnswer = b?.selectedAnswer || "";
+      const rowAnswer = a.selectedAnswer || "";
+
+      if (preferBandPrimary) {
+        if (bandAnswer) return { ...a, selectedAnswer: bandAnswer };
+        return a;
+      }
+
+      if (rowAnswer) return a;
+      return bandAnswer ? { ...a, selectedAnswer: bandAnswer } : a;
+    });
+
+    const rowDetected = rowBasedAnswers.filter((a) => a.selectedAnswer).length;
+    const bandDetected = bandAnswers.filter((a) => a.selectedAnswer).length;
+    const mergedDetected = merged.filter((a) => a.selectedAnswer).length;
+    let agreementCount = 0;
+    let conflictCount = 0;
+    let bandOnlyBackfill = 0;
+
+    for (let i = 0; i < Math.min(rowBasedAnswers.length, bandAnswers.length); i++) {
+      const rowAnswer = rowBasedAnswers[i]?.selectedAnswer || "";
+      const bandAnswer = bandAnswers[i]?.selectedAnswer || "";
+      if (!rowAnswer && bandAnswer) {
+        bandOnlyBackfill += 1;
+      } else if (rowAnswer && bandAnswer) {
+        if (rowAnswer === bandAnswer) {
+          agreementCount += 1;
+        } else {
+          conflictCount += 1;
+        }
+      }
+    }
+
+    console.log(
+      `[OMR] Q${startQ}+ sparse fallback: row=${rowDetected}/${numQ}, band=${bandDetected}/${numQ}, mergedWithBand=${mergedDetected}/${numQ}, agreements=${agreementCount}, conflicts=${conflictCount}, bandBackfill=${bandOnlyBackfill}, mode=${preferBandPrimary ? "band-primary" : "row-primary"}`,
+    );
+
+    return merged;
+  }
 
   console.log(
     `[OMR] Q${startQ}+${numQ}: ${regionBubbles.length} bubbles, ${rows.length} rows (${fullRows.length} full)`,
@@ -438,7 +863,49 @@ function extractAnswersFromRegion(
   );
 
   if (colCentroids.length < 2) {
-    // Fallback: if not enough full rows, evenly space centroids across region X span
+    const templateGuidedCentroids = is150Template
+      ? deriveTemplateGuidedCentroidsFor150(region, paperW, regionBubbles)
+      : [];
+
+    // Fallback 1: derive centroids from all X values in the region.
+    const distCentroids = deriveCentroidsFromXDistribution(
+      regionBubbles.map((b) => b.x),
+      5,
+    );
+    if (distCentroids.length >= 4) {
+      console.warn(
+        `[OMR] Q${startQ}+ using distribution centroids:`,
+        distCentroids.map((c) => Math.round(c)),
+      );
+      return extractWithCentroids(
+        allRows,
+        distCentroids,
+        startQ,
+        numQ,
+        isTopRegion,
+        yMin * paperH,
+        yMax * paperH,
+        is150Template,
+      );
+    }
+
+    if (is150Template && templateGuidedCentroids.length === 5) {
+      console.warn(
+        `[OMR] Q${startQ}+ centroidDriftFallbackApplied: template-guided centroids`,
+      );
+      return extractWithCentroids(
+        allRows,
+        templateGuidedCentroids,
+        startQ,
+        numQ,
+        isTopRegion,
+        yMin * paperH,
+        yMax * paperH,
+        is150Template,
+      );
+    }
+
+    // Fallback 2: evenly space centroids across region X span
     const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
     const xSpanMin = allXs[0];
     const xSpanMax = allXs[allXs.length - 1];
@@ -454,6 +921,9 @@ function extractAnswersFromRegion(
       startQ,
       numQ,
       isTopRegion,
+      yMin * paperH,
+      yMax * paperH,
+      is150Template,
     );
   }
 
@@ -475,6 +945,28 @@ function extractAnswersFromRegion(
       console.warn(
         `[OMR] Q${startQ}+ centroid gaps inconsistent (max deviation: ${maxDeviation.toFixed(1)}px vs avg: ${avgGap.toFixed(1)}px), using fallback`,
       );
+
+      if (is150Template) {
+        const templateGuidedCentroids = deriveTemplateGuidedCentroidsFor150(
+          region,
+          paperW,
+          regionBubbles,
+        );
+        console.log(
+          `[OMR] Q${startQ}+ centroidDriftFallbackApplied: template-guided centroids`,
+        );
+        return extractWithCentroids(
+          allRows,
+          templateGuidedCentroids,
+          startQ,
+          numQ,
+          isTopRegion,
+          yMin * paperH,
+          yMax * paperH,
+          is150Template,
+        );
+      }
+
       const allXs = regionBubbles.map((b) => b.x).sort((a, b) => a - b);
       const xSpanMin = allXs[0];
       const xSpanMax = allXs[allXs.length - 1];
@@ -490,11 +982,23 @@ function extractAnswersFromRegion(
         startQ,
         numQ,
         isTopRegion,
+        yMin * paperH,
+        yMax * paperH,
+        is150Template,
       );
     }
   }
 
-  return extractWithCentroids(allRows, colCentroids, startQ, numQ, isTopRegion);
+  return extractWithCentroids(
+    allRows,
+    colCentroids,
+    startQ,
+    numQ,
+    isTopRegion,
+    yMin * paperH,
+    yMax * paperH,
+    is150Template,
+  );
 }
 
 function extractWithCentroids(
@@ -503,6 +1007,9 @@ function extractWithCentroids(
   startQ: number,
   numQ: number,
   isTopRegion: boolean,
+  regionYMinPx: number,
+  regionYMaxPx: number,
+  is150Template: boolean = false,
 ): StudentAnswer[] {
   const options = ["A", "B", "C", "D", "E"] as const;
 
@@ -541,12 +1048,47 @@ function extractWithCentroids(
     `[OMR] Q${startQ}+: ${totalBubbles} bubbles → ${rows.length} rows → ${validRows.length} valid rows`,
   );
 
-  // Take exactly numQ rows (the actual question rows)
-  const qRows = validRows.slice(0, numQ);
+  // Map rows into fixed question bands by Y to avoid drift when clustering
+  // yields extra/missing rows in noisy regions.
+  const qRows: (Bubble[] | null)[] = new Array(numQ).fill(null);
+  if (validRows.length > 0) {
+    const rowMeans = validRows.map(
+      (row) => row.reduce((s, b) => s + b.y, 0) / row.length,
+    );
+    const yMin = Math.min(regionYMinPx, regionYMaxPx);
+    const yMax = Math.max(regionYMinPx, regionYMaxPx);
+    const ySpan = Math.max(1, yMax - yMin);
+
+    for (let i = 0; i < validRows.length; i++) {
+      const row = validRows[i];
+      const rowY = rowMeans[i];
+      const bandIdx = Math.max(
+        0,
+        Math.min(numQ - 1, Math.floor(((rowY - yMin) / ySpan) * numQ)),
+      );
+
+      const existing = qRows[bandIdx];
+      if (!existing) {
+        qRows[bandIdx] = row;
+      } else {
+        const existingBest = existing.reduce((m, b) => Math.max(m, b.fill), 0);
+        const candidateBest = row.reduce((m, b) => Math.max(m, b.fill), 0);
+        if (candidateBest > existingBest) {
+          qRows[bandIdx] = row;
+        }
+      }
+    }
+  }
   const answers: StudentAnswer[] = [];
 
   qRows.forEach((row, rowIdx) => {
     const qNum = startQ + rowIdx;
+
+    if (!row || row.length === 0) {
+      console.log(`[OMR] Q${qNum} row bubbles: [none]`);
+      answers.push({ questionNumber: qNum, selectedAnswer: "" });
+      return;
+    }
 
     // Log all bubbles in this row for debugging
     const rowBubbles = row
@@ -594,13 +1136,32 @@ function extractWithCentroids(
 
     // Find the highest-fill bubble in this row
     let best: Bubble | null = null;
+    let secondBest: Bubble | null = null;
     for (const b of row) {
-      if (!best || b.fill > best.fill) best = b;
+      if (!best || b.fill > best.fill) {
+        secondBest = best;
+        best = b;
+      } else if (!secondBest || b.fill > secondBest.fill) {
+        secondBest = b;
+      }
     }
 
-    // NUCLEAR: Accept ANY detected bubble, no fill threshold at all
-    // Even if OpenCV detected a bubble with 0.001 fill, it's better than blank
-    let fillThreshold = 0.0; // Accept anything detected
+    // Confidence gate:
+    // - 150Q: assume single mark unless clear double-shade pattern.
+    // - others: keep stricter threshold.
+    const fillThreshold = is150Template ? 0.34 : isTopRegion ? 0.45 : 0.42;
+    const bestFill = best?.fill ?? 0;
+    const secondFill = secondBest?.fill ?? 0;
+    const fillGap = bestFill - secondFill;
+    const minCentroidGap =
+      colCentroids.length > 1
+        ? Math.min(
+            ...Array.from({ length: colCentroids.length - 1 }, (_, i) =>
+              Math.abs(colCentroids[i + 1] - colCentroids[i]),
+            ),
+          )
+        : 50;
+    const bestSecondSpacing = secondBest ? Math.abs(best!.x - secondBest.x) : 0;
 
     // But for clearly-empty rows (no bubbles at all after row-gap clustering),
     // we still return blank. This threshold is for when bubbles ARE present but light.
@@ -611,14 +1172,76 @@ function extractWithCentroids(
     }
 
     // Snap to nearest centroid
+    const strongCandidates = row.filter((b) =>
+      b.fill >= (is150Template ? 0.76 : 0.84),
+    );
+
+    const nearestLaneIndex = (x: number): number =>
+      colCentroids.reduce(
+        (bestIdx, c, i) =>
+          Math.abs(x - c) < Math.abs(x - colCentroids[bestIdx]) ? i : bestIdx,
+        0,
+      );
+
+    const bestLane = best ? nearestLaneIndex(best.x) : -1;
+    const secondLane = secondBest ? nearestLaneIndex(secondBest.x) : -1;
+
+    // For 150Q, blank only when we see a true same-lane double-shade signature.
+    // Near-ties across different lanes are kept (policy: keep darkest).
+    const trueDoubleShadeSameLane =
+      is150Template &&
+      !!secondBest &&
+      strongCandidates.length >= 2 &&
+      strongCandidates.length <= 3 &&
+      bestFill >= 0.78 &&
+      secondFill >= 0.78 &&
+      fillGap <= 0.025 &&
+      bestSecondSpacing <= minCentroidGap * 0.55 &&
+      bestLane === secondLane;
+
+    if (
+      is150Template &&
+      !!secondBest &&
+      bestFill >= 0.76 &&
+      secondFill >= 0.76 &&
+      fillGap <= 0.03 &&
+      bestLane !== secondLane
+    ) {
+      console.log(
+        `[OMR] Q${qNum}: tieCrossLaneKept (bestLane=${bestLane}, secondLane=${secondLane}, gap=${fillGap.toFixed(3)}), keeping darkest`,
+      );
+    }
+
+    const shouldBlankForConfidence = is150Template
+      ? !best || bestFill < fillThreshold || trueDoubleShadeSameLane
+      : !best || bestFill < fillThreshold;
+
+    if (shouldBlankForConfidence) {
+      if (trueDoubleShadeSameLane) {
+        console.warn(
+          `[OMR] Q${qNum}: tieSameLaneBlank (lane=${bestLane}, gap=${fillGap.toFixed(3)}, spacing=${bestSecondSpacing.toFixed(1)})`,
+        );
+      }
+      console.warn(
+        `[OMR] Q${qNum}: low confidence/double-shade (best=${bestFill.toFixed(2)} second=${secondFill.toFixed(2)} gap=${fillGap.toFixed(3)} spacing=${bestSecondSpacing.toFixed(1)} strong=${strongCandidates.length}), returning blank`,
+      );
+      answers.push({ questionNumber: qNum, selectedAnswer: "" });
+      return;
+    }
+
+    const confirmedBest = best as Bubble;
+
     const colIdx = colCentroids.reduce(
       (bst, c, i) =>
-        Math.abs(best!.x - c) < Math.abs(best!.x - colCentroids[bst]) ? i : bst,
+        Math.abs(confirmedBest.x - c) <
+        Math.abs(confirmedBest.x - colCentroids[bst])
+          ? i
+          : bst,
       0,
     );
     const safeIdx = Math.min(colIdx, options.length - 1);
     console.log(
-      `[OMR] Q${qNum}: x=${Math.round(best.x)} → ${options[safeIdx]} fill=${best.fill.toFixed(2)} (valid)`,
+      `[OMR] Q${qNum}: x=${Math.round(confirmedBest.x)} → ${options[safeIdx]} fill=${confirmedBest.fill.toFixed(2)} (valid)`,
     );
     answers.push({ questionNumber: qNum, selectedAnswer: options[safeIdx] });
   });
@@ -770,40 +1393,34 @@ function getLayoutRegions(questionCount: number): AnswerRegion[] {
     // ── 150-question layout ─────────────────────────────────────────────────
     // Gordon College 150q template on A4 paper (210×297mm)
     // 15 blocks arranged in 3 rows × 5 columns
-    //
-    // Bubble density analysis (905 bubbles detected):
-    // - Bubbles clustered at x%: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90
-    // - Average ~90 bubbles per column
-    // - Two bubbles per visual block (e.g., Col1 = x0% + x10%)
-    //
-    // Clean even spacing with proper margins:
-    // Columns: [0%-20%], [20%-40%], [40%-60%], [60%-80%], [80%-100%]
-    // Rows:    [0%-33%],  [33%-67%],  [67%-100%]
-    //
-    // With aggressive overlap to capture ALL boundary questions robustly:
-    // Columns: [0%-22%], [18%-42%], [38%-62%], [58%-82%], [78%-100%]
-    // Row boundaries expanded significantly (5% overlap) to catch edge cases (Q10, Q20, Q30, Q40, Q50, etc.)
+    // Student ID occupies the top ~28% of the page.
+    // Answer blocks are below the ID section:
+    //   Row 1 (~30-50%): Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
+    //   Row 2 (~50-70%): Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
+    //   Row 3 (~70-90%): Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
+    // Columns evenly distributed across the page width (5 columns).
+    // Light X-overlap between adjacent columns to avoid clipping edge bubbles.
     return [
-      // Row 1 (y: 5%-45%) - Top row (expanded down by 7% to catch Q10)
-      { xMin: 0.0, xMax: 0.22, yMin: 0.05, yMax: 0.45, startQ: 1, numQ: 10 },
-      { xMin: 0.18, xMax: 0.42, yMin: 0.05, yMax: 0.45, startQ: 11, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.05, yMax: 0.45, startQ: 21, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.05, yMax: 0.45, startQ: 31, numQ: 10 },
-      { xMin: 0.78, xMax: 1.0, yMin: 0.05, yMax: 0.45, startQ: 41, numQ: 10 },
+      // Row 1 (Y: 27%-48%) — first bubble at ~31%, last at ~44%
+      { xMin: 0.0, xMax: 0.22, yMin: 0.27, yMax: 0.48, startQ: 1, numQ: 10 },
+      { xMin: 0.18, xMax: 0.42, yMin: 0.27, yMax: 0.48, startQ: 31, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.27, yMax: 0.48, startQ: 61, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.27, yMax: 0.48, startQ: 91, numQ: 10 },
+      { xMin: 0.78, xMax: 1.0, yMin: 0.27, yMax: 0.48, startQ: 121, numQ: 10 },
 
-      // Row 2 (y: 28%-72%) - Middle row (expanded significantly up & down)
-      { xMin: 0.0, xMax: 0.22, yMin: 0.28, yMax: 0.72, startQ: 51, numQ: 10 },
-      { xMin: 0.18, xMax: 0.42, yMin: 0.28, yMax: 0.72, startQ: 61, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.28, yMax: 0.72, startQ: 71, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.28, yMax: 0.72, startQ: 81, numQ: 10 },
-      { xMin: 0.78, xMax: 1.0, yMin: 0.28, yMax: 0.72, startQ: 91, numQ: 10 },
+      // Row 2 (Y: 47%-67%) — first bubble at ~50%, last at ~63%
+      { xMin: 0.0, xMax: 0.22, yMin: 0.47, yMax: 0.67, startQ: 11, numQ: 10 },
+      { xMin: 0.18, xMax: 0.42, yMin: 0.47, yMax: 0.67, startQ: 41, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.47, yMax: 0.67, startQ: 71, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.47, yMax: 0.67, startQ: 101, numQ: 10 },
+      { xMin: 0.78, xMax: 1.0, yMin: 0.47, yMax: 0.67, startQ: 131, numQ: 10 },
 
-      // Row 3 (y: 63%-100%) - Bottom row (expanded up by 5%)
-      { xMin: 0.0, xMax: 0.22, yMin: 0.63, yMax: 1.0, startQ: 101, numQ: 10 },
-      { xMin: 0.18, xMax: 0.42, yMin: 0.63, yMax: 1.0, startQ: 111, numQ: 10 },
-      { xMin: 0.38, xMax: 0.62, yMin: 0.63, yMax: 1.0, startQ: 121, numQ: 10 },
-      { xMin: 0.58, xMax: 0.82, yMin: 0.63, yMax: 1.0, startQ: 131, numQ: 10 },
-      { xMin: 0.78, xMax: 1.0, yMin: 0.63, yMax: 1.0, startQ: 141, numQ: 10 },
+      // Row 3 (Y: 66%-86%) — first bubble at ~69%, last at ~82%
+      { xMin: 0.0, xMax: 0.22, yMin: 0.66, yMax: 0.86, startQ: 21, numQ: 10 },
+      { xMin: 0.18, xMax: 0.42, yMin: 0.66, yMax: 0.86, startQ: 51, numQ: 10 },
+      { xMin: 0.38, xMax: 0.62, yMin: 0.66, yMax: 0.86, startQ: 81, numQ: 10 },
+      { xMin: 0.58, xMax: 0.82, yMin: 0.66, yMax: 0.86, startQ: 111, numQ: 10 },
+      { xMin: 0.78, xMax: 1.0, yMin: 0.66, yMax: 0.86, startQ: 141, numQ: 10 },
     ];
   }
 }
@@ -844,6 +1461,15 @@ export class ZipgradeScanner {
           : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
       const qCount = rawQ > 0 ? rawQ : 20;
 
+      const isValidMat = (mat: any) => {
+        try {
+          const info = OpenCV.toJSValue(mat) as any;
+          return Boolean(info && info.cols && info.rows);
+        } catch {
+          return false;
+        }
+      };
+
       // ── 1. Load image ──────────────────────────────────────────────────────
       const normalizedUri = imageUri.startsWith("file://")
         ? imageUri
@@ -862,8 +1488,9 @@ export class ZipgradeScanner {
       );
       const srcMat = OpenCV.base64ToMat(base64Image);
       const srcJs = OpenCV.toJSValue(srcMat, "jpeg") as any;
-      console.log(`[OMR] srcMat: ${srcJs.cols}x${srcJs.rows}`);
-      if (!srcJs.cols || srcJs.cols === 0) {
+      console.log(`[OMR] srcMat: ${srcJs?.cols}x${srcJs?.rows}`);
+      if (!isValidMat(srcMat) || !srcJs?.cols || !srcJs?.rows) {
+        console.error("[OMR] Invalid source image after base64 decode", srcJs);
         return {
           studentId: "00000000",
           answers: [],
@@ -876,6 +1503,7 @@ export class ZipgradeScanner {
       // DISABLED for 150Q - image comes in correct orientation from camera
       // Only for 50q sheets (legacy behavior)
       let workingMat = srcMat;
+      let rotated90For150 = false;
 
       if (qCount === 50) {
         const imgAspect = srcJs.cols / srcJs.rows;
@@ -930,6 +1558,7 @@ export class ZipgradeScanner {
             `[OMR] 150Q Post-rotation: ${rotatedJs.cols}x${rotatedJs.rows} (aspect=${(rotatedJs.cols / rotatedJs.rows).toFixed(2)})`,
           );
           workingMat = rotatedMat;
+          rotated90For150 = true;
         } else {
           console.log(
             `[OMR] 150Q already PORTRAIT: ${srcJs.cols}x${srcJs.rows} (aspect=${currentAspect.toFixed(2)})`,
@@ -940,7 +1569,11 @@ export class ZipgradeScanner {
 
       const IMG_W: number = (OpenCV.toJSValue(workingMat) as any).cols;
 
-      // ── 2. Grayscale + Blur ───────────────────────────────────────────────
+      // ── 2. Grayscale + Enhance Contrast ──────────────────────────────────
+      if (!isValidMat(workingMat)) {
+        throw new Error("OpenCV workingMat is empty after image load/rotation");
+      }
+
       let grayMat = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
       matsToCleanup.push(grayMat);
       try {
@@ -951,7 +1584,77 @@ export class ZipgradeScanner {
           ColorConversionCodes.COLOR_BGR2GRAY,
         );
       } catch (e) {
+        console.warn("[OMR] cvtColor failed, falling back to workingMat as grayMat", e);
         grayMat = workingMat;
+      }
+
+      if (!isValidMat(grayMat)) {
+        throw new Error("Gray image is empty after grayscale conversion");
+      }
+
+      // CLAHE (Contrast Limited Adaptive Histogram Equalization)
+      // Better than global equalization for skewed/poorly-lit images
+      // Improves bubble visibility even with angle distortion
+      let blurSource = grayMat;
+      
+      // Try CLAHE first (best quality)
+      const clahe = OpenCV.invoke("createCLAHE", 4.0, [16, 16]);
+      const claheMat = OpenCV.createObject(
+        ObjectType.Mat,
+        0,
+        0,
+        DataTypes.CV_8U,
+      );
+      matsToCleanup.push(claheMat);
+      
+      try {
+        OpenCV.invoke("apply", clahe, grayMat, claheMat);
+        if (isValidMat(claheMat)) {
+          blurSource = claheMat;
+          console.log("[OMR] CLAHE applied successfully");
+        } else {
+          console.warn("[OMR] CLAHE produced empty mat, trying histogram equalization");
+          // Fallback: global histogram equalization
+          const histEqMat = OpenCV.createObject(
+            ObjectType.Mat,
+            0,
+            0,
+            DataTypes.CV_8U,
+          );
+          matsToCleanup.push(histEqMat);
+          try {
+            OpenCV.invoke("equalizeHist", grayMat, histEqMat);
+            if (isValidMat(histEqMat)) {
+              blurSource = histEqMat;
+              console.log("[OMR] Histogram equalization applied");
+            }
+          } catch (hErr) {
+            console.warn("[OMR] Histogram equalization failed, using grayMat", hErr);
+          }
+        }
+      } catch (e) {
+        console.warn("[OMR] CLAHE failed, trying histogram equalization", e);
+        // Fallback: global histogram equalization
+        const histEqMat = OpenCV.createObject(
+          ObjectType.Mat,
+          0,
+          0,
+          DataTypes.CV_8U,
+        );
+        matsToCleanup.push(histEqMat);
+        try {
+          OpenCV.invoke("equalizeHist", grayMat, histEqMat);
+          if (isValidMat(histEqMat)) {
+            blurSource = histEqMat;
+            console.log("[OMR] Histogram equalization applied");
+          }
+        } catch (hErr) {
+          console.warn("[OMR] Histogram equalization failed, using grayMat", hErr);
+        }
+      }
+
+      if (!isValidMat(blurSource)) {
+        throw new Error("Blur source image is empty before GaussianBlur");
       }
 
       const blurMat = OpenCV.createObject(
@@ -960,15 +1663,28 @@ export class ZipgradeScanner {
         0,
         DataTypes.CV_8U,
       );
-      OpenCV.invoke(
-        "GaussianBlur",
-        grayMat,
-        blurMat,
-        OpenCV.createObject(ObjectType.Size, 5, 5),
-        0,
-        0,
-        BorderTypes.BORDER_DEFAULT,
-      );
+      matsToCleanup.push(blurMat);
+      const gaussianKernel = OpenCV.createObject(ObjectType.Size, 7, 7);
+      matsToCleanup.push(gaussianKernel);
+      try {
+        OpenCV.invoke(
+          "GaussianBlur",
+          blurSource,
+          blurMat,
+          gaussianKernel,
+          1.5, // Increased sigma
+          0,
+          BorderTypes.BORDER_DEFAULT,
+        );
+      } catch (e) {
+        console.warn("[OMR] GaussianBlur failed, using blur source directly", e);
+        try {
+          OpenCV.invoke("copyTo", blurSource, blurMat);
+        } catch (copyError) {
+          console.error("[OMR] Failed to copy blur source after GaussianBlur error", copyError);
+          throw e;
+        }
+      }
 
       // ── 3. Best threshold ─────────────────────────────────────────────────
       const threshCandidates: { mat: any; label: string }[] = [];
@@ -1113,13 +1829,17 @@ export class ZipgradeScanner {
       const numContours: number = (OpenCV.toJSValue(contoursVec) as any).array
         .length;
       console.log(`[OMR] numContours: ${numContours}`);
-      if (numContours === 0) {
+      if (numContours === 0 && qCount !== 150) {
         return {
           studentId: "00000000",
           answers: [],
           confidence: 0,
           processedImageUri,
         };
+      } else if (numContours === 0 && qCount === 150) {
+        console.warn(
+          "[OMR] 150Q contour detection returned 0 contours; proceeding with brightness-only path",
+        );
       }
 
       // ── 5. Collect bubble candidates ───────────────────────────────────────
@@ -1145,13 +1865,20 @@ export class ZipgradeScanner {
         minAspect = 0.25;
         maxAspect = 4.0;
         minExtent = 0.03;
-      } else {
-        // 100q: EXTREMELY relaxed filtering (smallest bubbles, most of them)
-        minShapeArea = Math.pow(imgWidth / 200, 2); // Very small minimum
-        maxShapeArea = imgArea * 0.15; // Very large maximum
-        minAspect = 0.1; // Accept almost any aspect ratio
+      } else if (qCount === 100) {
+        // 100q: very relaxed filtering
+        minShapeArea = Math.pow(imgWidth / 200, 2);
+        maxShapeArea = imgArea * 0.15;
+        minAspect = 0.1;
         maxAspect = 10.0;
-        minExtent = 0.01; // Accept almost any extent
+        minExtent = 0.01;
+      } else {
+        // 150q: ULTRA-relaxed filtering (tiny vertical bubbles, poor contrast)
+        minShapeArea = Math.pow(imgWidth / 250, 2); // Extremely small minimum
+        maxShapeArea = imgArea * 0.2; // Very large maximum
+        minAspect = 0.08; // Accept extreme aspect ratios
+        maxAspect = 15.0;
+        minExtent = 0.005; // Accept almost any extent
       }
 
       const rawShapes: Bubble[] = [];
@@ -1204,13 +1931,17 @@ export class ZipgradeScanner {
       console.log(
         `[OMR] rawShapes: ${rawShapes.length} (from ${numContours} contours)`,
       );
-      if (rawShapes.length === 0) {
+      if (rawShapes.length === 0 && qCount !== 150) {
         return {
           studentId: "00000000",
           answers: [],
           confidence: 0,
           processedImageUri,
         };
+      } else if (rawShapes.length === 0 && qCount === 150) {
+        console.warn(
+          "[OMR] 150Q rawShapes is 0; skipping contour bubble model and continuing with brightness-only path",
+        );
       }
 
       // ── 6. Bubble detection ────────────────────────────────────────────────
@@ -1222,19 +1953,38 @@ export class ZipgradeScanner {
       // Instead: find BOTH clusters and merge them.
       //
       // Step 1: find the filled bubble modal area
-      const filledShapes = rawShapes.filter((s) => s.fill >= 0.45);
+      
+      // For 150Q: more lenient fill thresholds due to smaller bubbles & poor image quality
+      const filledThreshold = qCount === 150 ? 0.30 : 0.45;
+      const emptyMinFill = qCount === 150 ? 0.02 : 0.08;
+      
+      const filledShapes = rawShapes.filter((s) => s.fill >= filledThreshold);
       const emptyShapes = rawShapes.filter(
-        (s) => s.fill < 0.45 && s.fill >= 0.08,
+        (s) => s.fill < filledThreshold && s.fill >= emptyMinFill,
       );
+      
+      console.log(
+        `[OMR] Bubble analysis (150Q=${qCount === 150}): filled=${filledShapes.length} (fill>=${filledThreshold}), empty=${emptyShapes.length} (${emptyMinFill}<fill<${filledThreshold})`,
+      );
+      if (rawShapes.length > 0) {
+        const fills = rawShapes.map((s) => s.fill);
+        const avgFill = fills.reduce((a, b) => a + b, 0) / fills.length;
+        const minFill = Math.min(...fills);
+        const maxFill = Math.max(...fills);
+        console.log(
+          `[OMR] Fill distribution: min=${minFill.toFixed(3)}, max=${maxFill.toFixed(3)}, avg=${avgFill.toFixed(3)}`,
+        );
+      }
+      
       const filledRefArea =
-        filledShapes.length > 5
+        filledShapes.length >= (qCount === 150 ? 2 : 5)
           ? findModalClusterMedian(
               filledShapes.map((s) => s.area),
               0.5,
             )
           : 0;
       const emptyRefArea =
-        emptyShapes.length > 5
+        emptyShapes.length >= (qCount === 150 ? 2 : 5)
           ? findModalClusterMedian(
               emptyShapes.map((s) => s.area),
               0.5,
@@ -1246,7 +1996,13 @@ export class ZipgradeScanner {
       const seen = new Set<number>();
       const addBubble = (s: (typeof rawShapes)[0], refArea: number) => {
         const key = Math.round(s.x) * 10000 + Math.round(s.y);
-        if (
+        if (refArea === 0) {
+          // No reference area: accept any shape with reasonable area
+          if (!seen.has(key) && s.area > 0) {
+            seen.add(key);
+            allBubbles.push(s);
+          }
+        } else if (
           !seen.has(key) &&
           s.area >= refArea * 0.4 &&
           s.area <= refArea * 2.2
@@ -1271,7 +2027,8 @@ export class ZipgradeScanner {
           emptyRefArea > 0 &&
           s.area >= emptyRefArea * 0.4 &&
           s.area <= emptyRefArea * 2.2;
-        if (nearFilled || nearEmpty) {
+        const noRefArea = filledRefArea === 0 && emptyRefArea === 0 && s.area > 0;
+        if (nearFilled || nearEmpty || noRefArea) {
           seen.add(key);
           allBubbles.push(s);
         }
@@ -1281,13 +2038,25 @@ export class ZipgradeScanner {
       console.log(
         `[OMR] filledRef: ${Math.round(filledRefArea)}, emptyRef: ${Math.round(emptyRefArea)}, allBubbles: ${allBubbles.length}`,
       );
-      if (allBubbles.length < 10) {
+      if (allBubbles.length < 10 && qCount !== 150) {
         return {
           studentId: "00000000",
           answers: [],
           confidence: 0,
           processedImageUri,
         };
+      }
+      if (allBubbles.length === 0 && qCount !== 150) {
+        return {
+          studentId: "00000000",
+          answers: [],
+          confidence: 0,
+          processedImageUri,
+        };
+      } else if (allBubbles.length === 0 && qCount === 150) {
+        console.warn(
+          "[OMR] 150Q allBubbles is 0; contour fallback disabled, relying on brightness scanner",
+        );
       }
 
       const medianH =
@@ -1315,7 +2084,7 @@ export class ZipgradeScanner {
                     s.fill >= 0.6 && // More lenient
                     s.w / s.h >= 0.3 && // More lenient aspect ratio
                     s.w / s.h <= 3.0
-                  : s.area >= bubbleRefArea * 1.5 &&
+                  : s.area >= bubbleRefArea * 3.5 &&
                     s.area <= bubbleRefArea * 10 &&
                     s.extent >= 0.6 &&
                     s.fill >= 0.65 &&
@@ -1362,6 +2131,12 @@ export class ZipgradeScanner {
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
+      let markers150: {
+        topLeft: { x: number; y: number };
+        topRight: { x: number; y: number };
+        bottomLeft: { x: number; y: number };
+        bottomRight: { x: number; y: number };
+      } | null = null;
 
       // Use registration marks for cropping when available (like Main)
       if (regMarks.length >= 3) {
@@ -1388,6 +2163,151 @@ export class ZipgradeScanner {
         console.log(
           `[OMR] crop: using ${qCount === 150 ? "wide margins for 150q" : "default margins"} (no reg marks)`,
         );
+      }
+
+      if (qCount === 150) {
+        // Build default markers from current paper crop (used if no better estimate is available).
+        markers150 = {
+          topLeft: { x: paperLeft, y: paperTop },
+          topRight: { x: paperRight, y: paperTop },
+          bottomLeft: { x: paperLeft, y: paperBottom },
+          bottomRight: { x: paperRight, y: paperBottom },
+        };
+
+        // If registration marks are missing, estimate page rectangle from grayscale image.
+        // This avoids mapping brightness sampling to the full camera frame.
+        if (regMarks.length < 3) {
+          try {
+            const pageThresh = OpenCV.createObject(
+              ObjectType.Mat,
+              0,
+              0,
+              DataTypes.CV_8U,
+            );
+            const pageContours = OpenCV.createObject(ObjectType.MatVector);
+            const pageHierarchy = OpenCV.createObject(
+              ObjectType.Mat,
+              0,
+              0,
+              DataTypes.CV_32S,
+            );
+            matsToCleanup.push(pageThresh, pageContours, pageHierarchy);
+
+            OpenCV.invoke(
+              "threshold",
+              grayMat,
+              pageThresh,
+              0,
+              255,
+              ThresholdTypes.THRESH_BINARY | ThresholdTypes.THRESH_OTSU,
+            );
+
+            OpenCV.invoke(
+              "findContoursWithHierarchy",
+              pageThresh,
+              pageContours,
+              pageHierarchy,
+              RetrievalModes.RETR_EXTERNAL,
+              ContourApproximationModes.CHAIN_APPROX_SIMPLE,
+            );
+
+            const pageContoursData = OpenCV.toJSValue(pageContours) as any;
+            const pageCount = pageContoursData.array.length;
+            const minArea = imgArea * 0.1;
+            const maxArea = imgArea * 0.98;
+            let bestRect: { x: number; y: number; width: number; height: number } | null = null;
+            let bestArea = 0;
+
+            for (let i = 0; i < pageCount; i++) {
+              const contour = OpenCV.copyObjectFromVector(pageContours, i);
+              const rect = OpenCV.toJSValue(
+                OpenCV.invoke("boundingRect", contour),
+              ) as any;
+              const area = rect.width * rect.height;
+              const aspect = rect.width / Math.max(1, rect.height);
+
+              if (area < minArea || area > maxArea) continue;
+              if (aspect < 0.45 || aspect > 0.9) continue; // 150 sheet is portrait-ish
+
+              if (area > bestArea) {
+                bestArea = area;
+                bestRect = rect;
+              }
+            }
+
+            if (bestRect) {
+              const insetX = Math.max(4, Math.round(bestRect.width * 0.01));
+              const insetY = Math.max(4, Math.round(bestRect.height * 0.01));
+              paperLeft = Math.max(0, bestRect.x + insetX);
+              paperRight = Math.min(imgWidth, bestRect.x + bestRect.width - insetX);
+              paperTop = Math.max(0, bestRect.y + insetY);
+              paperBottom = Math.min(imgHeight, bestRect.y + bestRect.height - insetY);
+              markers150 = {
+                topLeft: { x: paperLeft, y: paperTop },
+                topRight: { x: paperRight, y: paperTop },
+                bottomLeft: { x: paperLeft, y: paperBottom },
+                bottomRight: { x: paperRight, y: paperBottom },
+              };
+              console.log(
+                `[OMR] 150Q page-rect estimate: [${Math.round(paperLeft)},${Math.round(paperTop)}] -> [${Math.round(paperRight)},${Math.round(paperBottom)}], area=${Math.round(bestArea)}`,
+              );
+            }
+          } catch (e) {
+            console.warn("[OMR] 150Q page-rect estimation failed, using default crop", e);
+          }
+        } else {
+          const derivedMarkers = buildCornerMarkersFromRegMarks(regMarks);
+          if (derivedMarkers) {
+            markers150 = derivedMarkers;
+            console.log(
+              `[OMR] 150Q corner markers from regMarks: TL=(${Math.round(markers150.topLeft.x)},${Math.round(markers150.topLeft.y)}), TR=(${Math.round(markers150.topRight.x)},${Math.round(markers150.topRight.y)}), BL=(${Math.round(markers150.bottomLeft.x)},${Math.round(markers150.bottomLeft.y)}), BR=(${Math.round(markers150.bottomRight.x)},${Math.round(markers150.bottomRight.y)})`,
+            );
+
+            // Validate that corners form a reasonable rectangle
+            const TL = markers150.topLeft;
+            const TR = markers150.topRight;
+            const BL = markers150.bottomLeft;
+            const BR = markers150.bottomRight;
+            const leftSkew = Math.abs(TL.x - BL.x);
+            const rightSkew = Math.abs(TR.x - BR.x);
+            const topSkew = Math.abs(TL.y - TR.y);
+            const frameWidth = Math.abs(TR.x - TL.x);
+            const frameHeight = Math.abs(BL.y - TL.y);
+
+            const maxHorizontalSkew = frameWidth * 0.15;
+            const maxVerticalSkew = frameHeight * 0.08;
+
+            if (leftSkew > maxHorizontalSkew || rightSkew > maxHorizontalSkew) {
+              console.warn(`[OMR] Corner skew too large: leftSkew=${leftSkew} rightSkew=${rightSkew} max=${maxHorizontalSkew}`);
+              return { error: 'SKEWED', message: 'Adjust angle — hold phone directly above sheet' } as any;
+            }
+
+            if (topSkew > maxVerticalSkew) {
+              console.warn(`[OMR] Top edge skew too large: topSkew=${topSkew} max=${maxVerticalSkew}`);
+              return { error: 'SKEWED', message: 'Adjust angle — hold phone directly above sheet' } as any;
+            }
+          }
+        }
+
+        // If we rotated in OpenCV, map markers back to original image coordinates
+        // because brightness scanner reads the original, unrotated imageUri.
+        if (markers150 && rotated90For150) {
+          const mapRotatedBackToOriginal = (p: { x: number; y: number }) => ({
+            x: p.y,
+            y: srcJs.rows - 1 - p.x,
+          });
+
+          markers150 = {
+            topLeft: mapRotatedBackToOriginal(markers150.topLeft),
+            topRight: mapRotatedBackToOriginal(markers150.topRight),
+            bottomLeft: mapRotatedBackToOriginal(markers150.bottomLeft),
+            bottomRight: mapRotatedBackToOriginal(markers150.bottomRight),
+          };
+
+          console.log(
+            `[OMR] 150Q markers mapped back to original image orientation (${srcJs.cols}x${srcJs.rows})`,
+          );
+        }
       }
 
       const paperW = paperRight - paperLeft;
@@ -1616,42 +2536,86 @@ export class ZipgradeScanner {
       // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
 
-      // For 150-item templates, use REGION-BASED EXTRACTION (row clustering + ballot box)
-      if (detectedQ === 150 && bubbles.length > 100) {
+      // For 150-item templates, prioritize BRIGHTNESS extraction (more robust than contour-based)
+      if (detectedQ === 150) {
         console.log(
-          "[OMR] Using REGION-BASED extraction for 150-item template (row clustering)",
-        );
-        console.log(
-          `[OMR] Processing ${bubbles.length} bubbles in ${regions.length} regions`,
+          "[OMR] Using BRIGHTNESS scanning for 150-item template (Skia pixel sampling)",
         );
 
-        const regionAnswers: StudentAnswer[] = [];
+        const {
+          scan150ItemWithBrightness,
+        } = require("./brightnessScannerFor100Item");
 
-        // For each region, extract questions using row clustering
-        for (const region of regions) {
-          const regionQs = extractAnswersFromRegion(
-            bubbles,
-            region,
-            paperW,
-            paperH,
-            medianH,
+        const fallbackMarkers = markers150 ?? {
+          topLeft: { x: paperLeft, y: paperTop },
+          topRight: { x: paperRight, y: paperTop },
+          bottomLeft: { x: paperLeft, y: paperBottom },
+          bottomRight: { x: paperRight, y: paperBottom },
+        };
+
+        allAnswers = await scan150ItemWithBrightness(imageUri, fallbackMarkers);
+        const brightDetected = allAnswers.filter((a) => a.selectedAnswer).length;
+        console.log(`[OMR] 150Q brightness detected ${brightDetected}/150 answers`);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 150Q: BRIGHTNESS-ONLY STRATEGY (contour backfill removed)
+        // ═══════════════════════════════════════════════════════════════════
+        // Contour-based region detection is unreliable for 150Q because:
+        //   - Bubbles are too small/dense → fullRows=0 in most regions
+        //   - Centroid derivation collapses → wrong column mapping
+        //   - Band-based fallback guesses positions geometrically → noisy
+        //
+        // When brightness detects 130+/150, contour backfill of 10-20 blanks
+        // often introduces WRONG answers, reducing net accuracy.
+        //
+        // Only fall back to contour detection when brightness catastrophically
+        // fails (< 80/150), indicating the markers/coordinates are badly off
+        // and contour data might rescue some answers.
+        // ═══════════════════════════════════════════════════════════════════
+
+        if (brightDetected < 80 && bubbles.length >= 30) {
+          console.warn(
+            `[OMR] 150Q brightness critically low (${brightDetected}/150); attempting contour fallback`,
           );
-          regionAnswers.push(...regionQs);
+
+          const regionAnswers: StudentAnswer[] = [];
+          for (const region of regions) {
+            const regionQs = extractAnswersFromRegion(
+              bubbles,
+              region,
+              paperW,
+              paperH,
+              medianH,
+              true,
+            );
+            regionAnswers.push(...regionQs);
+          }
+
+          while (regionAnswers.length < 150) {
+            regionAnswers.push({
+              questionNumber: regionAnswers.length + 1,
+              selectedAnswer: "",
+            });
+          }
+
+          const regionDetected = regionAnswers.filter((a) => a.selectedAnswer).length;
+          console.log(
+            `[OMR] 150Q contour fallback: ${regionDetected}/150 answers (vs brightness ${brightDetected}/150)`,
+          );
+
+          // FORCE the use of the mathematically calibrated brightness scanner.
+          // The contour fallback for 150Q is highly inaccurate and hallucinates answers.
+          if (regionDetected > brightDetected + 20) {
+            allAnswers = regionAnswers;
+            console.log(
+              `[OMR] 150Q using contour fallback (${regionDetected} > ${brightDetected}+20)`,
+            );
+          }
+        } else {
+          console.log(
+            `[OMR] 150Q using brightness-only results (${brightDetected}/150 detected, no contour backfill)`,
+          );
         }
-
-        // Pad to 150 questions
-        while (regionAnswers.length < 150) {
-          regionAnswers.push({
-            questionNumber: regionAnswers.length + 1,
-            selectedAnswer: "",
-          });
-        }
-
-        allAnswers = regionAnswers;
-
-        console.log(
-          `[OMR] Region-based detection: ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`,
-        );
       } else if (detectedQ === 100 && regMarks.length >= 3) {
         console.log(
           "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
@@ -1850,8 +2814,11 @@ export class ZipgradeScanner {
         processedImageUri,
       };
     } catch (error) {
-      console.error("[OMR] Fatal error:", error);
-      throw new Error("Failed to process Zipgrade answer sheet");
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : '';
+      console.error("[OMR] Fatal error:", errorMessage);
+      if (errorStack) console.error("[OMR] Stack:", errorStack);
+      throw new Error(`Failed to process Zipgrade answer sheet: ${errorMessage}`);
     } finally {
       // Explicitly clear all OpenCV buffers and release memory
       try {
@@ -1878,19 +2845,42 @@ export class ZipgradeScanner {
     }
   }
 
-  static async validateZipgradeSheet(imageUri: string): Promise<{
+  static async validateZipgradeSheet(
+    imageUri: string,
+    expectedQuestions?: number,
+  ): Promise<{
     isValid: boolean;
     issues: string[];
     confidence: number;
     detectedTemplate?: keyof ReturnType<typeof ZipgradeGenerator.getTemplates>;
+    diagnostics?: {
+      edgeDensity: number;
+      coverage: number;
+      shortSideRatio: number;
+      centerOffset: number;
+      paperRect?: { x: number; y: number; width: number; height: number };
+    };
   }> {
     const issues: string[] = [];
     const matsToCleanup: any[] = [];
+    const diagnostics = {
+      edgeDensity: 0,
+      coverage: 0,
+      shortSideRatio: 0,
+      centerOffset: 0,
+    };
 
     try {
       // Load OpenCV
       loadOpenCV();
-      const { ColorConversionCodes, DataTypes, ObjectType } = OpenCVTypes;
+      const {
+        ColorConversionCodes,
+        ContourApproximationModes,
+        DataTypes,
+        ObjectType,
+        RetrievalModes,
+        ThresholdTypes,
+      } = OpenCVTypes;
 
       // Load Image
       const normalizedUri = imageUri.startsWith("file://")
@@ -1935,6 +2925,7 @@ export class ZipgradeScanner {
       const totalPixels = srcJs.rows * srcJs.cols;
 
       const edgeDensity = (edgePixels / totalPixels) * 100;
+      diagnostics.edgeDensity = edgeDensity;
       console.log(
         `[Validation] Blur Edge Density: ${edgeDensity.toFixed(2)}% (${edgePixels} edges)`,
       );
@@ -1945,6 +2936,232 @@ export class ZipgradeScanner {
         issues.push(
           "Image is too blurry. Ensure the camera is steadily focused and lighting is bright.",
         );
+      }
+
+      // Coverage check: ensure the detected sheet occupies enough of the frame.
+      // Small/very far captures are the top cause of weak 150-item detection.
+      const threshMat = OpenCV.createObject(
+        ObjectType.Mat,
+        0,
+        0,
+        DataTypes.CV_8U,
+      );
+      const contours = OpenCV.createObject(ObjectType.MatVector);
+      const hierarchy = OpenCV.createObject(
+        ObjectType.Mat,
+        0,
+        0,
+        DataTypes.CV_32S,
+      );
+      matsToCleanup.push(threshMat, contours, hierarchy);
+
+      OpenCV.invoke(
+        "threshold",
+        grayMat,
+        threshMat,
+        0,
+        255,
+        ThresholdTypes.THRESH_BINARY | ThresholdTypes.THRESH_OTSU,
+      );
+
+      OpenCV.invoke(
+        "findContoursWithHierarchy",
+        threshMat,
+        contours,
+        hierarchy,
+        RetrievalModes.RETR_EXTERNAL,
+        ContourApproximationModes.CHAIN_APPROX_SIMPLE,
+      );
+
+      const contoursData = OpenCV.toJSValue(contours) as any;
+      const contourCount = contoursData?.array?.length ?? 0;
+      let bestRectArea = 0;
+      let bestRectWidth = 0;
+      let bestRectHeight = 0;
+      let bestRectX = 0;
+      let bestRectY = 0;
+      let bestScore = -1;
+
+      const targetAspect = 210 / 297; // A4 portrait, normalized with min(w/h, h/w)
+      const maxAspectError = expectedQuestions === 150 ? 0.22 : 0.28;
+
+      for (let i = 0; i < contourCount; i++) {
+        const contour = OpenCV.copyObjectFromVector(contours, i);
+        const rect = OpenCV.toJSValue(OpenCV.invoke("boundingRect", contour)) as any;
+        const rectArea = (rect?.width ?? 0) * (rect?.height ?? 0);
+        const rectW = rect?.width ?? 0;
+        const rectH = rect?.height ?? 0;
+        if (rectW <= 0 || rectH <= 0) continue;
+
+        const rectAspect = rectW / Math.max(1, rectH);
+        const normalizedAspect = Math.min(rectAspect, 1 / Math.max(0.0001, rectAspect));
+        const aspectError = Math.abs(normalizedAspect - targetAspect);
+
+        // Skip tiny or huge contours and non-paper-like aspects.
+        if (rectArea < totalPixels * 0.02 || rectArea > totalPixels * 0.95) continue;
+        if (aspectError > maxAspectError) continue;
+
+        // Prefer large, paper-like rectangles.
+        const aspectScore = 1 - aspectError / maxAspectError;
+        const score = rectArea * Math.max(0.05, aspectScore);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestRectArea = rectArea;
+          bestRectWidth = rectW;
+          bestRectHeight = rectH;
+          bestRectX = rect?.x ?? 0;
+          bestRectY = rect?.y ?? 0;
+        }
+      }
+
+      // Fallback: if no paper-like contour survived filters, keep previous behavior.
+      if (bestRectArea <= 0) {
+        for (let i = 0; i < contourCount; i++) {
+          const contour = OpenCV.copyObjectFromVector(contours, i);
+          const rect = OpenCV.toJSValue(OpenCV.invoke("boundingRect", contour)) as any;
+          const rectArea = (rect?.width ?? 0) * (rect?.height ?? 0);
+          if (rectArea > bestRectArea) {
+            bestRectArea = rectArea;
+            bestRectWidth = rect?.width ?? 0;
+            bestRectHeight = rect?.height ?? 0;
+            bestRectX = rect?.x ?? 0;
+            bestRectY = rect?.y ?? 0;
+          }
+        }
+      }
+
+      const coverage = totalPixels > 0 ? bestRectArea / totalPixels : 0;
+      const minCoverage = expectedQuestions === 150 ? 0.36 : 0.16;
+      const widthRatio = srcJs.cols > 0 ? bestRectWidth / srcJs.cols : 0;
+      const heightRatio = srcJs.rows > 0 ? bestRectHeight / srcJs.rows : 0;
+      const shortSideRatio = Math.min(widthRatio, heightRatio);
+      const minShortSide = expectedQuestions === 150 ? 0.46 : 0.26;
+      const centerX = bestRectX + bestRectWidth / 2;
+      const centerY = bestRectY + bestRectHeight / 2;
+      const centerDx = srcJs.cols > 0 ? Math.abs(centerX - srcJs.cols / 2) / srcJs.cols : 0;
+      const centerDy = srcJs.rows > 0 ? Math.abs(centerY - srcJs.rows / 2) / srcJs.rows : 0;
+      const centerOffset = Math.sqrt(centerDx * centerDx + centerDy * centerDy);
+      diagnostics.coverage = coverage;
+      diagnostics.shortSideRatio = shortSideRatio;
+      diagnostics.centerOffset = centerOffset;
+      // Expose normalized paper bounding rect for UI tracking (QR-scanner-like)
+      if (bestRectWidth > 0 && bestRectHeight > 0 && srcJs.cols > 0 && srcJs.rows > 0) {
+        (diagnostics as any).paperRect = {
+          x: bestRectX / srcJs.cols,
+          y: bestRectY / srcJs.rows,
+          width: bestRectWidth / srcJs.cols,
+          height: bestRectHeight / srcJs.rows,
+        };
+      }
+      // 150Q sheets fill most of the frame; boundingRect can drift slightly with shadows,
+      // so allow a bit more center tolerance when coverage/size are otherwise strong.
+      const maxCenterOffset =
+        expectedQuestions === 150
+          ? coverage >= 0.42 && shortSideRatio >= 0.52
+            ? 0.2
+            : 0.18
+          : 0.24;
+
+      let inFrameFeatureContours = 0;
+      let bubbleLikeContours = 0;
+      if (bestRectArea > 0) {
+        const minBubbleArea = bestRectArea * 0.000015;
+        const maxBubbleArea = bestRectArea * 0.0022;
+
+        for (let i = 0; i < contourCount; i++) {
+          const contour = OpenCV.copyObjectFromVector(contours, i);
+          const rect = OpenCV.toJSValue(OpenCV.invoke("boundingRect", contour)) as any;
+          const rectW = rect?.width ?? 0;
+          const rectH = rect?.height ?? 0;
+          const rectArea = rectW * rectH;
+          if (rectW <= 0 || rectH <= 0 || rectArea <= 0) continue;
+
+          const rectCx = (rect?.x ?? 0) + rectW / 2;
+          const rectCy = (rect?.y ?? 0) + rectH / 2;
+          const insideBestRect =
+            rectCx >= bestRectX &&
+            rectCx <= bestRectX + bestRectWidth &&
+            rectCy >= bestRectY &&
+            rectCy <= bestRectY + bestRectHeight;
+
+          if (!insideBestRect) continue;
+
+          inFrameFeatureContours += 1;
+
+          const aspect = rectW / Math.max(1, rectH);
+          const bubbleLikeAspect = aspect >= 0.45 && aspect <= 2.2;
+          if (
+            bubbleLikeAspect &&
+            rectArea >= minBubbleArea &&
+            rectArea <= maxBubbleArea
+          ) {
+            bubbleLikeContours += 1;
+          }
+        }
+      }
+
+      console.log(
+        `[Validation] Sheet coverage: ${(coverage * 100).toFixed(1)}% (min ${(minCoverage * 100).toFixed(1)}%), shortSide ${(shortSideRatio * 100).toFixed(1)}% (min ${(minShortSide * 100).toFixed(1)}%), centerOffset ${centerOffset.toFixed(2)} (max ${maxCenterOffset.toFixed(2)})`,
+      );
+      console.log(
+        `[Validation] Contours: total=${contourCount}, inFrame=${inFrameFeatureContours}, bubbleLike=${bubbleLikeContours}`,
+      );
+
+      if (coverage < minCoverage) {
+        if (expectedQuestions === 150) {
+          issues.push(
+            "Sheet is too small in frame for 150-item accuracy. Move closer so the page fills the corner boxes and the full answer grid is visible.",
+          );
+        } else {
+          issues.push(
+            "Sheet is too small in frame. Move closer and keep the page centered inside the guide.",
+          );
+        }
+      }
+
+      if (shortSideRatio < minShortSide) {
+        if (expectedQuestions === 150) {
+          issues.push(
+            "150-item sheet appears too far or too tilted. Fit the paper fully inside the corner boxes and move closer before scanning.",
+          );
+        } else {
+          issues.push(
+            "Sheet appears too small or angled. Move closer and keep it centered in the guide.",
+          );
+        }
+      }
+
+      if (centerOffset > maxCenterOffset) {
+        issues.push(
+          expectedQuestions === 150
+            ? "Center the paper inside the corner boxes before capturing."
+            : "Center the paper inside the guide before capturing.",
+        );
+      }
+
+      if (expectedQuestions === 150) {
+        const minContourCount = 28;
+        const minInFrameFeatures = 12;
+        const minBubbleLikeContours = 8;
+
+        if (contourCount < minContourCount) {
+          issues.push(
+            "150-item sheet details are too faint or blurred for reliable scan. Improve focus and lighting before capturing.",
+          );
+        }
+
+        if (inFrameFeatureContours < minInFrameFeatures) {
+          issues.push(
+            "150-item sheet coverage is insufficient. Ensure the entire answer grid is visible within the corner boxes.",
+          );
+        }
+
+        if (bubbleLikeContours < minBubbleLikeContours) {
+          issues.push(
+            "150-item answer bubbles are not clearly visible. Move closer and avoid glare for a sharper capture.",
+          );
+        }
       }
     } catch (err) {
       console.error("[Validation] Blur detection check failed:", err);
@@ -1974,6 +3191,7 @@ export class ZipgradeScanner {
       issues,
       confidence: issues.length === 0 ? 0.95 : 0.4,
       detectedTemplate: "standard20",
+      diagnostics,
     };
   }
 }

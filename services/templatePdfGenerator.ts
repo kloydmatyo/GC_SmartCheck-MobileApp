@@ -506,57 +506,50 @@ function generate150QuestionHTML(template: TemplateData, logoData: string): stri
           </div>
         </div>
         
-        <!-- Top section: ID + Q41-50 + Q91-100 + Q141-150 -->
-        <div style="display: flex; gap: 3mm; margin-bottom: 3mm; align-items: flex-start;">
-          <!-- Student ID (smaller for 150-item) -->
-          <div class="id-section">
-            <div style="font-size: 7pt; font-weight: bold; margin-bottom: 2mm;">Student ID</div>
-            <div style="display: flex; gap: 0.4mm; margin-bottom: 2mm;">
-              ${Array(10).fill(0).map(() => '<div class="id-box"></div>').join('')}
-            </div>
-            <div style="display: flex; gap: 0.25mm;">
-              <div style="display: flex; flex-direction: column;">
-                ${[0,1,2,3,4,5,6,7,8,9].map(n => `<div style="height: 4mm; font-size: 6pt; font-weight: bold; display: flex; align-items: center; width: 7mm; justify-content: flex-end; padding-right: 0.5mm;">${n}</div>`).join('')}
-              </div>
-              ${Array(10).fill(0).map(() => `
-                <div style="display: flex; flex-direction: column;">
-                  ${[0,1,2,3,4,5,6,7,8,9].map(() => '<div class="bubble-id"></div>').join('')}
-                </div>
-              `).join('')}
-            </div>
+        <!-- Student ID section (full width) -->
+        <div class="id-section" style="margin-bottom: 4mm;">
+          <div style="font-size: 7pt; font-weight: bold; margin-bottom: 2mm;">Student ZipGrade ID</div>
+          <div style="display: flex; gap: 0.4mm; margin-bottom: 2mm;">
+            ${Array(10).fill(0).map(() => '<div class="id-box"></div>').join('')}
           </div>
-          
-          <!-- Q41-50, Q91-100, Q141-150 -->
-          <div style="display: flex; gap: 3mm;">
-            ${generateCompactQBlock(41, 50)}
-            ${generateCompactQBlock(91, 100)}
-            ${generateCompactQBlock(141, 150)}
+          <div style="display: flex; gap: 0.25mm;">
+            <div style="display: flex; flex-direction: column;">
+              ${[0,1,2,3,4,5,6,7,8,9].map(n => `<div style="height: 4mm; font-size: 6pt; font-weight: bold; display: flex; align-items: center; width: 7mm; justify-content: flex-end; padding-right: 0.5mm;">${n}</div>`).join('')}
+            </div>
+            ${Array(10).fill(0).map(() => `
+              <div style="display: flex; flex-direction: column;">
+                ${[0,1,2,3,4,5,6,7,8,9].map(() => '<div class="bubble-id"></div>').join('')}
+              </div>
+            `).join('')}
           </div>
         </div>
         
-        <!-- Bottom: 5 columns × 3 rows = 15 blocks for 150 items -->
-        <!-- Row 1: Q1-10, Q21-30, Q51-60, Q71-80, Q111-120 -->
+        <!-- Answer blocks: 3 rows x 5 columns = 15 blocks for 150 items -->
+        <!-- Row 1: Q1-10, Q31-40, Q61-70, Q91-100, Q121-130 -->
         <div style="display: flex; gap: 2.5mm; margin-bottom: 2mm;">
           ${generateCompactQBlock(1, 10)}
-          ${generateCompactQBlock(21, 30)}
-          ${generateCompactQBlock(51, 60)}
-          ${generateCompactQBlock(71, 80)}
-          ${generateCompactQBlock(111, 120)}
-        </div>
-        
-        <!-- Row 2: Q11-20, Q31-40, Q61-70, Q81-90, Q121-130 -->
-        <div style="display: flex; gap: 2.5mm; margin-bottom: 2mm;">
-          ${generateCompactQBlock(11, 20)}
           ${generateCompactQBlock(31, 40)}
           ${generateCompactQBlock(61, 70)}
-          ${generateCompactQBlock(81, 90)}
+          ${generateCompactQBlock(91, 100)}
           ${generateCompactQBlock(121, 130)}
         </div>
         
-        <!-- Row 3: Q101-110, Q131-140 (2 blocks) -->
-        <div style="display: flex; gap: 2.5mm;">
+        <!-- Row 2: Q11-20, Q41-50, Q71-80, Q101-110, Q131-140 -->
+        <div style="display: flex; gap: 2.5mm; margin-bottom: 2mm;">
+          ${generateCompactQBlock(11, 20)}
+          ${generateCompactQBlock(41, 50)}
+          ${generateCompactQBlock(71, 80)}
           ${generateCompactQBlock(101, 110)}
           ${generateCompactQBlock(131, 140)}
+        </div>
+        
+        <!-- Row 3: Q21-30, Q51-60, Q81-90, Q111-120, Q141-150 -->
+        <div style="display: flex; gap: 2.5mm;">
+          ${generateCompactQBlock(21, 30)}
+          ${generateCompactQBlock(51, 60)}
+          ${generateCompactQBlock(81, 90)}
+          ${generateCompactQBlock(111, 120)}
+          ${generateCompactQBlock(141, 150)}
         </div>
         
         <!-- Footer -->
