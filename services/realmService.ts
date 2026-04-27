@@ -17,6 +17,8 @@ export class OfflineGrade extends Realm.Object<OfflineGrade> {
   status!: string;
   scannedBy!: string;
   createdAt!: Date;
+  answers?: string;
+  isNullId?: boolean;
 
   static schema: Realm.ObjectSchema = {
     name: "OfflineGrade",
@@ -322,7 +324,7 @@ const STAGING_CONFIG: Realm.Configuration = {
     SystemKV,
     ScanHistory,
   ],
-  schemaVersion: 13,
+  schemaVersion: 14,
   onMigration: (oldRealm: any, newRealm: any) => {
     if (oldRealm.schemaVersion < 8) {
       const oldObjects = oldRealm.objects("OfflineClass");

@@ -34,7 +34,7 @@ export interface AnswerKeyData {
 
 export interface ExamConfiguration {
   metadata: ExamMetadata;
-  answerKey: AnswerKeyData;
+  answerKey: AnswerKeyData | null;
   templateLayout?: {
     name: string;
     totalQuestions: number;
