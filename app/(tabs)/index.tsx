@@ -18,6 +18,7 @@ import {
   Animated,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -464,6 +465,14 @@ export default function HomeScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#19B97C"
+              colors={["#19B97C"]}
+            />
+          }
         >
           <View style={styles.topRow}>
             <View style={styles.topSpacer} />

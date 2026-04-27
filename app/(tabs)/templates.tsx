@@ -18,6 +18,7 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -104,6 +105,7 @@ export default function TemplatesScreen() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Load dark mode preference
   useFocusEffect(
@@ -186,6 +188,16 @@ export default function TemplatesScreen() {
       setLoading(false);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([fetchTemplates(), fetchClassesAndExams()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshing]);
 
   // Filter templates
   const filteredTemplates = templates
@@ -695,6 +707,14 @@ export default function TemplatesScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContainer}
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#20BE7B"
+                colors={["#20BE7B"]}
+              />
+            }
           />
 
           {/* Pagination */}

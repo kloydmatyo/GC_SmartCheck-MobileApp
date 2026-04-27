@@ -8,6 +8,7 @@ import {
     KeyboardAvoidingView,
     Modal,
     Platform,
+    RefreshControl,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -72,6 +73,7 @@ export default function EditExamScreen() {
   const [showDiscardConfirmModal, setShowDiscardConfirmModal] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const displayStatus = structureLocked ? "Final" : status;
   const statusChipColors =
     displayStatus === "Final"
@@ -227,6 +229,16 @@ export default function EditExamScreen() {
       closeEditExam();
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (refreshing || saving) return;
+    setRefreshing(true);
+    try {
+      await loadExamData();
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -676,6 +688,14 @@ export default function EditExamScreen() {
           contentContainerStyle={styles.createSheetBodyContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#20BE7B"
+              colors={["#20BE7B"]}
+            />
+          }
         >
           <Text
             style={[

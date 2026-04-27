@@ -27,14 +27,14 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  serverTimestamp,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    serverTimestamp,
+    where,
 } from "firebase/firestore";
 import { Platform } from "react-native";
 import { GradingService } from "./gradingService";
@@ -327,8 +327,7 @@ export class GradeExportService {
         (r) => typeof r.dateScanned === "string" && r.dateScanned >= dateBound,
       );
       if (rows.length === 0) {
-        const label =
-          dateFilter === "today" ? "today" : "the past week";
+        const label = dateFilter === "today" ? "today" : "the past week";
         return {
           success: false,
           message: `No grade records found for ${label}.`,
@@ -463,7 +462,8 @@ export class GradeExportService {
   ): Promise<ExportResult> {
     onProgress?.("Building Excel file…", 55);
     const BOM = "\uFEFF";
-    const csvContent = BOM + GradeExportService.buildCsvString(rows, onProgress);
+    const csvContent =
+      BOM + GradeExportService.buildCsvString(rows, onProgress);
     const fileUri = getBaseDir() + fileName;
 
     onProgress?.("Writing file…", 80);
@@ -806,12 +806,185 @@ export class GradeExportService {
 
       // Report progress during large builds
       if (onProgress && rows.length > CSV_CHUNK_SIZE) {
-        const pct = Math.round(55 + (25 * Math.min(i + CSV_CHUNK_SIZE, rows.length)) / rows.length);
-        onProgress?.(`Processing rows ${i + 1}–${Math.min(i + CSV_CHUNK_SIZE, rows.length)}…`, pct);
+        const pct = Math.round(
+          55 + (25 * Math.min(i + CSV_CHUNK_SIZE, rows.length)) / rows.length,
+        );
+        onProgress?.(
+          `Processing rows ${i + 1}–${Math.min(i + CSV_CHUNK_SIZE, rows.length)}…`,
+          pct,
+        );
       }
     }
 
     return chunks.join("\n");
+  }
+
+  // ── Individual Student Export ────────────────────────────────────────────
+
+  /**
+   * Fetches all scanned result rows for an exam (current user only).
+   * Returns rows sorted by studentId ascending.
+   */
+  static async fetchStudentRows(examId: string): Promise<ExportableRow[]> {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return [];
+
+    const q = query(
+      collection(db, SCANNED_RESULTS),
+      where("examId", "==", examId),
+      where("scannedBy", "==", uid),
+    );
+    const snap = await getDocs(q);
+    const rows = snap.docs.map((d) => docToRow(d.data()));
+    rows.sort((a, b) => a.studentId.localeCompare(b.studentId));
+    return rows;
+  }
+
+  /**
+   * Exports a single student's result as CSV, Excel, or PDF.
+   * Generates a file and triggers the OS share sheet.
+   */
+  static async exportStudentResult(
+    row: ExportableRow,
+    examTitle: string,
+    examSubject: string,
+    format: ExportFormat,
+  ): Promise<ExportResult> {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return { success: false, message: "Not signed in." };
+
+    const safeTitle = examTitle
+      .replace(/[^a-zA-Z0-9 ]/g, "")
+      .replace(/\s+/g, "_")
+      .substring(0, 30);
+    const now = new Date();
+    const ts = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+      "_",
+      String(now.getHours()).padStart(2, "0"),
+      String(now.getMinutes()).padStart(2, "0"),
+    ].join("");
+    const ext = format === "pdf" ? "pdf" : "csv";
+    const fileName = `GC_${safeTitle}_${row.studentId}_${format.toUpperCase()}_${ts}.${ext}`;
+
+    try {
+      if (format === "csv") {
+        return await GradeExportService.generateCSV([row], examTitle, fileName);
+      } else if (format === "excel") {
+        return await GradeExportService.generateExcel(
+          [row],
+          examTitle,
+          fileName,
+        );
+      } else {
+        return await GradeExportService.generateStudentPDF(
+          row,
+          examTitle,
+          examSubject,
+          fileName,
+        );
+      }
+    } catch (err: any) {
+      return { success: false, message: err.message ?? "Export failed." };
+    }
+  }
+
+  /**
+   * Generates a single-student PDF result slip.
+   */
+  static async generateStudentPDF(
+    row: ExportableRow,
+    examTitle: string,
+    examSubject: string,
+    fileName: string,
+  ): Promise<ExportResult> {
+    const logoBase64 = await loadLogoBase64();
+    const exportDate = new Date().toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const statusColor = row.isPassing ? "#00a550" : "#e74c3c";
+    const statusBg = row.isPassing ? "#e8f5ee" : "#fdf0f0";
+    const gradeColors: Record<string, string> = {
+      A: "#00a550",
+      B: "#4a90e2",
+      C: "#f5a623",
+      D: "#e67e22",
+      F: "#e74c3c",
+    };
+    const gradeColor = gradeColors[row.gradeEquivalent] ?? "#333";
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #333; padding: 28px; background: #fff; }
+    .header { display: flex; flex-direction: row; align-items: center; border-bottom: 2px solid #00a550; padding-bottom: 12px; margin-bottom: 20px; }
+    .header img { width: 56px; height: 56px; margin-right: 14px; }
+    .header-text h1 { font-size: 15px; color: #00a550; margin-bottom: 2px; }
+    .header-text h2 { font-size: 12px; color: #555; font-weight: 500; }
+    .header-text p { font-size: 9px; color: #888; margin-top: 2px; }
+    .slip { border: 1px solid #ddd; border-radius: 10px; padding: 20px 24px; }
+    .slip-title { font-size: 13px; font-weight: 800; color: #1F2937; margin-bottom: 16px; }
+    .row { display: flex; flex-direction: row; justify-content: space-between; margin-bottom: 10px; }
+    .label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.4px; }
+    .value { font-size: 13px; font-weight: 700; color: #1F2937; }
+    .divider { border: none; border-top: 1px solid #eee; margin: 12px 0; }
+    .result-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-top: 14px; }
+    .grade-badge { font-size: 36px; font-weight: 900; color: ${gradeColor}; }
+    .status-badge { padding: 6px 18px; border-radius: 8px; background: ${statusBg}; color: ${statusColor}; font-size: 14px; font-weight: 800; }
+    .footer { margin-top: 20px; font-size: 8px; color: #aaa; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    ${logoBase64 ? `<img src="${logoBase64}" alt="Gordon College Logo"/>` : ""}
+    <div class="header-text">
+      <h1>Gordon College</h1>
+      <h2>${examTitle}${examSubject ? ` — ${examSubject}` : ""}</h2>
+      <p>Individual Result Slip • Generated ${exportDate}</p>
+    </div>
+  </div>
+  <div class="slip">
+    <div class="slip-title">Student Result</div>
+    <div class="row">
+      <div><div class="label">Student ID</div><div class="value">${row.studentId}</div></div>
+      <div><div class="label">Date Scanned</div><div class="value">${formatDate(row.dateScanned)}</div></div>
+    </div>
+    <hr class="divider"/>
+    <div class="row">
+      <div><div class="label">Score</div><div class="value">${row.score} / ${row.totalPoints}</div></div>
+      <div><div class="label">Percentage</div><div class="value">${row.percentage}%</div></div>
+    </div>
+    <div class="result-row">
+      <div><div class="label">Grade</div><div class="grade-badge">${row.gradeEquivalent}</div></div>
+      <div class="status-badge">${row.isPassing ? "PASSED" : "FAILED"}</div>
+    </div>
+  </div>
+  <div class="footer">GC SmartCheck • Gordon College • ${exportDate}</div>
+</body>
+</html>`;
+
+    const { uri } = await Print.printToFileAsync({ html });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, {
+        mimeType: "application/pdf",
+        dialogTitle: `Result Slip — ${row.studentId}`,
+        UTI: "com.adobe.pdf",
+      });
+    }
+    return {
+      success: true,
+      message: "Result slip exported.",
+      fileUri: uri,
+      recordCount: 1,
+    };
   }
 
   // ── Audit Logging (#7) ───────────────────────────────────────────────────

@@ -3,28 +3,28 @@ import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-  Alert,
-  Modal,
-  Platform,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Modal,
+    Platform,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import { ClassService } from "../../services/classService";
 import {
-  DuplicateScoreDetectionService,
-  DuplicateScoreMatch,
+    DuplicateScoreDetectionService,
+    DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
-import { GradingResult, ScanResult } from "../../types/scanning";
+import { GradingResult, ScanResult, StudentAnswer } from "../../types/scanning";
 import { DuplicateScoreWarningModal } from "../modals/DuplicateScoreWarningModal";
 import CameraScanner from "./CameraScanner";
 import ScanResults from "./ScanResults";
@@ -37,6 +37,375 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error("timeout")), ms),
     ),
   ]);
+}
+
+function resolveChoicesPerQuestion(examData: any): 4 | 5 {
+  const rawChoiceCount =
+    examData?.choicesPerQuestion ??
+    examData?.choices_per_item ??
+    examData?.choicesPerItem;
+  const rawChoiceFormat =
+    examData?.choiceFormat ??
+    examData?.choicesFormat ??
+    examData?.choice_format;
+
+  if (rawChoiceCount === 5 || rawChoiceCount === "5") return 5;
+  if (rawChoiceCount === 4 || rawChoiceCount === "4") return 4;
+
+  if (typeof rawChoiceFormat === "string") {
+    const normalized = rawChoiceFormat.trim().toUpperCase();
+    if (
+      normalized === "A-E" ||
+      normalized === "AE" ||
+      normalized.includes("5")
+    ) {
+      return 5;
+    }
+    if (
+      normalized === "A-D" ||
+      normalized === "AD" ||
+      normalized.includes("4")
+    ) {
+      return 4;
+    }
+  }
+
+  return 4;
+}
+
+type Scan200LocalTransform =
+  | "identity"
+  | "reverseAll"
+  | "physicalRowMajor"
+  | "physicalRowMajorReverse"
+  | "topBottomSwap"
+  | "reverseRowsWithinBlocks";
+
+interface Scan200MappingCandidate {
+  name: string;
+  swapPages: boolean;
+  mirrorChoices: boolean;
+  localTransform: Scan200LocalTransform;
+}
+
+interface Scan200PageProfile {
+  name: string;
+  mirrorChoices: boolean;
+  localTransform: Scan200LocalTransform;
+}
+
+const PHYSICAL_BLOCK_STARTS_200 = [1, 21, 41, 61, 81, 11, 31, 51, 71, 91];
+
+function find200Block(localQuestion: number): {
+  blockIndex: number;
+  row: number;
+} {
+  for (let i = 0; i < PHYSICAL_BLOCK_STARTS_200.length; i++) {
+    const start = PHYSICAL_BLOCK_STARTS_200[i];
+    if (localQuestion >= start && localQuestion < start + 10) {
+      return { blockIndex: i, row: localQuestion - start };
+    }
+  }
+
+  return {
+    blockIndex: Math.floor((localQuestion - 1) / 10),
+    row: (localQuestion - 1) % 10,
+  };
+}
+
+function localQuestionFromPhysicalBlock(
+  blockIndex: number,
+  row: number,
+): number {
+  const safeBlock = Math.max(0, Math.min(9, blockIndex));
+  const safeRow = Math.max(0, Math.min(9, row));
+  return PHYSICAL_BLOCK_STARTS_200[safeBlock] + safeRow;
+}
+
+function transform200LocalQuestion(
+  localQuestion: number,
+  transform: Scan200LocalTransform,
+): number {
+  const { blockIndex, row } = find200Block(localQuestion);
+
+  switch (transform) {
+    case "reverseAll":
+      return 101 - localQuestion;
+    case "physicalRowMajor":
+      return blockIndex * 10 + row + 1;
+    case "physicalRowMajorReverse":
+      return (9 - blockIndex) * 10 + (9 - row) + 1;
+    case "topBottomSwap":
+      return localQuestionFromPhysicalBlock(
+        blockIndex < 5 ? blockIndex + 5 : blockIndex - 5,
+        row,
+      );
+    case "reverseRowsWithinBlocks":
+      return localQuestionFromPhysicalBlock(blockIndex, 9 - row);
+    default:
+      return localQuestion;
+  }
+}
+
+function mirrorChoice(choice: string): string {
+  switch (choice) {
+    case "A":
+      return "E";
+    case "B":
+      return "D";
+    case "D":
+      return "B";
+    case "E":
+      return "A";
+    default:
+      return choice;
+  }
+}
+
+function remap200Answers(
+  answers: StudentAnswer[],
+  candidate: Scan200MappingCandidate,
+): StudentAnswer[] {
+  return answers
+    .map((answer) => {
+      if (answer.questionNumber < 1 || answer.questionNumber > 200) {
+        return answer;
+      }
+
+      const pageIndex = answer.questionNumber <= 100 ? 0 : 1;
+      const localQuestion = ((answer.questionNumber - 1) % 100) + 1;
+      const mappedPageIndex = candidate.swapPages ? 1 - pageIndex : pageIndex;
+      const mappedLocal = transform200LocalQuestion(
+        localQuestion,
+        candidate.localTransform,
+      );
+
+      return {
+        questionNumber: mappedPageIndex * 100 + mappedLocal,
+        selectedAnswer: candidate.mirrorChoices
+          ? mirrorChoice(answer.selectedAnswer)
+          : answer.selectedAnswer,
+      };
+    })
+    .sort((a, b) => a.questionNumber - b.questionNumber);
+}
+
+function remap200PageAnswers(
+  answers: StudentAnswer[],
+  targetPageIndex: 0 | 1,
+  profile: Scan200PageProfile,
+): StudentAnswer[] {
+  return answers
+    .map((answer) => {
+      const localQuestion = ((answer.questionNumber - 1) % 100) + 1;
+      const mappedLocal = transform200LocalQuestion(
+        localQuestion,
+        profile.localTransform,
+      );
+
+      return {
+        questionNumber: targetPageIndex * 100 + mappedLocal,
+        selectedAnswer: profile.mirrorChoices
+          ? mirrorChoice(answer.selectedAnswer)
+          : answer.selectedAnswer,
+      };
+    })
+    .sort((a, b) => a.questionNumber - b.questionNumber);
+}
+
+function scoreAnswersAgainstKeyRange(
+  answers: StudentAnswer[],
+  answerKey: string[],
+  startQuestion: number,
+  endQuestion: number,
+): number {
+  const answerMap = new Map(
+    answers.map((answer) => [answer.questionNumber, answer.selectedAnswer]),
+  );
+  let score = 0;
+
+  for (let q = startQuestion; q <= endQuestion; q++) {
+    const expected = String(answerKey[q - 1] || "").toUpperCase();
+    if (expected && answerMap.get(q) === expected) score++;
+  }
+
+  return score;
+}
+
+function build200PageProfiles(): Scan200PageProfile[] {
+  const transforms: Scan200LocalTransform[] = [
+    "identity",
+    "reverseAll",
+    "physicalRowMajor",
+    "physicalRowMajorReverse",
+    "topBottomSwap",
+    "reverseRowsWithinBlocks",
+  ];
+  const profiles: Scan200PageProfile[] = [];
+
+  for (const localTransform of transforms) {
+    for (const mirrorChoices of [false, true]) {
+      profiles.push({
+        name: `${localTransform}${mirrorChoices ? "+mirrorChoices" : ""}`,
+        mirrorChoices,
+        localTransform,
+      });
+    }
+  }
+
+  return profiles;
+}
+
+function scoreAnswersAgainstKey(
+  answers: StudentAnswer[],
+  answerKey: string[],
+): number {
+  const answerMap = new Map(
+    answers.map((answer) => [answer.questionNumber, answer.selectedAnswer]),
+  );
+  let score = 0;
+
+  for (let i = 0; i < Math.min(200, answerKey.length); i++) {
+    const expected = String(answerKey[i] || "").toUpperCase();
+    if (expected && answerMap.get(i + 1) === expected) score++;
+  }
+
+  return score;
+}
+
+function normalize200ScanMapping(
+  scanResult: ScanResult,
+  answerKey: string[],
+): ScanResult {
+  if (answerKey.length < 150 || scanResult.answers.length < 150) {
+    return scanResult;
+  }
+
+  const candidates: Scan200MappingCandidate[] = [];
+  const pageProfiles = build200PageProfiles();
+
+  for (const localTransform of [
+    "identity",
+    "reverseAll",
+    "physicalRowMajor",
+    "physicalRowMajorReverse",
+    "topBottomSwap",
+    "reverseRowsWithinBlocks",
+  ] as const) {
+    for (const swapPages of [false, true]) {
+      for (const mirrorChoices of [false, true]) {
+        candidates.push({
+          name: `${localTransform}${swapPages ? "+swapPages" : ""}${mirrorChoices ? "+mirrorChoices" : ""}`,
+          swapPages,
+          mirrorChoices,
+          localTransform,
+        });
+      }
+    }
+  }
+
+  const identity: Scan200MappingCandidate = {
+    name: "identity",
+    swapPages: false,
+    mirrorChoices: false,
+    localTransform: "identity",
+  };
+  const baselineScore = scoreAnswersAgainstKey(scanResult.answers, answerKey);
+  let bestCandidate = identity;
+  let bestAnswers = scanResult.answers;
+  let bestScore = baselineScore;
+  let bestMode = "global";
+
+  for (const candidate of candidates) {
+    const mappedAnswers = remap200Answers(scanResult.answers, candidate);
+    const score = scoreAnswersAgainstKey(mappedAnswers, answerKey);
+    if (score > bestScore) {
+      bestCandidate = candidate;
+      bestAnswers = mappedAnswers;
+      bestScore = score;
+      bestMode = "global";
+    }
+  }
+
+  const pageBuckets: [StudentAnswer[], StudentAnswer[]] = [
+    scanResult.answers.filter(
+      (answer) => answer.questionNumber >= 1 && answer.questionNumber <= 100,
+    ),
+    scanResult.answers.filter(
+      (answer) => answer.questionNumber >= 101 && answer.questionNumber <= 200,
+    ),
+  ];
+
+  for (const swapPages of [false, true]) {
+    const sourcePage0 = swapPages ? pageBuckets[1] : pageBuckets[0];
+    const sourcePage1 = swapPages ? pageBuckets[0] : pageBuckets[1];
+    let bestPage0Profile = pageProfiles[0];
+    let bestPage0Answers = sourcePage0;
+    let bestPage0Score = Number.NEGATIVE_INFINITY;
+    let bestPage1Profile = pageProfiles[0];
+    let bestPage1Answers = sourcePage1;
+    let bestPage1Score = Number.NEGATIVE_INFINITY;
+
+    for (const profile of pageProfiles) {
+      const mappedPage0 = remap200PageAnswers(sourcePage0, 0, profile);
+      const scorePage0 = scoreAnswersAgainstKeyRange(
+        mappedPage0,
+        answerKey,
+        1,
+        100,
+      );
+      if (scorePage0 > bestPage0Score) {
+        bestPage0Profile = profile;
+        bestPage0Answers = mappedPage0;
+        bestPage0Score = scorePage0;
+      }
+
+      const mappedPage1 = remap200PageAnswers(sourcePage1, 1, profile);
+      const scorePage1 = scoreAnswersAgainstKeyRange(
+        mappedPage1,
+        answerKey,
+        101,
+        200,
+      );
+      if (scorePage1 > bestPage1Score) {
+        bestPage1Profile = profile;
+        bestPage1Answers = mappedPage1;
+        bestPage1Score = scorePage1;
+      }
+    }
+
+    const combinedAnswers = [...bestPage0Answers, ...bestPage1Answers].sort(
+      (a, b) => a.questionNumber - b.questionNumber,
+    );
+    const combinedScore = bestPage0Score + bestPage1Score;
+    if (combinedScore > bestScore) {
+      bestCandidate = {
+        name: `page1:${bestPage0Profile.name}|page2:${bestPage1Profile.name}${swapPages ? "|swapPages" : ""}`,
+        swapPages,
+        mirrorChoices:
+          bestPage0Profile.mirrorChoices && bestPage1Profile.mirrorChoices,
+        localTransform: "identity",
+      };
+      bestAnswers = combinedAnswers;
+      bestScore = combinedScore;
+      bestMode = "per-page";
+    }
+  }
+
+  const improvement = bestScore - baselineScore;
+  const shouldApply = false;
+
+  console.log(
+    `[ScannerScreen] 200Q mapping diagnostic: baseline=${baselineScore}/200, best=${bestScore}/200 (${bestMode}:${bestCandidate.name}), improvement=${improvement}, applied=${shouldApply}`,
+  );
+
+  return shouldApply
+    ? {
+        ...scanResult,
+        answers: bestAnswers,
+        confidence: Math.max(scanResult.confidence || 0, 0.92),
+      }
+    : scanResult;
 }
 
 type ScannerState = "exam-select" | "camera" | "results";
@@ -61,7 +430,7 @@ export default function ScannerScreen({
   const [activeExamId, setActiveExamId] = useState("");
   const [examQuestionCount, setExamQuestionCount] = useState(20); // Store exam question count
   const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(
-    5,
+    4,
   );
 
   // class/exam dropdown state
@@ -85,7 +454,7 @@ export default function ScannerScreen({
     if (resetFlag) {
       setActiveExamId("");
       setExamQuestionCount(20);
-      setExamChoicesPerQuestion(5);
+      setExamChoicesPerQuestion(4);
       setSelectedClass(null);
       setSelectedExam(null);
       // Reset 2-stage state
@@ -193,8 +562,12 @@ export default function ScannerScreen({
     if (selectedExam) {
       setActiveExamId(selectedExam.id);
       const questionCount = selectedExam.num_items || 20;
+      const choicesPerQuestion = resolveChoicesPerQuestion(selectedExam);
       setExamQuestionCount(questionCount);
-      setExamChoicesPerQuestion(selectedExam.choiceFormat === "A-E" ? 5 : 4);
+      setExamChoicesPerQuestion(choicesPerQuestion);
+      console.log(
+        `[ScannerScreen] Selected exam scan config: questions=${questionCount}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+      );
       setCachedAnswerKey(
         Array.isArray(selectedExam.answerKey?.answers)
           ? selectedExam.answerKey.answers
@@ -231,7 +604,10 @@ export default function ScannerScreen({
           let answers: string[] = [];
           if (Array.isArray(akData.answers) && akData.answers.length > 0) {
             answers = akData.answers as string[];
-          } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+          } else if (
+            Array.isArray(akData.questionSettings) &&
+            akData.questionSettings.length > 0
+          ) {
             answers = (akData.questionSettings as any[])
               .slice()
               .sort((a, b) => a.questionNumber - b.questionNumber)
@@ -243,9 +619,13 @@ export default function ScannerScreen({
 
             // Also update the Realm cache so offline scans use the fresh key
             try {
-              const { RealmService } = await import("../../services/realmService");
+              const { RealmService } =
+                await import("../../services/realmService");
               const cacheRealm = await RealmService.getCacheRealm();
-              const cached = cacheRealm.objectForPrimaryKey<any>("QuizCache", activeExamId);
+              const cached = cacheRealm.objectForPrimaryKey<any>(
+                "QuizCache",
+                activeExamId,
+              );
               if (cached) {
                 cacheRealm.write(() => {
                   cached.answerKey = JSON.stringify({ ...akData, answers });
@@ -253,7 +633,10 @@ export default function ScannerScreen({
                 });
               }
             } catch (cacheErr) {
-              console.warn("[ScannerScreen] Realm cache update skipped:", cacheErr);
+              console.warn(
+                "[ScannerScreen] Realm cache update skipped:",
+                cacheErr,
+              );
             }
           }
         } else {
@@ -313,13 +696,23 @@ export default function ScannerScreen({
           // Check the selected class roster first (fastest, no extra query)
           if (selectedClass) {
             const classSnap = await withTimeout(
-              getDocs(query(collection(db, "classes"), where("__name__", "==", selectedClass.id))),
+              getDocs(
+                query(
+                  collection(db, "classes"),
+                  where("__name__", "==", selectedClass.id),
+                ),
+              ),
               1200,
             );
             if (!classSnap.empty) {
               const classData = classSnap.docs[0].data();
               const roster: any[] = classData.students || [];
-              if (roster.some((s: any) => s.student_id === studentId || s.studentId === studentId)) {
+              if (
+                roster.some(
+                  (s: any) =>
+                    s.student_id === studentId || s.studentId === studentId,
+                )
+              ) {
                 isValidId = true;
               }
             }
@@ -328,8 +721,24 @@ export default function ScannerScreen({
           // Fallback: query the standalone students collection (both field name variants)
           if (!isValidId) {
             const [snapSnake, snapCamel] = await Promise.all([
-              withTimeout(getDocs(query(collection(db, "students"), where("student_id", "==", studentId))), 1200),
-              withTimeout(getDocs(query(collection(db, "students"), where("studentId", "==", studentId))), 1200),
+              withTimeout(
+                getDocs(
+                  query(
+                    collection(db, "students"),
+                    where("student_id", "==", studentId),
+                  ),
+                ),
+                1200,
+              ),
+              withTimeout(
+                getDocs(
+                  query(
+                    collection(db, "students"),
+                    where("studentId", "==", studentId),
+                  ),
+                ),
+                1200,
+              ),
             ]);
             isValidId = !snapSnake.empty || !snapCamel.empty;
           }
@@ -354,6 +763,7 @@ export default function ScannerScreen({
       // ── 2. Fetch Answer Key (Fast Timeout) ──
       const rawCount = scanResult.answers?.length || 20;
       let answerKey: string[] = cachedAnswerKey ?? [];
+      let usedDefaultAnswerKey = false;
 
       if (answerKey.length === 0) {
         try {
@@ -368,13 +778,17 @@ export default function ScannerScreen({
           if (!akSnap.empty) {
             let best = akSnap.docs[0];
             akSnap.docs.slice(1).forEach((d) => {
-              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+              if ((d.data().version ?? 0) > (best.data().version ?? 0))
+                best = d;
             });
             const akData = best.data();
 
             if (Array.isArray(akData.answers) && akData.answers.length > 0) {
               answerKey = akData.answers as string[];
-            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+            } else if (
+              Array.isArray(akData.questionSettings) &&
+              akData.questionSettings.length > 0
+            ) {
               answerKey = (akData.questionSettings as any[])
                 .slice()
                 .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
@@ -394,6 +808,7 @@ export default function ScannerScreen({
           answerKey = GradingService.getDefaultAnswerKey(rawCount).map(
             (ak) => ak.correctAnswer,
           );
+          usedDefaultAnswerKey = true;
         }
       }
 
@@ -402,10 +817,14 @@ export default function ScannerScreen({
         correctAnswer: answer,
         points: 1,
       }));
+      const normalizedScanResult =
+        examQuestionCount === 200 && !usedDefaultAnswerKey
+          ? normalize200ScanMapping(scanResult, answerKey)
+          : scanResult;
 
       // ── 3. Grade & Duplicate Check ──
       const result = GradingService.gradeAnswers(
-        scanResult,
+        normalizedScanResult,
         answerKeyFormatted,
       );
       result.metadata = { ...result.metadata, isValidId: isValidId } as any;
@@ -623,7 +1042,7 @@ export default function ScannerScreen({
         const sQuiz = sQuizzes[0];
         foundExamId = `staging_${sQuiz._id.toHexString()}`;
         questionCount = sQuiz.questionCount || 20;
-        choicesPerQuestion = sQuiz.choiceFormat === "A-E" ? 5 : 4;
+        choicesPerQuestion = sQuiz.choiceFormat === "A-D" ? 4 : 5;
       }
 
       // 2. Check Cache Realm (Downloaded/Synced exams)
@@ -636,7 +1055,7 @@ export default function ScannerScreen({
           const cQuiz = cQuizzes[0];
           foundExamId = cQuiz.id;
           questionCount = cQuiz.questionCount || 20;
-          choicesPerQuestion = cQuiz.choiceFormat === "A-E" ? 5 : 4;
+          choicesPerQuestion = cQuiz.choiceFormat === "A-D" ? 4 : 5;
         }
       }
 
@@ -654,7 +1073,7 @@ export default function ScannerScreen({
               const data = snap.docs[0].data();
               foundExamId = snap.docs[0].id;
               questionCount = data.num_items || 20;
-              choicesPerQuestion = data.choiceFormat === "A-E" ? 5 : 4;
+              choicesPerQuestion = data.choiceFormat === "A-D" ? 4 : 5;
             }
           } catch (firestoreErr) {
             console.warn(
@@ -706,7 +1125,7 @@ export default function ScannerScreen({
     setTwoStageData(null);
     setTwoStageCurrent(1);
     setShowPage1Confirmation(false);
-    setExamChoicesPerQuestion(5);
+    setExamChoicesPerQuestion(4);
     setCachedAnswerKey(null);
     // clear selection so reopening starts fresh
     setSelectedClass(null);
