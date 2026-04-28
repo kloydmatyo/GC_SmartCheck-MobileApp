@@ -456,16 +456,18 @@ export class ExamService {
         let newId = "";
         stagingRealm.write(() => {
           const sQuiz = stagingRealm.create<OfflineQuiz>("OfflineQuiz", {
-            title: examData.title,
+            title: examData.title || "Untitled Exam",
             subject: examData.subject || examData.className || "General",
-            questionCount: examData.num_items,
+            className: examData.className || "",
+            classId: examData.classId || "",
+            questionCount: Number(examData.num_items || 0),
             status: "Draft",
             createdBy: currentUser.uid,
             createdAt: new Date(),
             answerKey: examData.answerKeyJson || "",
             instructorId: examData.instructorId || "",
             examCode: examData.examCode || "",
-            choicesPerItem: examData.choices_per_item || 4,
+            choicesPerItem: Number(examData.choices_per_item || 4),
           });
           newId = (sQuiz as any)._id.toHexString();
         });
@@ -494,7 +496,7 @@ export class ExamService {
             status: "Draft",
             structureLocked: Boolean(examData.structureLocked),
             papersCount: 0,
-            questionCount: examData.num_items || 0,
+            questionCount: Number(examData.num_items || 0),
             answerKey: "",
             createdBy: currentUser.uid,
             createdAt: new Date(),
@@ -502,7 +504,7 @@ export class ExamService {
             version: 1,
             instructorId: examData.instructorId || "",
             examCode: examData.examCode || "",
-            choicesPerItem: examData.choices_per_item || 4,
+            choicesPerItem: Number(examData.choices_per_item || 4),
           },
           Realm.UpdateMode.Modified,
         );

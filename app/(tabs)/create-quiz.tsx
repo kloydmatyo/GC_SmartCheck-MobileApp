@@ -65,7 +65,7 @@ export default function CreateQuizScreen() {
       ? router.replace(
           `/(tabs)/class-details?classId=${classIdParam}&tab=exams`,
         )
-      : router.replace("/(tabs)/quizzes");
+      : router.replace("/(tabs)/index");
   const [loading, setLoading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
