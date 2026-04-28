@@ -32,17 +32,18 @@ export class ExamService {
       const currentUser = auth.currentUser;
       if (!currentUser) return [];
 
-      // 1. Load from Staging & Cache Realm - FASTEST
+      // 1. Load from Staging & Cache Realm
       const stagingRealm = await RealmService.getStagingRealm();
       const staging = stagingRealm.objects<OfflineQuiz>("OfflineQuiz");
 
       const cacheRealm = await RealmService.getCacheRealm();
       const cached = cacheRealm.objects<QuizCache>("QuizCache");
 
-      const localExams: any[] = [];
+      const examMap = new Map<string, any>();
 
+      // Load cached exams first
       cached.forEach((q) => {
-        localExams.push({
+        examMap.set(q.id, {
           id: q.id,
           title: q.title,
           class: q.subject,
@@ -61,12 +62,15 @@ export class ExamService {
         });
       });
 
+      // Overlay staging exams
       staging.forEach((s) => {
-        localExams.push({
-          id: `staging_${s._id.toHexString()}`,
+        const stagingId = `staging_${s._id.toHexString()}`;
+        examMap.set(stagingId, {
+          id: stagingId,
           title: s.title,
           class: s.subject,
-          classId: (s as any).classId || "",
+          classId: s.classId || "",
+          className: s.className || "",
           date: s.createdAt.toLocaleDateString(),
           createdAt: s.createdAt,
           updatedAt: s.createdAt,
@@ -82,131 +86,107 @@ export class ExamService {
       const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
 
-      // When online, always fetch fresh from Firestore to avoid stale cache.
-      // Offline-created (staging) exams are merged in below.
-      if (!isOnline && localExams.length > 0) {
-        console.log(
-          `[ExamService] Offline - returning ${localExams.length} cached exams.`,
-        );
-        return localExams.sort(
-          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-        );
-      }
-
       if (isOnline) {
-        console.log("[ExamService] Online - fetching fresh from Firestore...");
-        const q = query(
-          collection(db, "exams"),
-          where("createdBy", "==", currentUser.uid),
-        );
-        const snap = await getDocs(q);
-
-        const examIds = snap.docs.map((doc) => doc.id);
-        const answerKeysMap: Record<string, any> = {};
-
-        // Firestore 'in' queries are limited to 30 elements.
-        const chunkArray = (arr: string[], size: number) =>
-          Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
-            arr.slice(i * size, i * size + size),
+        try {
+          console.log("[ExamService] Online - fetching fresh from Firestore...");
+          const q = query(
+            collection(db, "exams"),
+            where("createdBy", "==", currentUser.uid),
           );
+          // Set a timeout for getDocs to avoid hanging
+          const snap = await Promise.race([
+            getDocs(q),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 10000))
+          ]) as any;
 
-        const chunks = chunkArray(examIds, 30);
+          if (snap) {
+            const examIds = snap.docs.map((doc: any) => doc.id);
+            const answerKeysMap: Record<string, any> = {};
 
-        for (const chunk of chunks) {
-          if (chunk.length === 0) continue;
-          const akQuery = query(
-            collection(db, "answerKeys"),
-            where("examId", "in", chunk),
-          );
-          const akSnap = await getDocs(akQuery);
-          akSnap.docs.forEach((doc) => {
-            const data = doc.data();
-            const eId = data.examId;
-            if (
-              !answerKeysMap[eId] ||
-              (data.version || 0) > (answerKeysMap[eId].version || 0)
-            ) {
-              answerKeysMap[eId] = data;
+            // Firestore 'in' queries are limited to 30 elements.
+            const chunkArray = (arr: string[], size: number) =>
+              Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+                arr.slice(i * size, i * size + size),
+              );
+
+            const chunks = chunkArray(examIds, 30);
+
+            for (const chunk of chunks) {
+              if (chunk.length === 0) continue;
+              const akQuery = query(
+                collection(db, "answerKeys"),
+                where("examId", "in", chunk),
+              );
+              const akSnap = await getDocs(akQuery);
+              akSnap.docs.forEach((doc) => {
+                const data = doc.data();
+                const eId = data.examId;
+                if (
+                  !answerKeysMap[eId] ||
+                  (data.version || 0) > (answerKeysMap[eId].version || 0)
+                ) {
+                  answerKeysMap[eId] = data;
+                }
+              });
             }
-          });
+
+            // Update cache and merge into map
+            cacheRealm.write(() => {
+              snap.docs.forEach((docSnap: any) => {
+                const data = docSnap.data();
+                const eId = docSnap.id;
+                const akJson = answerKeysMap[eId]
+                  ? JSON.stringify(answerKeysMap[eId])
+                  : "";
+
+                const cachedItem = {
+                  id: eId,
+                  title: data.title || "Untitled Exam",
+                  subject: data.subject || data.className || "No Subject",
+                  className: data.className || "",
+                  classId: data.classId || "",
+                  isArchived: data.isArchived || false,
+                  status: data.status || "Draft",
+                  structureLocked: Boolean(data.structureLocked),
+                  papersCount: data.scanned_papers || 0,
+                  questionCount: data.num_items || 0,
+                  answerKey: akJson,
+                  createdBy: data.createdBy,
+                  createdAt: data.createdAt?.toDate?.() || new Date(),
+                  updatedAt: data.updatedAt?.toDate?.() || new Date(),
+                  version: data.version || 1,
+                  instructorId: data.instructorId || "",
+                  examCode: data.examCode || data.room || "",
+                  choicesPerItem: data.choices_per_item || 4,
+                };
+
+                cacheRealm.create("QuizCache", cachedItem, Realm.UpdateMode.Modified);
+
+                // Update map with fresh Firestore data
+                examMap.set(eId, {
+                  ...cachedItem,
+                  class: cachedItem.subject,
+                  date: cachedItem.createdAt.toLocaleDateString(),
+                  papers: cachedItem.papersCount,
+                  num_items: cachedItem.questionCount,
+                  choices_per_item: cachedItem.choicesPerItem,
+                  isDownloaded: true,
+                  isStaging: false,
+                });
+              });
+            });
+          }
+        } catch (onlineError) {
+          console.warn("[ExamService] Online fetch failed, using local only:", onlineError);
         }
-
-        // Update cache
-        cacheRealm.write(() => {
-          snap.docs.forEach((docSnap) => {
-            const data = docSnap.data();
-            const eId = docSnap.id;
-            const akJson = answerKeysMap[eId]
-              ? JSON.stringify(answerKeysMap[eId])
-              : "";
-
-            cacheRealm.create(
-              "QuizCache",
-              {
-                id: eId,
-                title: data.title || "Untitled Exam",
-                subject: data.subject || data.className || "No Subject",
-                className: data.className || "",
-                classId: data.classId || "",
-                isArchived: data.isArchived || false,
-                status: data.status || "Draft",
-                structureLocked: Boolean(data.structureLocked),
-                papersCount: data.scanned_papers || 0,
-                questionCount: data.num_items || 0,
-                answerKey: akJson,
-                createdBy: data.createdBy,
-                createdAt: data.createdAt?.toDate?.() || new Date(),
-                updatedAt: data.updatedAt?.toDate?.() || new Date(),
-                version: data.version || 1,
-                instructorId: data.instructorId || "",
-                examCode: data.examCode || data.room || "",
-                choicesPerItem: data.choices_per_item || 4,
-              },
-              Realm.UpdateMode.Modified,
-            );
-          });
-        });
-
-        // Map results for UI
-        const firestoreExams = snap.docs.map((docSnap) => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            title: data.title || "Untitled Exam",
-            class: data.subject || data.className || "No Subject",
-            isArchived: data.isArchived || false,
-            date:
-              data.created_at ||
-              data.createdAt?.toDate?.().toLocaleDateString() ||
-              "No Date",
-            papers: data.scanned_papers || 0,
-            status: data.status || "Draft",
-            isDownloaded: true,
-            isStaging: false,
-          };
-        });
-
-        const combined = [...firestoreExams];
-        staging.forEach((s) => {
-          combined.push({
-            id: `staging_${s._id.toHexString()}`,
-            title: s.title,
-            class: s.subject,
-            date: s.createdAt.toLocaleDateString(),
-            papers: 0,
-            status: s.status,
-            isStaging: true,
-            isDownloaded: true,
-          } as any);
-        });
-        return combined;
       }
 
-      return localExams;
+      return Array.from(examMap.values()).sort(
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+      );
     } catch (error) {
-      console.error("Error fetching exams:", error);
-      throw error;
+      console.error("Error in getExamsByUser:", error);
+      return []; // Return empty instead of crashing
     }
   }
 
@@ -1416,6 +1396,31 @@ export class ExamService {
           "exams",
         );
 
+        if (examId.startsWith("staging_")) {
+          console.log("[ExamService] Updating staging record...");
+          const stagingRealm = await RealmService.getStagingRealm();
+          const hexId = examId.replace("staging_", "");
+          const stagingExam = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+            "OfflineQuiz",
+            new Realm.BSON.ObjectId(hexId),
+          );
+          if (stagingExam) {
+            stagingRealm.write(() => {
+              if (updateData.title !== undefined)
+                stagingExam.title = updateData.title;
+              if (updateData.subject !== undefined && updateData.subject !== null)
+                stagingExam.subject = updateData.subject;
+              if (updateData.num_items !== undefined)
+                stagingExam.questionCount = updateData.num_items;
+              if (updateData.choices_per_item !== undefined)
+                stagingExam.choicesPerItem = updateData.choices_per_item;
+              stagingExam.createdAt = new Date();
+            });
+            console.log("[ExamService] Staging updated");
+          }
+          return 1; // Return dummy version for staging
+        }
+
         const cacheRealm = await RealmService.getCacheRealm();
         const existingCachedExam = cacheRealm.objectForPrimaryKey<QuizCache>(
           "QuizCache",
@@ -1492,7 +1497,31 @@ export class ExamService {
 
           console.log("[ExamService] ✅ Update queued to AsyncStorage");
 
-          if (existingCachedExam) {
+          if (examId.startsWith("staging_")) {
+            console.log("[ExamService] 📝 Updating staging record...");
+            const stagingRealm = await RealmService.getStagingRealm();
+            const hexId = examId.replace("staging_", "");
+            const stagingExam = stagingRealm.objectForPrimaryKey<OfflineQuiz>(
+              "OfflineQuiz",
+              new Realm.BSON.ObjectId(hexId),
+            );
+            if (stagingExam) {
+              stagingRealm.write(() => {
+                if (updateData.title !== undefined)
+                  stagingExam.title = updateData.title;
+                if (updateData.subject !== undefined && updateData.subject !== null)
+                  stagingExam.subject = updateData.subject;
+                if (updateData.num_items !== undefined)
+                  stagingExam.questionCount = updateData.num_items;
+                if (updateData.choices_per_item !== undefined)
+                  stagingExam.choicesPerItem = updateData.choices_per_item;
+                stagingExam.createdAt = new Date(); // Update timestamp to show as fresh
+              });
+              console.log("[ExamService] ✅ Staging updated");
+            } else {
+              console.log("[ExamService] ⚠️  Staging exam not found to update");
+            }
+          } else if (existingCachedExam) {
             console.log("[ExamService] 📝 Updating local cache...");
             cacheRealm.write(() => {
               if (updateData.title !== undefined)
