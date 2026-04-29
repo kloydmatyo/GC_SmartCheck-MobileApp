@@ -52,6 +52,8 @@ interface QuestionRowProps {
   onSelect: (questionNumber: number, answer: string) => void;
 }
 
+const QUESTION_ROW_HEIGHT = 96;
+
 const QuestionRow = React.memo(
   ({
     item,
@@ -80,14 +82,20 @@ const QuestionRow = React.memo(
           style={[
             styles.questionNumberWrap,
             isHighlighted && styles.questionNumberWrapHighlighted,
+            isUnanswered && styles.questionNumberWrapUnanswered,
           ]}
         >
+          {isUnanswered ? (
+            <Text style={styles.unansweredAsterisk}>*</Text>
+          ) : null}
           <Text
             style={[
               styles.questionNumber,
               {
                 color: isHighlighted
                   ? "#14925F"
+                  : isUnanswered
+                    ? "#DC2626"
                   : darkModeEnabled
                     ? "#e7f1eb"
                     : "#98A1B2",
@@ -96,21 +104,19 @@ const QuestionRow = React.memo(
           >
             {item.questionNumber}.
           </Text>
-          {isUnanswered ? (
-            <Ionicons
-              name="bookmark"
-              size={14}
-              color="#F59E0B"
-              style={styles.unansweredBookmark}
-            />
-          ) : null}
         </View>
-        <View style={styles.choicesContainer}>
+        <View
+          style={[
+            styles.choicesContainer,
+            isUnanswered && styles.choicesContainerUnanswered,
+          ]}
+        >
           {choices.map((choice) => (
             <TouchableOpacity
               key={choice}
               style={[
                 styles.choiceButton,
+                isUnanswered && styles.choiceButtonUnanswered,
                 darkModeEnabled && {
                   backgroundColor: "#2a3a33",
                   borderColor: "#34483f",
@@ -127,6 +133,7 @@ const QuestionRow = React.memo(
               <Text
                 style={[
                   styles.choiceText,
+                  isUnanswered && styles.choiceTextUnanswered,
                   darkModeEnabled && { color: "#9db1a6" },
                   item.answer === choice && styles.choiceTextSelected,
                 ]}
@@ -187,11 +194,13 @@ export default function EditAnswerKeyScreen() {
   const [incompleteCount, setIncompleteCount] = useState(0);
   const [unansweredModalVisible, setUnansweredModalVisible] = useState(false);
   const [discardConfirmVisible, setDiscardConfirmVisible] = useState(false);
+  const [exitIncompleteConfirmVisible, setExitIncompleteConfirmVisible] =
+    useState(false);
+  const [exitIncompleteCount, setExitIncompleteCount] = useState(0);
   const [highlightedQuestionNumber, setHighlightedQuestionNumber] = useState<number | null>(null);
   const [pendingJumpQuestionNumber, setPendingJumpQuestionNumber] = useState<number | null>(null);
   const saveLockRef = useRef(false);
   const questionListRef = useRef<FlatList<QuestionAnswer> | null>(null);
-  const pendingSaveResolveRef = useRef<((value: boolean) => void) | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const [statusModal, setStatusModal] = useState<{
     visible: boolean;
@@ -225,11 +234,6 @@ export default function EditAnswerKeyScreen() {
     return () => {
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
-      }
-
-      if (pendingSaveResolveRef.current) {
-        pendingSaveResolveRef.current(false);
-        pendingSaveResolveRef.current = null;
       }
     };
   }, []);
@@ -459,8 +463,40 @@ export default function EditAnswerKeyScreen() {
       // Update UI with fetched exam metadata
       setExamTitle(examData.metadata.title);
       setExamCode(examData.metadata.examCode || "");
-      setChoicesPerItem(examData.choiceFormat === "A-E" ? 5 : 4);
-      const numItems = examData.totalQuestions || 20;
+      let resolvedChoicesPerItem: 4 | 5 =
+        examData.choiceFormat === "A-E" ? 5 : 4;
+      let numItems = Number(examData.totalQuestions ?? 0);
+      if (!Number.isFinite(numItems) || numItems <= 0) {
+        numItems = Math.max(
+          Number(examData.answerKey?.questionSettings?.length ?? 0),
+          Number(examData.answerKey?.answers?.length ?? 0),
+          20,
+        );
+      }
+
+      if (online && !(examId as string).startsWith("staging_")) {
+        try {
+          const examSnap = await getDoc(doc(db, "exams", examId as string));
+          if (examSnap.exists()) {
+            const raw = examSnap.data() as Record<string, any>;
+            const fromExamDoc = Number(
+              raw.choices_per_item ?? raw.choicesPerItem ?? resolvedChoicesPerItem,
+            );
+            resolvedChoicesPerItem = fromExamDoc === 5 ? 5 : 4;
+            const fromExamQuestionCount = Number(
+              raw.num_items ?? raw.numItems ?? raw.questionCount ?? numItems,
+            );
+            if (Number.isFinite(fromExamQuestionCount) && fromExamQuestionCount > 0) {
+              numItems = fromExamQuestionCount;
+            }
+          }
+        } catch (examDocErr) {
+          console.warn(
+            "[EditAnswerKey] Failed to read choices_per_item from exam doc:",
+            examDocErr,
+          );
+        }
+      }
 
       // When online, always fetch the answer key directly from Firestore so we
       // pick up any edits made from the web app without relying on the Realm cache.
@@ -504,6 +540,15 @@ export default function EditAnswerKeyScreen() {
         // Offline — use whatever ExamService returned from cache
         freshAnswers = examData.answerKey?.answers ?? [];
       }
+
+      if (
+        resolvedChoicesPerItem === 4 &&
+        freshAnswers.some((answer) => String(answer).trim().toUpperCase() === "E")
+      ) {
+        resolvedChoicesPerItem = 5;
+      }
+
+      setChoicesPerItem(resolvedChoicesPerItem);
 
       const initialAnswers = Array.from({ length: numItems }, (_, i) => ({
         questionNumber: i + 1,
@@ -558,8 +603,13 @@ export default function EditAnswerKeyScreen() {
   const handleAttemptExit = () => {
     if (saving || saveLockRef.current) return;
     const unansweredCount = getUnansweredQuestions().length;
-    if (hasLocalChanges || unansweredCount > 0) {
+    if (hasLocalChanges) {
       setDiscardConfirmVisible(true);
+      return;
+    }
+    if (unansweredCount > 0) {
+      setExitIncompleteCount(unansweredCount);
+      setExitIncompleteConfirmVisible(true);
       return;
     }
     goBack();
@@ -579,16 +629,9 @@ export default function EditAnswerKeyScreen() {
 
       const emptyAnswers = answers.filter((a) => !a.answer);
       if (emptyAnswers.length > 0) {
-        const shouldContinue = await new Promise<boolean>((resolve) => {
-          setIncompleteCount(emptyAnswers.length);
-          pendingSaveResolveRef.current = resolve;
-          setIncompleteConfirmVisible(true);
-        });
-
-        if (!shouldContinue) {
-          setSaving(false);
-          return;
-        }
+        setIncompleteCount(emptyAnswers.length);
+        setIncompleteConfirmVisible(true);
+        return;
       }
 
       const online = await NetworkService.isOnline();
@@ -1028,11 +1071,11 @@ export default function EditAnswerKeyScreen() {
   }
 
   const unansweredQuestions = getUnansweredQuestions();
-  const discardConfirmMessage = hasLocalChanges
-    ? unansweredQuestions.length > 0
+  const hasIncompleteAnswerKey = unansweredQuestions.length > 0;
+  const discardConfirmMessage =
+    unansweredQuestions.length > 0
       ? `You have unsaved answer key changes. ${unansweredQuestions.length} item(s) are still unanswered. Leave without saving?`
-      : "You have unsaved answer key changes. Leave without saving?"
-    : `${unansweredQuestions.length} item(s) are still unanswered. Leave this answer key?`;
+      : "You have unsaved answer key changes. Leave without saving?";
 
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
@@ -1142,6 +1185,11 @@ export default function EditAnswerKeyScreen() {
         maxToRenderPerBatch={20}
         windowSize={11}
         removeClippedSubviews={true}
+        getItemLayout={(_, index) => ({
+          length: QUESTION_ROW_HEIGHT,
+          offset: QUESTION_ROW_HEIGHT * index,
+          index,
+        })}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1155,11 +1203,20 @@ export default function EditAnswerKeyScreen() {
             setHighlightedQuestionNumber(null);
           }
         }}
-        onScrollToIndexFailed={({ index }) => {
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          const estimatedRowHeight =
+            averageItemLength > 0 ? averageItemLength : QUESTION_ROW_HEIGHT;
           questionListRef.current?.scrollToOffset({
-            offset: Math.max(0, index * 110),
+            offset: Math.max(0, index * estimatedRowHeight),
             animated: true,
           });
+          setTimeout(() => {
+            questionListRef.current?.scrollToIndex({
+              index,
+              animated: true,
+              viewPosition: 0.2,
+            });
+          }, 120);
         }}
       />
 
@@ -1181,15 +1238,15 @@ export default function EditAnswerKeyScreen() {
           ]}
           onPress={() => setUnansweredModalVisible(true)}
         >
-          <Ionicons
-            name={
-              unansweredQuestions.length > 0
-                ? "bookmark-outline"
-                : "checkmark-circle-outline"
-            }
-            size={18}
-            color={unansweredQuestions.length > 0 ? "#A16207" : "#14925F"}
-          />
+          {unansweredQuestions.length > 0 ? (
+            <Text style={styles.unansweredAsteriskFooter}>*</Text>
+          ) : (
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={18}
+              color="#14925F"
+            />
+          )}
           <Text
             style={[
               styles.unansweredButtonText,
@@ -1204,9 +1261,12 @@ export default function EditAnswerKeyScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            (saving || hasIncompleteAnswerKey) && styles.saveButtonDisabled,
+          ]}
           onPress={handleSave}
-          disabled={saving}
+          disabled={saving || hasIncompleteAnswerKey}
         >
           {saving ? (
             <ActivityIndicator color="#fff" />
@@ -1226,18 +1286,29 @@ export default function EditAnswerKeyScreen() {
       <ConfirmationModal
         visible={incompleteConfirmVisible}
         title="Incomplete Answer Key"
-        message={`${incompleteCount} question(s) don't have answers yet. Save anyway?`}
-        cancelText="Cancel"
-        confirmText="Save Anyway"
+        message={`${incompleteCount} question(s) don't have answers yet. Complete all answers before saving.`}
+        cancelText="Close"
+        confirmText="Review Items"
         onCancel={() => {
           setIncompleteConfirmVisible(false);
-          pendingSaveResolveRef.current?.(false);
-          pendingSaveResolveRef.current = null;
         }}
         onConfirm={() => {
           setIncompleteConfirmVisible(false);
-          pendingSaveResolveRef.current?.(true);
-          pendingSaveResolveRef.current = null;
+          setUnansweredModalVisible(true);
+        }}
+      />
+
+      <ConfirmationModal
+        visible={exitIncompleteConfirmVisible}
+        title="Edit Answer Key Later?"
+        message={`${exitIncompleteCount} unanswered item(s).`}
+        cancelText="Stay"
+        confirmText="Leave"
+        destructive
+        onCancel={() => setExitIncompleteConfirmVisible(false)}
+        onConfirm={() => {
+          setExitIncompleteConfirmVisible(false);
+          goBack();
         }}
       />
 
@@ -1267,11 +1338,15 @@ export default function EditAnswerKeyScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.unansweredModalCard}>
             <View style={styles.unansweredModalHeader}>
-              <Ionicons
-                name={unansweredQuestions.length > 0 ? "bookmark-outline" : "checkmark-circle-outline"}
-                size={22}
-                color={unansweredQuestions.length > 0 ? "#F59E0B" : "#20BE7B"}
-              />
+              {unansweredQuestions.length > 0 ? (
+                <Text style={styles.unansweredAsteriskModal}>*</Text>
+              ) : (
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={22}
+                  color="#20BE7B"
+                />
+              )}
               <Text style={styles.unansweredModalTitle}>Unanswered Items</Text>
             </View>
 
@@ -1443,7 +1518,8 @@ const styles = StyleSheet.create({
     borderColor: "#E8EBF0",
   },
   questionCardUnanswered: {
-    backgroundColor: "#FFF9EB",
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
   },
   questionCardHighlighted: {
     backgroundColor: "#EAF7F0",
@@ -1454,12 +1530,19 @@ const styles = StyleSheet.create({
   },
   questionNumberWrap: {
     width: 52,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     borderRadius: 16,
     paddingVertical: 6,
   },
   questionNumberWrapHighlighted: {
     backgroundColor: "#EAF7F0",
+  },
+  questionNumberWrapUnanswered: {
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
   },
   questionNumber: {
     fontSize: 24,
@@ -1469,8 +1552,12 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontVariant: ["tabular-nums"],
   },
-  unansweredBookmark: {
-    marginTop: 4,
+  unansweredAsterisk: {
+    marginRight: 2,
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: "700",
+    color: "#DC2626",
   },
   choicesContainer: {
     flexDirection: "row",
@@ -1478,6 +1565,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
     marginLeft: 10,
+  },
+  choicesContainerUnanswered: {
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    borderColor: "transparent",
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   choiceButton: {
     width: 42,
@@ -1488,6 +1583,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#D9DEE7",
+  },
+  choiceButtonUnanswered: {
+    backgroundColor: "#FFF1F2",
+    borderColor: "#FCA5A5",
+    borderWidth: 1,
   },
   choiceButtonHighlighted: {
     borderColor: "#7DD3A8",
@@ -1507,6 +1607,9 @@ const styles = StyleSheet.create({
   },
   choiceTextSelected: {
     color: "#fff",
+  },
+  choiceTextUnanswered: {
+    color: "#DC2626",
   },
   footer: {
     position: "absolute",
@@ -1542,9 +1645,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: "#FFF7E6",
+    backgroundColor: "#FEF2F2",
     borderWidth: 1,
-    borderColor: "#F6D38B",
+    borderColor: "#FECACA",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -1557,7 +1660,7 @@ const styles = StyleSheet.create({
   unansweredButtonText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#A16207",
+    color: "#DC2626",
   },
   footerUnansweredButton: {
     marginHorizontal: 0,
@@ -1566,6 +1669,12 @@ const styles = StyleSheet.create({
   },
   unansweredButtonTextComplete: {
     color: "#14925F",
+  },
+  unansweredAsteriskFooter: {
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: "#DC2626",
   },
   modalOverlay: {
     flex: 1,
@@ -1592,6 +1701,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "800",
     color: "#1D2433",
+  },
+  unansweredAsteriskModal: {
+    fontSize: 28,
+    lineHeight: 24,
+    fontWeight: "800",
+    color: "#DC2626",
   },
   unansweredModalText: {
     fontSize: 14,
@@ -1621,16 +1736,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: "#FFF7E6",
+    backgroundColor: "#FEF2F2",
     borderWidth: 1,
-    borderColor: "#F6D38B",
+    borderColor: "#FECACA",
     alignItems: "center",
     justifyContent: "center",
   },
   unansweredChipText: {
     fontSize: 12,
     fontWeight: "800",
-    color: "#A16207",
+    color: "#DC2626",
   },
   unansweredModalClose: {
     marginTop: 20,
