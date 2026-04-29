@@ -7,6 +7,8 @@ import {
     getDoc,
     getDocs,
     query,
+    serverTimestamp,
+    setDoc,
     Timestamp,
     updateDoc,
     where,
@@ -413,18 +415,68 @@ export class ClassService {
         }
       }
 
-      // When online, always fetch fresh from Firestore to avoid stale cache.
-      // Only use cache as fallback when offline.
-      const { NetworkService } = await import("./networkService");
-      const isOnline = await NetworkService.isOnline();
-
       const cacheRealm = await RealmService.getCacheRealm();
       const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
         "ClassCache",
         classId,
       );
 
-      if (!isOnline && cached) {
+      // When online, try Firestore but fallback to cache if not found or network fails
+      const { NetworkService } = await import("./networkService");
+      const isOnline = await NetworkService.isOnline();
+
+      if (isOnline) {
+        try {
+          const docRef = doc(db, this.COLLECTION, classId);
+          const docSnap = await Promise.race([
+            getDoc(docRef),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
+          ]) as any;
+
+          if (docSnap && docSnap.exists()) {
+            const data = docSnap.data();
+            const cls = {
+              id: docSnap.id,
+              class_name: data.class_name,
+              course_subject: data.course_subject,
+              room: data.room,
+              year: normalizeYear(data.year),
+              semester: data.semester,
+              section_block: data.section_block,
+              students: data.students || [],
+              instructorId: data.instructorId,
+              isArchived: data.isArchived || false,
+              createdBy: data.createdBy,
+              created_at: data.created_at,
+              createdAt: data.createdAt?.toDate?.() ?? (data.createdAt ? new Date(data.createdAt) : undefined),
+              updatedAt: data.updatedAt?.toDate?.() ?? (data.updatedAt ? new Date(data.updatedAt) : undefined),
+            };
+
+            // Update cache in background
+            cacheRealm.write(() => {
+              cacheRealm.create("ClassCache", {
+                id: docSnap.id,
+                class_name: data.class_name,
+                course_subject: data.course_subject,
+                room: data.room ?? "",
+                year: normalizeYear(data.year) ?? "",
+                section_block: data.section_block ?? "",
+                isArchived: data.isArchived || false,
+                students: JSON.stringify(data.students || []),
+                createdBy: data.createdBy,
+                updatedAt: toRealmDate(cls.updatedAt || new Date()),
+              }, Realm.UpdateMode.Modified);
+            });
+
+            return cls;
+          }
+        } catch (err) {
+          console.warn("[ClassService] Online fetch failed, using cache:", err);
+        }
+      }
+
+      // Return from cache if we're offline OR online fetch failed
+      if (cached) {
         return {
           id: cached.id,
           class_name: cached.class_name,
@@ -440,80 +492,57 @@ export class ClassService {
           updatedAt: cached.updatedAt,
         };
       }
-      if (isOnline) {
-        const docRef = doc(db, this.COLLECTION, classId);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const cls = {
-            id: docSnap.id,
-            class_name: data.class_name,
-            course_subject: data.course_subject,
-            room: data.room,
-            year: normalizeYear(data.year),
-            semester: data.semester,
-            section_block: data.section_block,
-            students: data.students || [],
-            instructorId: data.instructorId,
-            isArchived: data.isArchived || false,
-            createdBy: data.createdBy,
-            created_at: data.created_at,
-            createdAt:
-              data.createdAt?.toDate?.() ??
-              (data.createdAt ? new Date(data.createdAt) : undefined),
-            updatedAt:
-              data.updatedAt?.toDate?.() ??
-              (data.updatedAt ? new Date(data.updatedAt) : undefined),
-          };
-
-          // Update cache
-          cacheRealm.write(() => {
-            cacheRealm.create(
-              "ClassCache",
-              {
-                id: docSnap.id,
-                class_name: data.class_name,
-                course_subject: data.course_subject,
-                room: data.room ?? "",
-                year: normalizeYear(data.year) ?? "",
-                section_block: data.section_block ?? "",
-                isArchived: data.isArchived || false,
-                students: JSON.stringify(data.students || []),
-                createdBy: data.createdBy,
-                updatedAt: toRealmDate(cls.updatedAt),
-              },
-              Realm.UpdateMode.Modified,
-            );
-          });
-
-          return cls;
-        }
-      }
 
       return null;
     } catch (error) {
-      console.error("Error fetching class:", error);
-      throw error;
+      console.error("Error in getClassById:", error);
+      return null;
     }
   }
 
   /**
-   * Update a class
+   * Update a class (Local-First)
    */
   static async updateClass(
     classId: string,
-    updates: Partial<CreateClassData>,
+    updates: Partial<Omit<Class, "id">>,
   ): Promise<void> {
     try {
+      const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
       const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objectForPrimaryKey<ClassCache>(
-        "ClassCache",
-        classId,
-      );
+      const cached = cacheRealm.objectForPrimaryKey<ClassCache>("ClassCache", classId);
 
+      // 1. Handle Staging Classes (Pre-Sync)
+      if (classId.startsWith("staging_")) {
+        console.log("[ClassService] Updating staging class...");
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = classId.replace("staging_", "");
+        const sClass = stagingRealm.objectForPrimaryKey<OfflineClass>(
+          "OfflineClass",
+          new Realm.BSON.ObjectId(hexId),
+        );
+
+        if (sClass) {
+          stagingRealm.write(() => {
+            if (updates.class_name !== undefined) sClass.class_name = updates.class_name;
+            if (updates.course_subject !== undefined) sClass.course_subject = updates.course_subject;
+            if (updates.room !== undefined) sClass.room = updates.room ?? "";
+            if (updates.section_block !== undefined) sClass.section_block = updates.section_block ?? "";
+            if (updates.students !== undefined) sClass.students = JSON.stringify(updates.students);
+            sClass.createdAt = new Date(); // Refresh timestamp
+          });
+          console.log("[ClassService] Staging updated");
+        }
+        
+        // Also queue the update for when it finally syncs
+        await OfflineStorageService.queueUpdate(classId, "update", updates, "classes");
+        return;
+      }
+
+      // 2. Handle Regular Classes
       if (!isOnline) {
+        console.log("[ClassService] Offline. Queueing update to AsyncStorage...");
         await OfflineStorageService.queueUpdate(
           classId,
           "update",
@@ -526,19 +555,13 @@ export class ClassService {
 
         if (cached) {
           cacheRealm.write(() => {
-            if (updates.class_name !== undefined)
-              cached.class_name = updates.class_name;
-            if (updates.course_subject !== undefined)
-              cached.course_subject = updates.course_subject;
+            if (updates.class_name !== undefined) cached.class_name = updates.class_name;
+            if (updates.course_subject !== undefined) cached.course_subject = updates.course_subject;
             if (updates.room !== undefined) cached.room = updates.room ?? "";
-            if (updates.year !== undefined)
-              cached.year = normalizeYear(updates.year) ?? "";
-            if (updates.section_block !== undefined)
-              cached.section_block = updates.section_block ?? "";
-            if (updates.isArchived !== undefined)
-              cached.isArchived = updates.isArchived;
-            if (updates.students !== undefined)
-              cached.students = JSON.stringify(updates.students);
+            if (updates.year !== undefined) cached.year = normalizeYear(updates.year) ?? "";
+            if (updates.section_block !== undefined) cached.section_block = updates.section_block ?? "";
+            if (updates.isArchived !== undefined) cached.isArchived = updates.isArchived;
+            if (updates.students !== undefined) cached.students = JSON.stringify(updates.students);
             cached.updatedAt = toRealmDate(new Date());
           });
         }
@@ -548,36 +571,25 @@ export class ClassService {
       const docRef = doc(db, this.COLLECTION, classId);
       const updatePayload = {
         ...updates,
-        // Normalize year to short format to stay consistent with web app
         ...(updates.year !== undefined && { year: yearToShort(updates.year) }),
-        updatedAt: Timestamp.now(),
+        updatedAt: serverTimestamp(),
       };
 
       try {
-        const timeoutMs = 5000;
-        const timeoutError = new Error("Network error: Request timed out");
-        
         await Promise.race([
           updateDoc(docRef, updatePayload),
-          new Promise<never>((_, reject) => setTimeout(() => reject(timeoutError), timeoutMs))
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 5000))
         ]);
-      } catch (fbError: any) {
-        const errText = [fbError?.message, fbError?.code, String(fbError)].join(" ").toLowerCase();
-        const isNetwork = errText.includes("network") || errText.includes("offline") || errText.includes("timeout");
-        
-        if (isNetwork) {
-          console.warn("[ClassService] Network failed during update, falling back to offline queue.");
-          await OfflineStorageService.queueUpdate(
-            classId,
-            "update",
-            {
-              ...updates,
-              ...(updates.year !== undefined && { year: yearToShort(updates.year) }),
-            },
-            "classes",
-          );
-        } else {
-          throw fbError;
+      } catch (fbError) {
+        console.warn("[ClassService] Online update failed, queueing offline:", fbError);
+        await OfflineStorageService.queueUpdate(classId, "update", updates, "classes");
+        // Update cache anyway
+        if (cached) {
+          cacheRealm.write(() => {
+            if (updates.class_name !== undefined) cached.class_name = updates.class_name;
+            if (updates.course_subject !== undefined) cached.course_subject = updates.course_subject;
+            cached.updatedAt = toRealmDate(new Date());
+          });
         }
       }
 
@@ -609,6 +621,24 @@ export class ClassService {
    */
   static async deleteClass(classId: string): Promise<void> {
     try {
+      if (classId.startsWith("staging_")) {
+        console.log("[ClassService] Deleting staging class...");
+        const stagingRealm = await RealmService.getStagingRealm();
+        const hexId = classId.replace("staging_", "");
+        const sClass = stagingRealm.objectForPrimaryKey<OfflineClass>(
+          "OfflineClass",
+          new Realm.BSON.ObjectId(hexId),
+        );
+        if (sClass) {
+          stagingRealm.write(() => {
+            stagingRealm.delete(sClass);
+          });
+        }
+        // Also clear any pending creation/update for this staging class
+        await OfflineStorageService.clearUpdatesForExam(classId);
+        return;
+      }
+
       const docRef = doc(db, this.COLLECTION, classId);
       await deleteDoc(docRef);
 
