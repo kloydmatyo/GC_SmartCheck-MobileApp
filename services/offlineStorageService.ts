@@ -272,6 +272,27 @@ export class OfflineStorageService {
   }
 
   /**
+   * Clear all pending updates for a specific exam/class
+   */
+  static async clearUpdatesForExam(examId: string): Promise<void> {
+    try {
+      const realm = await RealmService.getStagingRealm();
+      const updates = realm
+        .objects<OfflinePendingUpdate>("OfflinePendingUpdate")
+        .filtered("examId == $0", examId);
+
+      if (updates.length > 0) {
+        realm.write(() => {
+          realm.delete(updates);
+        });
+        console.log(`[OfflineStorageService] Cleared ${updates.length} updates for:`, examId);
+      }
+    } catch (error) {
+      console.error("Error clearing updates for exam:", error);
+    }
+  }
+
+  /**
    * Clear all pending updates
    */
   static async clearPendingUpdates(): Promise<void> {
