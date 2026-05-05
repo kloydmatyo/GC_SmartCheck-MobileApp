@@ -2442,19 +2442,14 @@ function scan200ItemPagePixelsWithBrightness(
     reliableAnchorCount >= 7 &&
     anchorDxRange <= maxCoherentAnchorRange &&
     anchorDyRange <= maxCoherentAnchorRange;
-  const useAnchorGrid =
-    hasStrongPerBlockAnchors || hasCoherentAnchorGrid;
+  const useAnchorGrid = hasStrongPerBlockAnchors || hasCoherentAnchorGrid;
 
   if (reliableAnchorCount >= 7 && !useAnchorGrid) {
     console.log(
       `[200Q-FAST] Block anchors rejected: reliable=${reliableAnchorCount}/10, dxRange=${Math.round(anchorDxRange)}, dyRange=${Math.round(anchorDyRange)}, max=${maxCoherentAnchorRange}`,
     );
   }
-  if (
-    useAnchorGrid &&
-    hasStrongPerBlockAnchors &&
-    !hasCoherentAnchorGrid
-  ) {
+  if (useAnchorGrid && hasStrongPerBlockAnchors && !hasCoherentAnchorGrid) {
     console.log(
       `[200Q-FAST] Using per-block anchors: reliable=${reliableAnchorCount}/10, dxRange=${Math.round(anchorDxRange)}, dyRange=${Math.round(anchorDyRange)}`,
     );

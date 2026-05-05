@@ -2,6 +2,7 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ClassService } from "@/services/classService";
 import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,11 +12,8 @@ import {
   addDoc,
   collection,
   doc,
-  getDocs,
-  query,
   serverTimestamp,
-  setDoc,
-  where,
+  setDoc
 } from "firebase/firestore";
 import React, { useCallback, useRef, useState } from "react";
 import {
@@ -65,7 +63,7 @@ export default function CreateQuizScreen() {
       ? router.replace(
           `/(tabs)/class-details?classId=${classIdParam}&tab=exams`,
         )
-      : router.replace("/(tabs)/quizzes");
+      : router.replace("/(tabs)/index");
   const [loading, setLoading] = useState(false);
   const [darkModeEnabled, setDarkModeEnabled] = useState(false);
 
@@ -132,77 +130,26 @@ export default function CreateQuizScreen() {
 
         try {
           setClassesLoading(true);
-          const { NetworkService } = await import("@/services/networkService");
-          const isOnline = await NetworkService.isOnline();
-          let classes: ClassOption[] = [];
+          const fetchedClasses = await ClassService.getClassesByUser();
 
-          if (isOnline) {
-            try {
-              const classesQuery = query(
-                collection(db, "classes"),
-                where("createdBy", "==", currentUser.uid),
-              );
-              // Provide a short timeout so UI won't freeze on flaky networks
-              const classesSnapshot = await Promise.race([
-                getDocs(classesQuery),
-                new Promise<any>((_, reject) =>
-                  setTimeout(() => reject(new Error("timeout")), 3000),
-                ),
-              ]);
-
-              classes = classesSnapshot.docs
-                .map((classDoc: any) => ({
-                  id: classDoc.id,
-                  ...(classDoc.data() as Omit<ClassOption, "id">),
-                }))
-                .filter((cls: any) => !cls.isArchived);
-            } catch (err) {
-              console.warn(
-                "Firestore classes fetch failed, falling back to cache",
-                err,
-              );
-            }
-          }
-
-          // Fallback to cache if offline or Firestore query failed
-          if (!isOnline || classes.length === 0) {
-            const { RealmService } = await import("@/services/realmService");
-            const cacheRealm = await RealmService.getCacheRealm();
-            const cachedClasses = cacheRealm
-              .objects<any>("ClassCache")
-              .filtered(`createdBy == "${currentUser.uid}"`);
-
-            classes = cachedClasses.map((c: any) => ({
-              id: c.id,
-              class_name: c.class_name,
-              course_subject: c.course_subject,
-              section_block: c.section_block,
-              isArchived: false, // We assume cached active ones aren't archived
+          // Map to ClassOption type and filter out archived classes
+          const activeClasses: ClassOption[] = fetchedClasses
+            .filter((cls: any) => !cls.isArchived)
+            .map((cls: any) => ({
+              id: cls.id,
+              class_name: cls.class_name,
+              course_subject: cls.course_subject,
+              section_block: cls.section_block,
             }));
-          }
 
-          // Always add unsynced classes from the Staging Realm
-          const { RealmService } = await import("@/services/realmService");
-          const stagingRealm = await RealmService.getStagingRealm();
-          const stagingClasses = stagingRealm.objects<any>("OfflineClass");
-
-          const sClasses = stagingClasses.map((c: any) => ({
-            id: `staging_${c._id.toHexString()}`,
-            class_name: c.class_name,
-            course_subject: c.course_subject,
-            section_block: c.section_block,
-            isArchived: false,
-          }));
-
-          setClassOptions([...classes, ...sClasses]);
-        } catch (error) {
-          console.warn("Could not load classes:", error);
+          setClassOptions(activeClasses);
+        } catch (err) {
+          console.error("Error loading classes:", err);
           setClassOptions([]);
         } finally {
           setClassesLoading(false);
         }
       };
-
       loadClasses();
     }, [classIdParam, refreshNonce]),
   );

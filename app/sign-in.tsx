@@ -134,15 +134,13 @@ export default function SignInScreen() {
         return;
       }
 
-      // Preload offline data
+      // Preload offline data in the background so it doesn't block login
       const netState = await NetInfo.fetch();
       if (netState.isConnected && netState.isInternetReachable) {
-        try {
-          const { SyncService } = await import("@/services/syncService");
-          await SyncService.syncPendingUpdates();
-        } catch (syncError) {
-          console.warn("[GoogleSignIn] Sync failed:", syncError);
-        }
+        import("@/services/syncService").then(({ SyncService }) => {
+          console.log("[GoogleSignIn] Background preloading data...");
+          SyncService.syncPendingUpdates().catch(err => console.warn("[GoogleSignIn] Sync failed:", err));
+        }).catch(err => console.warn("Failed to load SyncService", err));
       }
 
       router.replace("/(tabs)");
@@ -216,20 +214,13 @@ export default function SignInScreen() {
           return;
         }
 
-        // 3. Trigger data preload to Realm (Primary Cache)
+        // 3. Trigger data preload to Realm in the background
         const netState = await NetInfo.fetch();
         if (netState.isConnected && netState.isInternetReachable) {
-          setIsLoading(true); // Ensure loading state is still active
-          try {
-            const { SyncService } = await import("@/services/syncService");
-            console.log("[SignIn] Preloading data for offline use...");
-            await SyncService.syncPendingUpdates();
-          } catch (syncError) {
-            console.warn(
-              "[SignIn] Initial sync failed, proceeding to dashboard:",
-              syncError,
-            );
-          }
+          import("@/services/syncService").then(({ SyncService }) => {
+            console.log("[SignIn] Background preloading data for offline use...");
+            SyncService.syncPendingUpdates().catch(err => console.warn("[SignIn] Initial sync failed:", err));
+          }).catch(err => console.warn("Failed to load SyncService", err));
         }
 
         // 3. Navigate to Dashboard
