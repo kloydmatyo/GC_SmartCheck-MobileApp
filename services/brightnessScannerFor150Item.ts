@@ -1,19 +1,4 @@
-﻿﻿/**
- * Brightness-Based Scanner for 100-Item Templates
- *
- * This scanner uses brightness sampling instead of contour detection
- * to achieve >99% accuracy for 100-item answer sheets.
- *
- * Ported from Web-Based-for-SIA/src/components/scanning/OMRScanner.tsx
- *
- * Key differences from contour-based scanning:
- * - Samples pixel brightness at calculated positions
- * - Uses bilinear coordinate mapping for perspective correction
- * - Compares brightness values within each question
- * - More robust to lighting variations and small bubbles
- */
-
-import { StudentAnswer } from "../types/scanning";
+﻿﻿import { StudentAnswer } from "../types/scanning";
 const DEBUG_LOGS = true;
 
 // ─── TYPES ───
@@ -135,18 +120,18 @@ function sampleBubbleAt(
 }
 
 // ─── TEMPLATE LAYOUT ───
-// 100-question full page A4 (210 × 297 mm)
-// Source: drawFullSheet() in templatePdfGenerator.ts
+// 150-question full page A4 (210 × 297 mm)
+// Source: drawFullSheet() in answerSheetGenerator.ts with blocksPerCol=3
 //
 // Corner markers: cornerInset=2mm, markerSize=8mm → marker centers at (6,6) and (204,291)
 // Frame between marker centers: fw = 198mm, fh = 285mm
 //
-// Template grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
-//   Col 0: Q1-10  (row 0), Q11-20  (row 1)
-//   Col 1: Q21-30 (row 0), Q31-40  (row 1)
-//   Col 2: Q41-50 (row 0), Q51-60  (row 1)
-//   Col 3: Q61-70 (row 0), Q71-80  (row 1)
-//   Col 4: Q81-90 (row 0), Q91-100 (row 1)
+// Template grid: 5 columns × 3 rows, sequential left-to-right, top-to-bottom:
+//   Col 0: Q1-10   (row 0), Q11-20  (row 1), Q21-30  (row 2)
+//   Col 1: Q31-40  (row 0), Q41-50  (row 1), Q51-60  (row 2)
+//   Col 2: Q61-70  (row 0), Q71-80  (row 1), Q81-90  (row 2)
+//   Col 3: Q91-100 (row 0), Q101-110 (row 1), Q111-120 (row 2)
+//   Col 4: Q121-130 (row 0), Q131-140 (row 1), Q141-150 (row 2)
 //
 // Physical measurements (drawFullSheet, A4 210×297mm):
 //   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
@@ -160,15 +145,17 @@ function sampleBubbleAt(
 //     Col 3: 134.8333mm → NX = (134.8333-6)/198 = 0.65067
 //     Col 4: 172.4167mm → NX = (172.4167-6)/198 = 0.84049
 //
+//   For 150-item (blocksPerCol=3):
 //   currentY after header+ID ≈ 81mm from page top
 //   drawQBlock adds 5mm header → first bubble row at currentY+5
-//   Row 0 first bubble Y: 81+5 = 86mm → NY = (86-6)/285 = 0.28070
 //   blockVGap = 10×5.2 + 10 = 62mm
-//   Row 1 first bubble Y: 143+5 = 148mm → NY = (148-6)/285 = 0.49825
+//   Row 0 first bubble Y: 81+5 = 86mm → NY = (86-6)/285 = 0.28070
+//   Row 1 first bubble Y: 86+62 = 148mm → NY = (148-6)/285 = 0.49825
+//   Row 2 first bubble Y: 148+62 = 210mm → NY = (210-6)/285 = 0.71579
 //
 //   bubbleSpacingNX = 5.5 / 198 = 0.027778
 //   rowSpacingNY    = 5.2 / 285 = 0.018246
-function get100ItemTemplateLayout(): TemplateLayout {
+function get150ItemTemplateLayout(): TemplateLayout {
   const fw = 198,
     fh = 285;
 
@@ -178,23 +165,29 @@ function get100ItemTemplateLayout(): TemplateLayout {
   // Exact first-bubble NX per column (A-choice center, derived from template source)
   const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.84049];
   // Exact first-bubble NY per row (first question row center, derived from template source)
-  const rowNY = [0.2807, 0.49825];
+  const rowNY = [0.2807, 0.49825, 0.71579];
 
-  // 10 blocks: 5 cols × 2 rows
-  // Reading order: left-to-right across row 0, then row 1
-  //   Row 0: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
-  //   Row 1: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
+  // 15 blocks: 5 cols × 3 rows
+  // Reading order: left-to-right across row 0, then row 1, then row 2
+  //   Row 0: Q1-10, Q31-40, Q61-70, Q91-100, Q121-130
+  //   Row 1: Q11-20, Q41-50, Q71-80, Q101-110, Q131-140
+  //   Row 2: Q21-30, Q51-60, Q81-90, Q111-120, Q141-150
   const BLOCKS: { startQ: number; col: number; row: number }[] = [
     { startQ: 1, col: 0, row: 0 },
-    { startQ: 21, col: 1, row: 0 },
-    { startQ: 41, col: 2, row: 0 },
-    { startQ: 61, col: 3, row: 0 },
-    { startQ: 81, col: 4, row: 0 },
+    { startQ: 31, col: 1, row: 0 },
+    { startQ: 61, col: 2, row: 0 },
+    { startQ: 91, col: 3, row: 0 },
+    { startQ: 121, col: 4, row: 0 },
     { startQ: 11, col: 0, row: 1 },
-    { startQ: 31, col: 1, row: 1 },
-    { startQ: 51, col: 2, row: 1 },
-    { startQ: 71, col: 3, row: 1 },
-    { startQ: 91, col: 4, row: 1 },
+    { startQ: 41, col: 1, row: 1 },
+    { startQ: 71, col: 2, row: 1 },
+    { startQ: 101, col: 3, row: 1 },
+    { startQ: 131, col: 4, row: 1 },
+    { startQ: 21, col: 0, row: 2 },
+    { startQ: 51, col: 1, row: 2 },
+    { startQ: 81, col: 2, row: 2 },
+    { startQ: 111, col: 3, row: 2 },
+    { startQ: 141, col: 4, row: 2 },
   ];
 
   const answerBlocks: AnswerBlock[] = BLOCKS.map((b) => ({
@@ -235,7 +228,7 @@ function detectAnswersFromImage(
 
   if (DEBUG_LOGS) {
     console.log(
-      `[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
+      `[150Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
     );
   }
 
@@ -285,7 +278,7 @@ function detectAnswersFromImage(
 
       if (DEBUG_LOGS) {
         console.log(
-          `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ} auto-align: dx=${blockDx}, dy=${blockDy}`,
+          `[150Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ} auto-align: dx=${blockDx}, dy=${blockDy}`,
         );
       }
     }
@@ -297,7 +290,7 @@ function detectAnswersFromImage(
         block.firstBubbleNY,
       );
       console.log(
-        `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`,
+        `[150Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`,
       );
     }
 
@@ -325,7 +318,7 @@ function detectAnswersFromImage(
       // Debug: Log all brightness values for first question in each block
       if (DEBUG_LOGS && q === block.startQ) {
         console.log(
-          `[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")}`,
+          `[150Q-BRIGHTNESS] Q${q} all choices: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")}`,
         );
       }
 
@@ -344,7 +337,6 @@ function detectAnswersFromImage(
       const gapFromSecond = secondDark - darkest;
       const gapRatio = ref > 20 ? gapFromSecond / ref : 0;
       const absoluteGap = secondDark - darkest;
-      const gapFromThird = thirdDark - darkest;
 
       const median = sorted[Math.floor(sorted.length / 2)].brightness;
       const spread = brightest - darkest;
@@ -372,7 +364,7 @@ function detectAnswersFromImage(
         (q <= block.startQ + 2 || q === block.endQ || !selectedChoice)
       ) {
         console.log(
-          `[100Q-BRIGHTNESS] Q${q}: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")} → ${selectedChoice || "?"} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`,
+          `[150Q-BRIGHTNESS] Q${q}: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")} → ${selectedChoice || "?"} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`,
         );
       }
 
@@ -390,13 +382,13 @@ function detectAnswersFromImage(
 }
 
 // ─── MAIN EXPORT ───
-export async function scan100ItemWithBrightness(
+export async function scan150ItemWithBrightness(
   imageUri: string,
   markers: Markers,
   choicesPerQuestion: 4 | 5 = 5,
   enableBlockAutoAlign = false,
 ): Promise<StudentAnswer[]> {
-  console.log("[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
+  console.log("[150Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
 
   try {
     // Import Skia and FileSystem (using legacy API for compatibility)
@@ -420,7 +412,7 @@ export async function scan100ItemWithBrightness(
 
     const width = image.width();
     const height = image.height();
-    console.log(`[100Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
+    console.log(`[150Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
 
     // Read pixel data (RGBA format)
     const pixels = image.readPixels();
@@ -430,12 +422,12 @@ export async function scan100ItemWithBrightness(
     }
 
     console.log(
-      `[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`,
+      `[150Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`,
     );
 
     // Detect answers using brightness sampling
-    const layout = get100ItemTemplateLayout();
-    const numQuestions = 100;
+    const layout = get150ItemTemplateLayout();
+    const numQuestions = 150;
     const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
 
     const answers = detectAnswersFromImage(
@@ -450,14 +442,14 @@ export async function scan100ItemWithBrightness(
     );
 
     const detectedCount = answers.filter((a) => a.selectedAnswer).length;
-    console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
+    console.log(`[150Q-BRIGHTNESS] Detected ${detectedCount}/150 answers`);
 
     return answers;
   } catch (error) {
-    console.error("[100Q-BRIGHTNESS] Error:", error);
+    console.error("[150Q-BRIGHTNESS] Error:", error);
 
     // Return empty answers on error
-    return Array.from({ length: 100 }, (_, i) => ({
+    return Array.from({ length: 150 }, (_, i) => ({
       questionNumber: i + 1,
       selectedAnswer: "",
     }));

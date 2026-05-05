@@ -12,11 +12,8 @@ import {
   addDoc,
   collection,
   doc,
-  getDocs,
-  query,
   serverTimestamp,
-  setDoc,
-  where,
+  setDoc
 } from "firebase/firestore";
 import React, { useCallback, useRef, useState } from "react";
 import {
@@ -134,7 +131,7 @@ export default function CreateQuizScreen() {
         try {
           setClassesLoading(true);
           const fetchedClasses = await ClassService.getClassesByUser();
-          
+
           // Map to ClassOption type and filter out archived classes
           const activeClasses: ClassOption[] = fetchedClasses
             .filter((cls: any) => !cls.isArchived)
