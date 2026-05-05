@@ -133,7 +133,32 @@ export class SyncService {
 
       // 4. Flush queued document updates
       try {
-        const pendingUpdates = await OfflineStorageService.getPendingUpdates();
+        const rawUpdates = await OfflineStorageService.getPendingUpdates();
+        
+        // --- DEDUPLICATE UPDATES ---
+        const pendingUpdates: PendingUpdate[] = [];
+        const updateMap = new Map<string, PendingUpdate>();
+
+        for (const update of rawUpdates) {
+          if (update.action === "update" || update.action === "update-answer-key") {
+            const key = `${update.collection || "exams"}_${update.examId}_${update.action}`;
+            if (updateMap.has(key)) {
+              // Merge data into existing update, keeping the existing ID
+              const existing = updateMap.get(key)!;
+              existing.data = { ...existing.data, ...update.data };
+              
+              // Remove this duplicate from local storage so it doesn't stay pending
+              await OfflineStorageService.removePendingUpdate(update.id);
+            } else {
+              updateMap.set(key, update);
+              pendingUpdates.push(update);
+            }
+          } else {
+            pendingUpdates.push(update);
+          }
+        }
+        // --- END DEDUPLICATION ---
+
         for (const update of pendingUpdates) {
           try {
             const conflict = await this.syncUpdate(update);
@@ -227,18 +252,19 @@ export class SyncService {
 
     const realm = await RealmService.getCacheRealm();
 
+    const lastSync = await OfflineStorageService.getLastSync();
+    const lastSyncDate = lastSync ? Timestamp.fromDate(lastSync) : null;
+
     // Sync Classes
-    const classesQuery = query(
-      collection(db, "classes"),
-      where("createdBy", "==", currentUser.uid),
-    );
+    const classConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
+    if (lastSyncDate) classConstraints.push(where("updatedAt", ">", lastSyncDate));
+    const classesQuery = query(collection(db, "classes"), ...classConstraints);
     const classesSnap = await getDocs(classesQuery);
 
     // Sync Exams + their latest answer keys
-    const examsQuery = query(
-      collection(db, "exams"),
-      where("createdBy", "==", currentUser.uid),
-    );
+    const examConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
+    if (lastSyncDate) examConstraints.push(where("updatedAt", ">", lastSyncDate));
+    const examsQuery = query(collection(db, "exams"), ...examConstraints);
     const examsSnap = await getDocs(examsQuery);
     const examsWithAK: any[] = [];
 
@@ -293,10 +319,12 @@ export class SyncService {
     const stagingGrades = stagingRealm.objects<OfflineGrade>("OfflineGrade");
 
     realm.write(() => {
-      // Clear existing cache
-      realm.delete(realm.objects("ClassCache"));
-      realm.delete(realm.objects("QuizCache"));
-      realm.delete(realm.objects("GradeCache"));
+      // Clear existing cache ONLY if doing a full sync
+      if (!lastSync) {
+        realm.delete(realm.objects("ClassCache"));
+        realm.delete(realm.objects("QuizCache"));
+        realm.delete(realm.objects("GradeCache"));
+      }
 
       // 1. Insert fresh classes (Server + Staging)
       const processedClassIds = new Set<string>();
@@ -316,7 +344,7 @@ export class SyncService {
           students: JSON.stringify(data.students || []),
           createdBy: data.createdBy,
           updatedAt: data.updatedAt?.toDate?.() || new Date(),
-        });
+        }, "modified" as any);
       });
 
       stagingClasses.forEach((sClass) => {
@@ -331,7 +359,7 @@ export class SyncService {
             students: sClass.students,
             createdBy: sClass.createdBy,
             updatedAt: sClass.createdAt,
-          });
+          }, "modified" as any);
         }
       });
 
@@ -360,7 +388,7 @@ export class SyncService {
           examCode: item.data.examCode || "",
           choicesPerItem: pendingData?.choices_per_item || item.data.choices_per_item || 4,
           version: pendingData?.version || item.data.version || 1,
-        });
+        }, "modified" as any);
       });
 
       stagingQuizzes.forEach((sQuiz) => {
@@ -381,7 +409,7 @@ export class SyncService {
             examCode: sQuiz.examCode || "",
             choicesPerItem: sQuiz.choicesPerItem || 4,
             version: 1,
-          });
+          }, "modified" as any);
         }
       });
 
@@ -399,7 +427,7 @@ export class SyncService {
           dateScanned: data.dateScanned,
           scannedBy: data.scannedBy,
           createdAt: data.createdAt?.toDate?.() || new Date(),
-        });
+        }, "modified" as any);
       });
 
       stagingGrades.forEach((sGrade) => {
@@ -414,11 +442,12 @@ export class SyncService {
           dateScanned: sGrade.dateScanned,
           scannedBy: sGrade.scannedBy,
           createdAt: sGrade.createdAt,
-        });
+        }, "modified" as any);
       });
     });
 
-    console.log("Primary Cache Realm updated from Firestore");
+    await OfflineStorageService.updateLastSync();
+    console.log("Primary Cache Realm updated from Firestore via Delta Fetch");
   }
 
   private static async syncStagingGrades(): Promise<void> {
