@@ -168,15 +168,23 @@ function sampleBubbleAt(
 //
 //   bubbleSpacingNX = 5.5 / 198 = 0.027778
 //   rowSpacingNY    = 5.2 / 285 = 0.018246
-function get100ItemTemplateLayout(): TemplateLayout {
+function get100ItemTemplateLayout(physicalChoices: 4 | 5 = 5): TemplateLayout {
   const fw = 198,
     fh = 285;
 
   const bSpacingNX = 5.5 / fw; // 0.027778 — horizontal gap between choice bubbles
   const rSpacingNY = 5.2 / fh; // 0.018246 — vertical gap between question rows
 
-  // Exact first-bubble NX per column (A-choice center, derived from template source)
-  const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.84049];
+  // Exact first-bubble NX per column (A-choice center, derived from template source).
+  // Four-choice sheets use narrower blocks, so the block columns spread slightly.
+  const usableW = 190;
+  const qBlockW = 10 + (physicalChoices - 1) * 5.5 + 3.5;
+  const colGap = (usableW - 5 * qBlockW) / 6;
+  const colNX = Array.from({ length: 5 }, (_, col) => {
+    const bx = 10 + colGap + col * (qBlockW + colGap);
+    const firstBubbleX = bx + 10;
+    return (firstBubbleX - 6) / fw;
+  });
   // Exact first-bubble NY per row (first question row center, derived from template source)
   const rowNY = [0.2807, 0.49825];
 
@@ -434,9 +442,9 @@ export async function scan100ItemWithBrightness(
     );
 
     // Detect answers using brightness sampling
-    const layout = get100ItemTemplateLayout();
     const numQuestions = 100;
     const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
+    const layout = get100ItemTemplateLayout(effectiveChoices);
 
     const answers = detectAnswersFromImage(
       pixels,
