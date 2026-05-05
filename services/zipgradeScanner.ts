@@ -1528,7 +1528,9 @@ export class ZipgradeScanner {
           "[OMR] Strict 200Q corner validation failed; falling back to dedicated 200Q pixel scanner",
         );
 
-        const { scan200ItemPageFast } = require("./brightnessScannerFor200Item");
+        const {
+          scan200ItemPageFast,
+        } = require("./brightnessScannerFor200Item");
         allAnswers = await scan200ItemPageFast(
           imageUri,
           currentPage,
@@ -1540,6 +1542,43 @@ export class ZipgradeScanner {
         console.log(
           `[OMR] 200Q fallback scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
         );
+      }
+      // ── 150-item template: brightness scanning ──────────────────────────
+      else if (detectedQ === 150 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 150-item template (Skia pixel sampling)",
+        );
+
+        const {
+          scan150ItemWithBrightness,
+        } = require("./brightnessScannerFor150Item");
+        const markers = extractCornerMarkers();
+        allAnswers = await scan150ItemWithBrightness(
+          imageUri,
+          markers,
+          choicesPerQuestion,
+          true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+        );
+
+        console.log(
+          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`,
+        );
+      } else if (detectedQ === 150) {
+        // Fallback: not enough markers for brightness scanning
+        console.warn(
+          "[OMR] Not enough corner markers for brightness scanning, falling back to region-based detection",
+        );
+
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
       }
       // ── 100-item template: brightness scanning ──────────────────────────
       else if (detectedQ === 100 && regMarks.length >= 3) {
