@@ -14,6 +14,12 @@ export interface ScanResult {
   answers: StudentAnswer[];
   confidence: number; // 0-1 scale
   processedImageUri?: string;
+  detectedCorners?: {
+    topLeft: { x: number; y: number };
+    topRight: { x: number; y: number };
+    bottomLeft: { x: number; y: number };
+    bottomRight: { x: number; y: number };
+  };
 }
 
 export interface GradingResult {
