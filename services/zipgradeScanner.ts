@@ -1042,14 +1042,12 @@ export class ZipgradeScanner {
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      const strict200Corners = (():
-        | {
-            topLeft: { x: number; y: number };
-            topRight: { x: number; y: number };
-            bottomLeft: { x: number; y: number };
-            bottomRight: { x: number; y: number };
-          }
-        | null => null)();
+      const strict200Corners = ((): {
+        topLeft: { x: number; y: number };
+        topRight: { x: number; y: number };
+        bottomLeft: { x: number; y: number };
+        bottomRight: { x: number; y: number };
+      } | null => null)();
 
       if (strict200Corners) {
         paperLeft = Math.max(
@@ -1411,12 +1409,24 @@ export class ZipgradeScanner {
 
         const { scan200ItemPage } = require("./brightnessScannerFor200Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan200ItemPage(
+        const result = await scan200ItemPage(
           imageUri,
           markers,
           currentPage,
           choicesPerQuestion,
         );
+
+        if (result && result.answers) {
+          allAnswers = result.answers;
+          studentId = result.studentId || "000000000";
+        } else {
+          console.error("[OMR] 200Q scanner returned invalid result:", result);
+          const questionOffset = currentPage === 1 ? 0 : 100;
+          allAnswers = Array.from({ length: 100 }, (_, i) => ({
+            questionNumber: questionOffset + i + 1,
+            selectedAnswer: "",
+          }));
+        }
 
         const rangeStart = currentPage === 1 ? 1 : 101;
         const rangeEnd = currentPage === 1 ? 100 : 200;

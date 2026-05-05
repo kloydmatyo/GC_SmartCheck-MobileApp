@@ -70,29 +70,35 @@ export async function scan200ItemPage(
   markers: Markers,
   pageNumber: 1 | 2,
   choicesPerQuestion: 4 | 5 = 4,
-): Promise<StudentAnswer[]> {
+): Promise<{ studentId: string; answers: StudentAnswer[] }> {
   const questionOffset = pageNumber === 1 ? 0 : 100;
   console.log(
     `[200Q-100Q][${SCANNER_200Q_VERSION}] Page ${pageNumber}: scanning with 100-item brightness scanner (Q${questionOffset + 1}-${questionOffset + 100})`,
   );
 
   try {
-    const localAnswers = await scan100ItemWithBrightness(
+    const result = await scan100ItemWithBrightness(
       imageUri,
       markers,
       choicesPerQuestion,
       true,
     );
-    const pageAnswers = offsetPageAnswers(localAnswers, pageNumber);
+    const pageAnswers = offsetPageAnswers(result.answers, pageNumber);
     const detectedCount = pageAnswers.filter((a) => a.selectedAnswer).length;
 
     console.log(
       `[200Q-100Q] Page ${pageNumber}: Detected ${detectedCount}/100 answers; ${summarizeChoiceCounts(pageAnswers)}`,
     );
 
-    return pageAnswers;
+    return {
+      studentId: result.studentId,
+      answers: pageAnswers,
+    };
   } catch (error) {
     console.error(`[200Q-100Q] Page ${pageNumber} error:`, error);
-    return blankPageAnswers(pageNumber);
+    return {
+      studentId: "000000000",
+      answers: blankPageAnswers(pageNumber),
+    };
   }
 }
