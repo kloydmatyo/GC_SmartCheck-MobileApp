@@ -160,11 +160,11 @@ function sampleBubbleAt(
 //     Col 3: 134.8333mm → NX = (134.8333-6)/198 = 0.65067
 //     Col 4: 172.4167mm → NX = (172.4167-6)/198 = 0.84049
 //
-//   currentY after header+ID ≈ 81mm from page top
+//   currentY after header+ID ≈ 79mm from page top
 //   drawQBlock adds 5mm header → first bubble row at currentY+5
-//   Row 0 first bubble Y: 81+5 = 86mm → NY = (86-6)/285 = 0.28070
+//   Row 0 first bubble Y: 79+5 = 84mm → NY = (84-6)/285 = 0.27368
 //   blockVGap = 10×5.2 + 10 = 62mm
-//   Row 1 first bubble Y: 143+5 = 148mm → NY = (148-6)/285 = 0.49825
+//   Row 1 first bubble Y: 79+62+5 = 146mm → NY = (146-6)/285 = 0.49123
 //
 //   bubbleSpacingNX = 5.5 / 198 = 0.027778
 //   rowSpacingNY    = 5.2 / 285 = 0.018246
@@ -178,7 +178,8 @@ function get100ItemTemplateLayout(): TemplateLayout {
   // Exact first-bubble NX per column (A-choice center, derived from template source)
   const colNX = [0.08123, 0.27104, 0.46086, 0.65067, 0.84049];
   // Exact first-bubble NY per row (first question row center, derived from template source)
-  const rowNY = [0.2807, 0.49825];
+  // Template flow: currentY after ID = 79mm, drawQBlock adds 5mm header → first bubble at 84mm (row 0) and 146mm (row 1)
+  const rowNY = [(84 - 6) / fh, (146 - 6) / fh]; // [0.27368, 0.49123]
 
   // 10 blocks: 5 cols × 2 rows
   // Reading order: left-to-right across row 0, then row 1
@@ -389,13 +390,125 @@ function detectAnswersFromImage(
   return answers;
 }
 
+// ─── STUDENT ID DETECTION ───
+// Detects the 9-digit student ID from the ID bubble grid
+// Grid layout: 9 columns × 10 rows (digits 0-9 for each position)
+function detectStudentId(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  markers: Markers,
+): string {
+  const fw = 198,
+    fh = 285;
+
+  // ID section physical measurements (from drawFullSheet in answerSheetGenerator.ts):
+  // idLabelW = 6mm, idPad = 2mm, idColGap = 4.8mm
+  // idContentW = 6 + 9×4.8 = 49.2mm
+  // idBorderW = 49.2 + 2×2 = 53.2mm
+  // idBorderX = 10mm (left margin)
+  // idStartX = 10 + 2 + 6 = 18mm (first bubble column center)
+  //
+  // Normalized coordinates (relative to marker frame):
+  const idColGap = 4.8 / fw; // 0.024242
+  const idRowH = 4.0 / fh; // 0.014035
+  const idBubbleSize = 3.0 / fw; // bubble diameter
+
+  // First ID bubble position (column 0, row 0 = digit "0")
+  const firstIdNX = (18 - 6) / fw; // (18mm - marker offset) / frame width ≈ 0.0606
+  // Tracing template Y flow:
+  // startY=0 + cornerInset(2) + 3 = 5mm
+  // + logo(8) + 2 = 15mm
+  // + examCode(4) = 19mm
+  // + name/date(4) = 23mm (idTopY)
+  // + label(5.5) = 28.5mm
+  // + boxes(4.0) + spacing(2) = 34.5mm ← Row 0 bubble center
+  const firstIdNY = (36.5 - 6) / fh; // (28.5mm - marker offset) / frame height
+
+  const frameW = markers.topRight.x - markers.topLeft.x;
+  const frameH = markers.bottomLeft.y - markers.topLeft.y;
+  const bubbleRX = (idBubbleSize * frameW) / 2;
+  const bubbleRY = (idBubbleSize * frameH) / 2;
+
+  if (DEBUG_LOGS) {
+    console.log(
+      `[100Q-BRIGHTNESS] ID Detection: Frame ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
+    );
+  }
+
+  const digits: string[] = [];
+
+  // For each of the 9 ID digit columns
+  for (let col = 0; col < 9; col++) {
+    const fills: { digit: string; brightness: number }[] = [];
+
+    // Sample all 10 digit rows (0-9)
+    for (let row = 0; row < 10; row++) {
+      const nx = firstIdNX + col * idColGap;
+      const ny = firstIdNY + row * idRowH;
+      const { px, py } = mapToPixel(markers, nx, ny);
+
+      const brightness = sampleBubbleAt(
+        pixels,
+        width,
+        height,
+        px,
+        py,
+        bubbleRX,
+        bubbleRY,
+      );
+
+      fills.push({ digit: row.toString(), brightness });
+    }
+
+    // Find darkest (most filled) bubble in this column
+    const sorted = [...fills].sort((a, b) => a.brightness - b.brightness);
+    const darkest = sorted[0].brightness;
+    const secondDark = sorted[1]?.brightness ?? 255;
+    const brightest = sorted[sorted.length - 1].brightness;
+
+    // Use similar detection logic as answers but with more relaxed thresholds
+    // ID bubbles tend to be filled more lightly than answer bubbles
+    const ref = brightest;
+    const darkRatio = ref > 20 ? darkest / ref : 1;
+    const absoluteGap = secondDark - darkest;
+
+    // More lenient thresholds for ID detection
+    let selectedDigit = "0";
+    if (darkRatio < 0.88 && absoluteGap >= 5) {
+      // Accept if reasonably darker and has some gap
+      selectedDigit = sorted[0].digit;
+    } else if (absoluteGap >= 8) {
+      // Or if gap is clear regardless of ratio
+      selectedDigit = sorted[0].digit;
+    }
+
+    digits.push(selectedDigit);
+
+    if (DEBUG_LOGS && col < 3) {
+      // Log first 3 columns for debugging
+      console.log(
+        `[100Q-BRIGHTNESS] ID Col ${col}: darkest=${darkest.toFixed(0)} (digit ${sorted[0].digit}), gap=${absoluteGap.toFixed(0)}, ratio=${darkRatio.toFixed(2)} → ${selectedDigit}`,
+      );
+    }
+  }
+
+  const studentId = digits.join("");
+
+  if (DEBUG_LOGS) {
+    console.log(`[100Q-BRIGHTNESS] Detected Student ID: ${studentId}`);
+  }
+
+  return studentId;
+}
+
 // ─── MAIN EXPORT ───
 export async function scan100ItemWithBrightness(
   imageUri: string,
   markers: Markers,
   choicesPerQuestion: 4 | 5 = 5,
   enableBlockAutoAlign = false,
-): Promise<StudentAnswer[]> {
+): Promise<{ studentId: string; answers: StudentAnswer[] }> {
   console.log("[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
 
   try {
@@ -452,14 +565,26 @@ export async function scan100ItemWithBrightness(
     const detectedCount = answers.filter((a) => a.selectedAnswer).length;
     console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
 
-    return answers;
+    // Detect student ID
+    let studentId = "000000000";
+    try {
+      studentId = detectStudentId(pixels, width, height, markers);
+    } catch (idError) {
+      console.error("[100Q-BRIGHTNESS] Error detecting student ID:", idError);
+      studentId = "000000000";
+    }
+
+    return { studentId, answers };
   } catch (error) {
     console.error("[100Q-BRIGHTNESS] Error:", error);
 
-    // Return empty answers on error
-    return Array.from({ length: 100 }, (_, i) => ({
-      questionNumber: i + 1,
-      selectedAnswer: "",
-    }));
+    // Return empty result on error
+    return {
+      studentId: "000000000",
+      answers: Array.from({ length: 100 }, (_, i) => ({
+        questionNumber: i + 1,
+        selectedAnswer: "",
+      })),
+    };
   }
 }
