@@ -155,6 +155,7 @@ const QuestionRow = React.memo(
     prev.choices === next.choices &&
     prev.onSelect === next.onSelect,
 );
+QuestionRow.displayName = "QuestionRow";
 
 export default function EditAnswerKeyScreen() {
   const router = useRouter();
@@ -172,7 +173,7 @@ export default function EditAnswerKeyScreen() {
       ? router.replace(
         `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
       )
-      : router.replace("/(tabs)/quizzes");
+      : router.replace("/");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -435,7 +436,7 @@ export default function EditAnswerKeyScreen() {
     return { id: `ak_${examIdStr}`, data: null };
   };
 
-  const loadAnswerKey = async () => {
+  const loadAnswerKey = useCallback(async () => {
     try {
       resetAnswerKeyScreen();
 
@@ -573,7 +574,7 @@ export default function EditAnswerKeyScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [examId, goBack]);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing || saving) return;
@@ -722,11 +723,10 @@ export default function EditAnswerKeyScreen() {
           transaction.get(answerKeyRef),
         ]);
 
+        // Get exam data to verify existence
         if (!examSnap.exists()) {
           throw new Error("Exam not found");
         }
-
-        const examData = examSnap.data();
 
         const serverVersion = Number(answerKeySnap.data()?.version ?? 1);
         if (answerKeySnap.exists() && serverVersion !== answerKeyVersion) {

@@ -532,20 +532,16 @@ export default function ScannerScreen({
 
     const fetchExams = async () => {
       try {
-        const { collection, query, where, getDocs } =
-          await import("firebase/firestore");
-        const examsRef = collection(db, "exams");
-        const examsQuery = query(
-          examsRef,
-          where("classId", "==", selectedClass.id),
-        );
-        const snap = await getDocs(examsQuery);
-        const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setExamsList(list);
+        const { ExamService } = await import("../../services/examService");
+        const list = await ExamService.getExamsByUser();
+        
+        // Filter by classId
+        const filtered = list.filter((ex: any) => ex.classId === selectedClass.id);
+        setExamsList(filtered);
 
         // Handle pre-selection of exam if initialExamId is provided
         if (initialExamId) {
-          const matched = list.find((ex) => ex.id === initialExamId);
+          const matched = filtered.find((ex: any) => ex.id === initialExamId);
           if (matched) {
             setSelectedExam(matched);
           }

@@ -289,15 +289,31 @@ export class StudentValidationService {
         additionalInfo
       };
 
-      // In production, this would write to Firestore or analytics service
-      console.log('[VALIDATION LOG]', logEntry);
-      
       // REQ 8: Persist to Firestore backend logging
-      await addDoc(collection(db, 'validation_logs'), logEntry);
+      try {
+        const { NetworkService } = await import("./networkService");
+        const isOnline = await NetworkService.isOnline();
+        
+        if (isOnline) {
+          await addDoc(collection(db, 'validation_logs'), logEntry);
+          console.log('[VALIDATION LOG] Sent to Firestore');
+        } else {
+          throw new Error('Offline');
+        }
+      } catch {
+        // Queue for later if offline or failed
+        const { OfflineStorageService } = await import('./offlineStorageService');
+        await OfflineStorageService.queueUpdate(
+          studentId,
+          'audit_log',
+          { ...logEntry, collection: 'validation_logs' },
+          'exams' // Validation logs are queued in the exams queue for simplicity
+        );
+        console.log('[VALIDATION LOG] Queued for offline sync');
+      }
 
     } catch (error) {
       console.error('Failed to log validation:', error);
-      // Don't throw - logging failure shouldn't break validation
     }
   }
 
