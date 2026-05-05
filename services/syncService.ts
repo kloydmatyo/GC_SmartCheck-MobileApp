@@ -134,7 +134,7 @@ export class SyncService {
       // 4. Flush queued document updates
       try {
         const rawUpdates = await OfflineStorageService.getPendingUpdates();
-        
+
         // --- DEDUPLICATE UPDATES ---
         const pendingUpdates: PendingUpdate[] = [];
         const updateMap = new Map<string, PendingUpdate>();
@@ -146,7 +146,7 @@ export class SyncService {
               // Merge data into existing update, keeping the existing ID
               const existing = updateMap.get(key)!;
               existing.data = { ...existing.data, ...update.data };
-              
+
               // Remove this duplicate from local storage so it doesn't stay pending
               await OfflineStorageService.removePendingUpdate(update.id);
             } else {
@@ -298,12 +298,12 @@ export class SyncService {
 
     // 4. Fetch all staging data to ensure Cache reflects local reality
     const stagingRealm = await RealmService.getStagingRealm();
-    
+
     // Get pending updates (edits/deletes)
     const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>(
       "OfflinePendingUpdate",
     );
-        const updateMap = new Map<string, any>();
+    const updateMap = new Map<string, any>();
     const deletedIds = new Set<string>();
     pendingUpdates.forEach((u) => {
       if (u.action === "delete") {
@@ -328,7 +328,7 @@ export class SyncService {
 
       // 1. Insert fresh classes (Server + Staging)
       const processedClassIds = new Set<string>();
-      
+
       classesSnap.docs.forEach((doc) => {
         if (deletedIds.has(doc.id)) return;
         const data = doc.data();
@@ -378,7 +378,7 @@ export class SyncService {
           status: pendingData?.status || item.data.status || "Draft",
           papersCount: item.data.scanned_papers || 0,
           questionCount: pendingData?.num_items || item.data.num_items || 0,
-          answerKey: pendingData?.answers 
+          answerKey: pendingData?.answers
             ? JSON.stringify({ ...JSON.parse(item.answerKey || "{}"), answers: pendingData.answers })
             : item.answerKey,
           createdBy: item.data.createdBy,
@@ -628,8 +628,8 @@ export class SyncService {
           ) {
             console.warn(
               `[SyncService] Ownership mismatch for exam ${update.examId}: ` +
-                `createdBy="${serverData.createdBy}", instructorId="${serverData.instructorId}", ` +
-                `currentUser="${currentUser.uid}"`,
+              `createdBy="${serverData.createdBy}", instructorId="${serverData.instructorId}", ` +
+              `currentUser="${currentUser.uid}"`,
             );
             throw Object.assign(new Error("Permission denied: not the owner"), {
               code: "permission-denied",
