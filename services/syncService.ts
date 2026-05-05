@@ -256,19 +256,28 @@ export class SyncService {
     const lastSyncDate = lastSync ? Timestamp.fromDate(lastSync) : null;
 
     // Sync Classes
-    const classConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
-    if (lastSyncDate) classConstraints.push(where("updatedAt", ">", lastSyncDate));
-    const classesQuery = query(collection(db, "classes"), ...classConstraints);
+    const classesQuery = query(collection(db, "classes"), where("createdBy", "==", currentUser.uid));
     const classesSnap = await getDocs(classesQuery);
+    
+    // In-memory delta filter to bypass Firestore composite index requirement
+    const newOrUpdatedClasses = classesSnap.docs.filter(doc => {
+      if (!lastSyncDate) return true;
+      const data = doc.data();
+      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+    });
 
     // Sync Exams + their latest answer keys
-    const examConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
-    if (lastSyncDate) examConstraints.push(where("updatedAt", ">", lastSyncDate));
-    const examsQuery = query(collection(db, "exams"), ...examConstraints);
+    const examsQuery = query(collection(db, "exams"), where("createdBy", "==", currentUser.uid));
     const examsSnap = await getDocs(examsQuery);
+    
+    const newOrUpdatedExams = examsSnap.docs.filter(doc => {
+      if (!lastSyncDate) return true;
+      const data = doc.data();
+      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+    });
     const examsWithAK: any[] = [];
 
-    for (const examDoc of examsSnap.docs) {
+    for (const examDoc of newOrUpdatedExams) {
       const akQuery = query(
         collection(db, "answerKeys"),
         where("examId", "==", examDoc.id),
@@ -329,7 +338,7 @@ export class SyncService {
       // 1. Insert fresh classes (Server + Staging)
       const processedClassIds = new Set<string>();
 
-      classesSnap.docs.forEach((doc) => {
+      newOrUpdatedClasses.forEach((doc) => {
         if (deletedIds.has(doc.id)) return;
         const data = doc.data();
         processedClassIds.add(doc.id);

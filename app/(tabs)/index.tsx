@@ -206,6 +206,25 @@ export default function HomeScreen() {
     });
   }, [syncBannerOffset, syncBannerOpacity]);
 
+  const handleSyncPress = useCallback(async () => {
+    if (isSyncing || !isOnline) {
+      animateSyncBannerOut();
+      return;
+    }
+    
+    setIsSyncing(true);
+    try {
+      await SyncService.syncPendingUpdates();
+      setTimeout(() => animateSyncBannerOut(), 2000);
+    } catch (error) {
+      console.error("Manual sync failed", error);
+      animateSyncBannerOut();
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing, isOnline, animateSyncBannerOut]);
+
+
   const showSyncBannerTemporarily = useCallback(() => {
     setShowSyncBanner(true);
     syncBannerOpacity.setValue(0);
@@ -500,7 +519,7 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   style={styles.syncPillTouch}
                   activeOpacity={0.85}
-                  onPress={animateSyncBannerOut}
+                  onPress={handleSyncPress}
                 >
                   <View
                     style={[
