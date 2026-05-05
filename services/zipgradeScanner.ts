@@ -1189,10 +1189,10 @@ export class ZipgradeScanner {
       let detectedQ = qCount;
 
       if (qCount <= 20) {
-        // A 20-question sheet has exactly 100 bubbles (20 * 5).
-        // A 50-question sheet has 250 answer bubbles + 50 ID bubbles = 300 bubbles.
-        // Therefore, any sheet with > 160 bubbles is definitively a 50+ question sheet.
-        const looksLike50q = bubbles.length > 160;
+        // A 20-question sheet has 100 answer bubbles (20×5) + 90 ID bubbles (9×10) = 190 total
+        // A 50-question sheet has 250 answer bubbles (50×5) + 90 ID bubbles (9×10) = 340 total
+        // Therefore, any sheet with > 270 bubbles is definitively a 50-item sheet.
+        const looksLike50q = bubbles.length > 270;
 
         if (looksLike50q) {
           detectedQ = 50;
@@ -1449,6 +1449,47 @@ export class ZipgradeScanner {
         );
         return markers;
       };
+
+      // ── 20q template: try brightness scanning FIRST if we have corner markers ──
+      console.log(
+        `[OMR] 20q check: detectedQ=${detectedQ}, regMarks.length=${regMarks.length}, qCount=${qCount}`,
+      );
+      if (detectedQ === 20 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 20-item template (Skia pixel sampling)",
+        );
+
+        try {
+          const {
+            scan20ItemWithBrightness,
+          } = require("./brightnessScannerFor20Item");
+          const markers = extractCornerMarkers();
+          const result = await scan20ItemWithBrightness(
+            imageUri,
+            markers,
+            choicesPerQuestion,
+            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+          );
+
+          if (result && result.answers) {
+            allAnswers = result.answers;
+            studentId = result.studentId || "000000000";
+            console.log(
+              `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/20 answers, ID: ${studentId}`,
+            );
+          } else {
+            console.error("[OMR] 20Q scanner returned invalid result:", result);
+            allAnswers = Array.from({ length: 20 }, (_, i) => ({
+              questionNumber: i + 1,
+              selectedAnswer: "",
+            }));
+          }
+        } catch (scanError) {
+          console.error("[OMR] 20Q brightness scanner error:", scanError);
+          // Will fall through to region-based detection below
+          allAnswers = []; // Reset to trigger fallback
+        }
+      }
 
       // ── 50q template: try brightness scanning FIRST if we have corner markers ──
       console.log(
