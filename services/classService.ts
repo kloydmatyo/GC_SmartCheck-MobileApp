@@ -179,11 +179,13 @@ export class ClassService {
       const currentUser = auth.currentUser;
       if (!currentUser) return [];
 
-      // 1. Load from Staging & Cache Realm - FASTEST
-      const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm.objects<ClassCache>("ClassCache");
+      // 1. Load from Staging & Cache Realm concurrently for speed
+      const [cacheRealm, stagingRealm] = await Promise.all([
+        RealmService.getCacheRealm(),
+        RealmService.getStagingRealm()
+      ]);
 
-      const stagingRealm = await RealmService.getStagingRealm();
+      const cached = cacheRealm.objects<ClassCache>("ClassCache");
       const staging = stagingRealm.objects<OfflineClass>("OfflineClass");
 
       const localClasses: Class[] = [];
