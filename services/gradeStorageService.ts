@@ -88,33 +88,63 @@ export class GradeStorageService {
 
   static async validateStudentId(studentId: string): Promise<boolean> {
     try {
-      // ── 1. Check StudentCache Realm (fast, no network) ───────────────────
-      const { RealmService } = await import("./realmService");
-      const cacheRealm = await RealmService.getCacheRealm();
-      const cached = cacheRealm
-        .objects("StudentCache")
-        .filtered("student_id == $0", studentId);
-      if (cached.length > 0) return true;
+      const normalizedId = String(studentId || "").trim();
+      if (!normalizedId) return false;
 
-      // ── 2. Check ClassCache rosters (students embedded as JSON) ──────────
-      const allClasses = cacheRealm.objects("ClassCache");
-      for (const cls of allClasses as any) {
-        try {
-          const students: { student_id: string }[] = JSON.parse(
-            cls.students || "[]",
-          );
-          if (students.some((s) => s.student_id === studentId)) return true;
-        } catch {
-          // malformed JSON — skip
+      // ── Fast path: local cache (no network/index dependency) ─────────────
+      try {
+        const cacheRealm = await RealmService.getCacheRealm();
+        const cachedStudents = cacheRealm
+          .objects<any>("StudentCache")
+          .filtered("student_id == $0", normalizedId);
+        if (cachedStudents.length > 0) return true;
+
+        const cachedClasses = cacheRealm.objects<any>("ClassCache");
+        for (const classRow of cachedClasses) {
+          let parsedStudents: any[] = [];
+          try {
+            parsedStudents = JSON.parse(classRow.students || "[]");
+          } catch (_) {
+            parsedStudents = [];
+          }
+
+          const existsInClass = parsedStudents.some((s: any) => {
+            const candidate = String(
+              s?.student_id ?? s?.studentId ?? s?.id ?? "",
+            ).trim();
+            return candidate === normalizedId;
+          });
+
+          if (existsInClass) return true;
         }
+      } catch (cacheErr) {
+        console.warn(
+          "[GradeStorageService] Cache lookup failed during student validation:",
+          cacheErr,
+        );
       }
 
-      // ── 3. Fallback: single Firestore query by student_id field (both variants) ──────────
-      const [studentFieldSnap, studentCamelSnap] = await Promise.all([
-        getDocs(query(collection(db, "students"), where("student_id", "==", studentId))),
-        getDocs(query(collection(db, "students"), where("studentId", "==", studentId))),
-      ]);
-      if (!studentFieldSnap.empty || !studentCamelSnap.empty) return true;
+      // ── Primary: check top-level `students` collection ──────────────────
+      // 1a. Document ID is the student ID (most common pattern in this app)
+      const directRef = doc(db, "students", normalizedId);
+      const directSnap = await getDoc(directRef);
+      if (directSnap.exists()) return true;
+
+      // 1b. `student_id` field within the collection
+      const studentFieldQ = query(
+        collection(db, "students"),
+        where("student_id", "==", normalizedId),
+      );
+      const studentFieldSnap = await getDocs(studentFieldQ);
+      if (!studentFieldSnap.empty) return true;
+
+      // 1c. `studentId` field (camelCase variant) within the collection
+      const studentCamelQ = query(
+        collection(db, "students"),
+        where("studentId", "==", normalizedId),
+      );
+      const studentCamelSnap = await getDocs(studentCamelQ);
+      if (!studentCamelSnap.empty) return true;
 
       LogService.warn(
         "STUDENT_ID_INVALID",
@@ -175,9 +205,9 @@ export class GradeStorageService {
           "EXAM_ID_INVALID",
           "Failed to validate exam ID anywhere",
           {
-            examId,
-            error,
-          },
+              examId,
+              error,
+            },
         );
         return true; // Allow as a last resort if everything fails
       }
@@ -307,7 +337,7 @@ export class GradeStorageService {
           message: `Student ID "${result.studentId}" was not found in the database.`,
         };
       }
-    } catch (_err) {
+    } catch (err) {
       console.warn(
         "[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.",
       );
@@ -326,7 +356,7 @@ export class GradeStorageService {
           message: `Exam ID "${resolvedExamId}" is not active or does not exist.`,
         };
       }
-    } catch (_err) {
+    } catch (err) {
       console.warn(
         "[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.",
       );
@@ -349,7 +379,7 @@ export class GradeStorageService {
           message: `A grade for Student ${result.studentId} in this exam already exists.`,
         };
       }
-    } catch (_err) {
+    } catch (err) {
       console.warn(
         "[GradeStorageService] Duplicate check timed out. Proceeding.",
       );

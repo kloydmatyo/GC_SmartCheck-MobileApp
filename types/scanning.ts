@@ -14,6 +14,7 @@ export interface ScanResult {
   answers: StudentAnswer[];
   confidence: number; // 0-1 scale
   processedImageUri?: string;
+  idRegionImageUri?: string; // Cropped ID region for visual verification
 }
 
 export interface GradingResult {
@@ -85,4 +86,8 @@ export interface BubbleDetection {
   height: number;
   filled: boolean;
   confidence: number;
+  originalX?: number;
+  originalY?: number;
+  originalW?: number;
+  originalH?: number;
 }

@@ -1,29 +1,31 @@
 import { Ionicons } from "@expo/vector-icons";
-import NetInfo from "@react-native-community/netinfo";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    Alert,
-    Modal,
-    Platform,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+      Alert,
+      Image,
+      Modal,
+      Platform,
+      ScrollView,
+      StatusBar,
+      StyleSheet,
+      Text,
+      TextInput,
+      TouchableOpacity,
+      View,
 } from "react-native";
 import Toast from "react-native-toast-message";
+import NetInfo from "@react-native-community/netinfo";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { ClassService } from "../../services/classService";
 import {
-    DuplicateScoreDetectionService,
-    DuplicateScoreMatch,
+      DuplicateScoreDetectionService,
+      DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
 import { StorageService } from "../../services/storageService";
+import { Class } from "../../types/class";
 import { GradingResult, ScanResult, StudentAnswer } from "../../types/scanning";
 import { DuplicateScoreWarningModal } from "../modals/DuplicateScoreWarningModal";
 import CameraScanner from "./CameraScanner";
@@ -443,6 +445,75 @@ function normalize200ScanMapping(
     : scanResult;
 }
 
+function normalizeStudentId(value: unknown): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function extractClassRosterIds(selectedClass: Class | null): string[] {
+  if (!selectedClass?.students?.length) return [];
+
+  const ids = selectedClass.students
+    .map((student) =>
+      normalizeStudentId(
+        (student as any)?.student_id ?? (student as any)?.studentId,
+      ),
+    )
+    .filter((id) => id.length > 0);
+
+  return Array.from(new Set(ids));
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const prev = new Array(b.length + 1).fill(0);
+  const curr = new Array(b.length + 1).fill(0);
+
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+
+  return prev[b.length];
+}
+
+function findClosestRosterId(
+  scannedId: string,
+  rosterIds: string[],
+): string | null {
+  if (!scannedId || rosterIds.length === 0) return null;
+
+  const comparable = rosterIds.filter(
+    (id) => Math.abs(id.length - scannedId.length) <= 2,
+  );
+  if (comparable.length === 0) return null;
+
+  const ranked = comparable
+    .map((id) => ({
+      id,
+      distance: levenshteinDistance(scannedId, id),
+    }))
+    .sort((a, b) => a.distance - b.distance);
+
+  const best = ranked[0];
+  const second = ranked[1];
+  const hasClearLead = !second || best.distance + 1 <= second.distance;
+
+  if (best.distance <= 2 && hasClearLead) {
+    return best.id;
+  }
+
+  return null;
+}
+
 type ScannerState = "exam-select" | "camera" | "results";
 
 interface ScannerScreenProps {
@@ -469,13 +540,8 @@ export default function ScannerScreen({
   );
 
   // class/exam dropdown state
-  const [classesList, setClassesList] = useState<
-    { id: string; class_name?: string }[]
-  >([]);
-  const [selectedClass, setSelectedClass] = useState<{
-    id: string;
-    class_name?: string;
-  } | null>(null);
+  const [classesList, setClassesList] = useState<Class[]>([]);
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [examsList, setExamsList] = useState<any[]>([]);
   const [selectedExam, setSelectedExam] = useState<any | null>(null);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
@@ -514,6 +580,8 @@ export default function ScannerScreen({
   );
   const [scanCount, setScanCount] = useState(0);
   const [cachedAnswerKey, setCachedAnswerKey] = useState<string[] | null>(null);
+  const [examIdInput, setExamIdInput] = useState("");
+  const [isValidatingExam, setIsValidatingExam] = useState(false);
 
   // ── 2-Stage scanning state for 200-item exams ───────────────────────────
   const [twoStageData, setTwoStageData] = useState<{
@@ -524,6 +592,11 @@ export default function ScannerScreen({
   const [showPage1Confirmation, setShowPage1Confirmation] = useState(false);
 
   // ── Manual student ID entry (fallback when OMR can't read bubbles) ──────
+  const [cornerBoxErrorModal, setCornerBoxErrorModal] = useState<{
+    visible: boolean;
+    message: string;
+  }>({ visible: false, message: "" });
+
   const [manualIdModal, setManualIdModal] = useState<{
     visible: boolean;
     pendingScan: ScanResult | null;
@@ -535,13 +608,15 @@ export default function ScannerScreen({
     pendingImage: "",
     input: "",
   });
-  const [cornerBoxErrorModal, setCornerBoxErrorModal] = useState<{
-    visible: boolean;
-    message: string;
-  }>({
-    visible: false,
-    message: "",
-  });
+
+  // ── Student ID confirmation (always shown after scan) ───────────────────
+  const [idConfirmation, setIdConfirmation] = useState<{
+    active: boolean;
+    scanResult: ScanResult | null;
+    imageUri: string;
+    editedId: string;
+    rosterSearch: string;
+  } | null>(null);
 
   // ----- new behaviour for class/exam selection UI -----
   // load classes for teacher
@@ -575,16 +650,18 @@ export default function ScannerScreen({
 
     const fetchExams = async () => {
       try {
-        const { ExamService } = await import("../../services/examService");
-        const list = await ExamService.getExamsByUser();
-        
-        // Filter by classId
-        const filtered = list.filter((ex: any) => ex.classId === selectedClass.id);
-        setExamsList(filtered);
+        const examsRef = collection(db, "exams");
+        const examsQuery = query(
+          examsRef,
+          where("classId", "==", selectedClass.id),
+        );
+        const snap = await getDocs(examsQuery);
+        const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setExamsList(list);
 
         // Handle pre-selection of exam if initialExamId is provided
         if (initialExamId) {
-          const matched = filtered.find((ex: any) => ex.id === initialExamId);
+          const matched = list.find((ex: any) => ex.id === initialExamId);
           if (matched) {
             setSelectedExam(matched);
           }
@@ -634,7 +711,7 @@ export default function ScannerScreen({
         if (!akSnap.empty) {
           // Pick the highest-version doc (same logic as ExamService)
           let best = akSnap.docs[0];
-          akSnap.docs.slice(1).forEach((d) => {
+          akSnap.docs.slice(1).forEach((d: any) => {
             if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
           });
           const akData = best.data();
@@ -698,12 +775,82 @@ export default function ScannerScreen({
     };
   }, [activeExamId]);
 
+  // ── ID Confirmation handlers ────────────────────────────────────────────
   const handleScanComplete = async (
     scanResult: ScanResult,
     imageUri: string,
   ) => {
+    // Always show the ID confirmation screen
+    const detectedId = normalizeStudentId(scanResult.studentId);
+    const isInvalidId = !detectedId || /^0+$/.test(detectedId) || detectedId === "Unknown";
+    setIdConfirmation({
+      active: true,
+      scanResult,
+      imageUri,
+      editedId: isInvalidId ? "" : detectedId,
+      rosterSearch: "",
+    });
+  };
+
+  const handleConfirmStudentId = () => {
+    if (!idConfirmation?.scanResult) return;
+    const confirmedResult: ScanResult = {
+      ...idConfirmation.scanResult,
+      studentId: idConfirmation.editedId,
+    };
+    const imageUri = idConfirmation.imageUri;
+    setIdConfirmation(null);
+    proceedWithGrading(confirmedResult, imageUri);
+  };
+
+  const handleRescanFromConfirmation = () => {
+    setIdConfirmation(null);
+    setScanCount((prev) => prev + 1);
+  };
+
+  const proceedWithGrading = async (
+    scanResult: ScanResult,
+    imageUri: string,
+  ) => {
     try {
-      const studentId = scanResult.studentId;
+      let effectiveScanResult = scanResult;
+      let studentId = normalizeStudentId(effectiveScanResult.studentId);
+      let classRosterIds = extractClassRosterIds(selectedClass);
+
+      if (classRosterIds.length === 0 && selectedClass?.id) {
+        try {
+          const freshClass = await ClassService.getClassById(selectedClass.id);
+          classRosterIds = extractClassRosterIds(freshClass as Class | null);
+          if (classRosterIds.length > 0) {
+            console.log(
+              `[ScannerScreen] Loaded ${classRosterIds.length} student IDs from class roster for verification`,
+            );
+          }
+        } catch (rosterErr) {
+          console.warn(
+            "[ScannerScreen] Could not load full class roster for ID verification",
+            rosterErr,
+          );
+        }
+      }
+
+      if (
+        studentId &&
+        classRosterIds.length > 0 &&
+        !classRosterIds.includes(studentId)
+      ) {
+        const closestRosterId = findClosestRosterId(studentId, classRosterIds);
+        if (closestRosterId) {
+          console.log(
+            `[ScannerScreen] Auto-corrected student ID from ${studentId} to roster match ${closestRosterId}`,
+          );
+          studentId = closestRosterId;
+          effectiveScanResult = {
+            ...effectiveScanResult,
+            studentId: closestRosterId,
+          };
+        }
+      }
 
       // Ensure that a valid student ID was parsed
       const isInvalidId =
@@ -716,7 +863,7 @@ export default function ScannerScreen({
         // Show manual entry modal instead of hard-blocking
         setManualIdModal({
           visible: true,
-          pendingScan: { ...scanResult, studentId: "" },
+          pendingScan: { ...effectiveScanResult, studentId: "" },
           pendingImage: imageUri,
           input: "",
         });
@@ -725,7 +872,7 @@ export default function ScannerScreen({
 
       console.log(`[ScannerScreen] Detected student ID: ${studentId}`);
 
-      // ── 1. Fast Student Verification ──
+      // ── 1. Fast Student Verification (local-first) ──
       let isValidId = false;
       const netState = await NetInfo.fetch();
 
@@ -783,13 +930,10 @@ export default function ScannerScreen({
           }
         } catch (err) {
           console.warn(
-            "[ScannerScreen] Student verification timed out. Assuming valid.",
+            "[ScannerScreen] Fast validation timed out. Assuming valid.",
           );
           isValidId = true;
         }
-      } else {
-        console.log("[ScannerScreen] Offline - Skipping network validation.");
-        isValidId = true; // Trust ID while offline
       }
 
       if (!isValidId) {
@@ -816,7 +960,7 @@ export default function ScannerScreen({
 
           if (!akSnap.empty) {
             let best = akSnap.docs[0];
-            akSnap.docs.slice(1).forEach((d) => {
+            akSnap.docs.slice(1).forEach((d: any) => {
               if ((d.data().version ?? 0) > (best.data().version ?? 0))
                 best = d;
             });
@@ -1131,16 +1275,12 @@ export default function ScannerScreen({
     handleScanComplete(correctedScan, pendingImage);
   };
 
-  const handleScannerError = (message: string) => {
-    if (
-      examQuestionCount === 200 &&
-      /could not detect all 4 corner boxes/i.test(message)
-    ) {
-      setCornerBoxErrorModal({ visible: true, message });
-      return;
+  const handleScannerError = (error: string) => {
+    if (error.includes("200-item") && error.includes("corner markers")) {
+      setCornerBoxErrorModal({ visible: true, message: error });
+    } else {
+      Alert.alert("Scanner Error", error);
     }
-
-    Alert.alert("Error", message);
   };
 
   const handleDismissCornerBoxModal = () => {
@@ -1151,7 +1291,7 @@ export default function ScannerScreen({
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
       {/* ── Camera (Always Visible) ── */}
-      {currentState !== "results" && !showPage1Confirmation && (
+      {currentState !== "results" && !showPage1Confirmation && !idConfirmation?.active && (
         <CameraScanner
           key={`cam-${scanCount}`}
           questionCount={examQuestionCount}
@@ -1172,7 +1312,7 @@ export default function ScannerScreen({
       )}
 
       {/* ── Header Overlay (Back + Title) ── */}
-      {currentState !== "results" && (
+      {currentState !== "results" && !idConfirmation?.active && (
         <View style={styles.headerOverlay}>
           <TouchableOpacity
             onPress={handleClose}
@@ -1186,7 +1326,7 @@ export default function ScannerScreen({
       )}
 
       {/* ── Selectors Overlay (Class & Exam side-by-side) ── */}
-      {currentState !== "results" && (
+      {currentState !== "results" && !idConfirmation?.active && (
         <View style={styles.selectorsOverlay}>
           <TouchableOpacity
             style={styles.selectorField}
@@ -1304,6 +1444,119 @@ export default function ScannerScreen({
           </ScrollView>
         </View>
       </Modal>
+
+      {/* ── Student ID Confirmation Screen ── */}
+      {idConfirmation?.active && (
+        <View style={styles.idConfirmContainer}>
+          <View style={styles.idConfirmHeader}>
+            <TouchableOpacity onPress={handleRescanFromConfirmation}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.idConfirmTitle}>Verify Student ID</Text>
+            <View style={{ flex: 1 }} />
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+            {/* Zoomed ID Region Image */}
+            {idConfirmation.scanResult?.idRegionImageUri ? (
+              <Image
+                source={{ uri: idConfirmation.scanResult.idRegionImageUri }}
+                style={styles.idRegionImage}
+                resizeMode="contain"
+              />
+            ) : (
+              <View style={[styles.idRegionImage, { justifyContent: "center", alignItems: "center" }]}>
+                <Ionicons name="scan-outline" size={40} color="#555" />
+                <Text style={{ color: "#555", marginTop: 8, fontSize: 13 }}>ID region not available</Text>
+              </View>
+            )}
+
+            {/* Editable Student ID */}
+            <Text style={styles.idConfirmLabel}>Student ID</Text>
+            <TextInput
+              style={styles.idConfirmInput}
+              value={idConfirmation.editedId}
+              onChangeText={(text) =>
+                setIdConfirmation({ ...idConfirmation, editedId: text })
+              }
+              keyboardType="number-pad"
+              placeholder="Enter Student ID"
+              placeholderTextColor="#555"
+              maxLength={15}
+            />
+
+            {/* Roster Picker */}
+            {selectedClass?.students && selectedClass.students.length > 0 && (
+              <>
+                <Text style={styles.rosterLabel}>— or select from roster —</Text>
+                <TextInput
+                  style={styles.rosterSearch}
+                  placeholder="🔍 Search by name or ID..."
+                  placeholderTextColor="#666"
+                  value={idConfirmation.rosterSearch}
+                  onChangeText={(text) =>
+                    setIdConfirmation({ ...idConfirmation, rosterSearch: text })
+                  }
+                />
+                <View style={styles.rosterList}>
+                  {selectedClass.students
+                    .filter((s) => {
+                      const q = (idConfirmation.rosterSearch || "").toLowerCase();
+                      if (!q) return true;
+                      return (
+                        (s.student_id || "").includes(q) ||
+                        (s.first_name || "").toLowerCase().includes(q) ||
+                        (s.last_name || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 20)
+                    .map((student) => (
+                      <TouchableOpacity
+                        key={student.student_id}
+                        style={[
+                          styles.rosterItem,
+                          idConfirmation.editedId === student.student_id && styles.rosterItemSelected,
+                        ]}
+                        onPress={() =>
+                          setIdConfirmation({
+                            ...idConfirmation,
+                            editedId: student.student_id,
+                          })
+                        }
+                      >
+                        <Text style={styles.rosterStudentId}>
+                          {student.student_id}
+                        </Text>
+                        <Text style={styles.rosterStudentName}>
+                          {student.last_name}, {student.first_name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                </View>
+              </>
+            )}
+          </ScrollView>
+
+          {/* Action Buttons */}
+          <View style={styles.idConfirmActions}>
+            <TouchableOpacity style={styles.rescanBtn} onPress={handleRescanFromConfirmation}>
+              <Ionicons name="camera" size={20} color="#fff" />
+              <Text style={styles.rescanBtnText}>Rescan</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.confirmBtn,
+                !idConfirmation.editedId && styles.confirmBtnDisabled,
+              ]}
+              onPress={handleConfirmStudentId}
+              disabled={!idConfirmation.editedId}
+            >
+              <Ionicons name="checkmark-circle" size={20} color="#fff" />
+              <Text style={styles.confirmBtnText}>Confirm & Grade</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* ── Results ── */}
       {currentState === "results" && gradingResult && (
@@ -1757,34 +2010,157 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
   },
-  cornerErrorTipsCard: {
+  // ── ID Confirmation Screen ──────────────────────────────────────────────
+  idConfirmContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#0f0f0f",
+    padding: 20,
+    zIndex: 50,
+  },
+  idConfirmHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 20,
+    paddingTop: Platform.OS === "ios" ? 50 : (StatusBar.currentHeight ?? 20) + 4,
+  },
+  idConfirmTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  idRegionImage: {
     width: "100%",
-    backgroundColor: "#fff7ef",
-    borderWidth: 1,
-    borderColor: "#fde2cc",
+    height: 180,
     borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 16,
+    backgroundColor: "#1a1a1a",
+    marginBottom: 20,
+  },
+  idConfirmLabel: {
+    color: "#aaa",
+    fontSize: 14,
+    marginBottom: 6,
+  },
+  idConfirmInput: {
+    backgroundColor: "#1a1a1a",
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "600",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#333",
+    marginBottom: 20,
+    textAlign: "center",
+    letterSpacing: 4,
+  },
+  rosterLabel: {
+    color: "#666",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 10,
+  },
+  rosterSearch: {
+    backgroundColor: "#1a1a1a",
+    color: "#fff",
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#333",
+    marginBottom: 8,
+  },
+  rosterList: {
+    maxHeight: 220,
+    marginBottom: 20,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  rosterItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#222",
+    backgroundColor: "#141414",
+  },
+  rosterItemSelected: {
+    backgroundColor: "#1a3a1a",
+    borderLeftWidth: 3,
+    borderLeftColor: "#22c55e",
+  },
+  rosterStudentId: {
+    color: "#22c55e",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  rosterStudentName: {
+    color: "#aaa",
+    fontSize: 14,
+  },
+  idConfirmActions: {
+    position: "absolute",
+    bottom: 30,
+    left: 20,
+    right: 20,
+    flexDirection: "row",
+    gap: 12,
+  },
+  rescanBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#333",
+  },
+  rescanBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  confirmBtn: {
+    flex: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#22c55e",
+  },
+  confirmBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  confirmBtnDisabled: {
+    opacity: 0.4,
   },
   cornerErrorDetailText: {
-    width: "100%",
-    fontSize: 12,
-    color: "#8f8f8f",
-    textAlign: "center",
-    marginBottom: 12,
-    lineHeight: 17,
+    color: '#d35400',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 12,
+  },
+  cornerErrorTipsCard: {
+    backgroundColor: '#fff3cd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    width: '100%',
   },
   cornerErrorTipsTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#a54900",
+    fontWeight: 'bold',
+    color: '#856404',
     marginBottom: 8,
   },
   cornerErrorTipText: {
+    color: '#856404',
     fontSize: 13,
-    color: "#7a4b24",
-    lineHeight: 19,
-    marginBottom: 3,
+    marginBottom: 4,
   },
 });

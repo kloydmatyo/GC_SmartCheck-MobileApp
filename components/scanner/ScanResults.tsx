@@ -7,14 +7,13 @@ import {
   Image,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import { StorageService } from "../../services/storageService";
 import { GradingResult } from "../../types/scanning";
@@ -198,7 +197,9 @@ export default function ScanResults({
       >
         <View style={styles.titleContainer}>
           <Text style={styles.screenGreeting}>Scan Result</Text>
-          <Text style={styles.screenSubtext}>Review and verify the captured data</Text>
+          <Text style={styles.screenSubtext}>
+            Review and verify the captured data
+          </Text>
         </View>
 
         {/* Scanned Image Section */}
@@ -232,7 +233,12 @@ export default function ScanResults({
         {result.studentId && (
           <View style={[styles.section, isEditingId && styles.sectionEditing]}>
             <View style={styles.sectionHeader}>
-              <View style={[styles.sectionIconContainer, { backgroundColor: '#E8F5E9' }]}>
+              <View
+                style={[
+                  styles.sectionIconContainer,
+                  { backgroundColor: "#E8F5E9" },
+                ]}
+              >
                 <Ionicons name="person" size={16} color="#1FC27D" />
               </View>
               <Text style={styles.sectionTitle}>Student Identity</Text>
@@ -258,16 +264,24 @@ export default function ScanResults({
                   autoFocus
                 />
                 <View style={styles.editActions}>
-                  <TouchableOpacity onPress={handleCancelEdit} style={styles.actionBtnCancel}>
+                  <TouchableOpacity
+                    onPress={handleCancelEdit}
+                    style={styles.actionBtnCancel}
+                  >
                     <Ionicons name="close" size={20} color="#FF4B4B" />
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={handleSaveId} style={styles.actionBtnSave}>
+                  <TouchableOpacity
+                    onPress={handleSaveId}
+                    style={styles.actionBtnSave}
+                  >
                     <Ionicons name="checkmark" size={20} color="#1FC27D" />
                   </TouchableOpacity>
                 </View>
               </View>
             ) : (
-              <Text style={styles.studentIdValue}>{editedStudentId || "Unknown"}</Text>
+              <Text style={styles.studentIdValue}>
+                {editedStudentId || "Unknown"}
+              </Text>
             )}
           </View>
         )}
@@ -275,21 +289,35 @@ export default function ScanResults({
         {/* Breakdown Section */}
         <View style={[styles.section, styles.breakdownSection]}>
           <View style={styles.sectionHeader}>
-            <View style={[styles.sectionIconContainer, { backgroundColor: '#E3F2FD' }]}>
+            <View
+              style={[
+                styles.sectionIconContainer,
+                { backgroundColor: "#E3F2FD" },
+              ]}
+            >
               <Ionicons name="help-circle-outline" size={18} color="#2196F3" />
             </View>
-            <Text style={styles.sectionTitle}>Point Breakdown ({totalQuestions} items)</Text>
+            <Text style={styles.sectionTitle}>
+              Point Breakdown ({totalQuestions} items)
+            </Text>
           </View>
 
           <View style={styles.breakdownList}>
             {details.length > 0 ? (
               details.map((item, index) => {
-                const studentAns = item.studentAnswer || (item as any).selectedAnswer || "—";
+                const studentAns =
+                  item.studentAnswer || (item as any).selectedAnswer || "—";
                 const correctAns = item.correctAnswer || "—";
                 const isCorrect = item.isCorrect ?? false;
 
                 return (
-                  <View key={index} style={[styles.row, index === details.length - 1 && styles.lastRow]}>
+                  <View
+                    key={index}
+                    style={[
+                      styles.row,
+                      index === details.length - 1 && styles.lastRow,
+                    ]}
+                  >
                     <View style={styles.qIndicator}>
                       <Text style={styles.qNumber}>{item.questionNumber}</Text>
                     </View>
@@ -297,7 +325,14 @@ export default function ScanResults({
                     <View style={styles.comparison}>
                       <View style={styles.ansBlock}>
                         <Text style={styles.ansLabel}>SCANNED</Text>
-                        <Text style={[styles.ansValue, !isCorrect && styles.textError]}>{studentAns}</Text>
+                        <Text
+                          style={[
+                            styles.ansValue,
+                            !isCorrect && styles.textError,
+                          ]}
+                        >
+                          {studentAns}
+                        </Text>
                       </View>
 
                       <Ionicons name="arrow-forward" size={12} color="#DDD" />
@@ -308,7 +343,12 @@ export default function ScanResults({
                       </View>
                     </View>
 
-                    <View style={[styles.statusTag, isCorrect ? styles.bgSuccess : styles.bgError]}>
+                    <View
+                      style={[
+                        styles.statusTag,
+                        isCorrect ? styles.bgSuccess : styles.bgError,
+                      ]}
+                    >
                       <Ionicons
                         name={isCorrect ? "checkmark" : "close"}
                         size={12}
@@ -319,7 +359,9 @@ export default function ScanResults({
                 );
               })
             ) : (
-              <Text style={styles.emptyText}>No analysis data for this sheet.</Text>
+              <Text style={styles.emptyText}>
+                No analysis data for this sheet.
+              </Text>
             )}
           </View>
         </View>
@@ -342,7 +384,12 @@ export default function ScanResults({
         </View>
         <TouchableOpacity style={styles.nextBtn} onPress={onScanAnother}>
           <Text style={styles.nextText}>Quick Scan</Text>
-          <Ionicons name="scan-outline" size={18} color="#FFF" style={{ marginLeft: 6 }} />
+          <Ionicons
+            name="scan-outline"
+            size={18}
+            color="#FFF"
+            style={{ marginLeft: 6 }}
+          />
         </TouchableOpacity>
       </View>
 
@@ -355,7 +402,11 @@ export default function ScanResults({
           >
             <Ionicons name="close" size={24} color="#FFF" />
           </TouchableOpacity>
-          <Image source={{ uri: imageUri }} style={styles.fullImage} resizeMode="contain" />
+          <Image
+            source={{ uri: imageUri }}
+            style={styles.fullImage}
+            resizeMode="contain"
+          />
         </View>
       </Modal>
     </View>
@@ -371,7 +422,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16, // Reduced from 20 for better edge fit
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 55,
+    paddingTop:
+      Platform.OS === "android" ? (StatusBar.currentHeight || 24) + 12 : 55,
     paddingBottom: 15,
     backgroundColor: "#FFF",
     borderBottomWidth: 1,
@@ -656,7 +708,6 @@ const styles = StyleSheet.create({
   modalBg: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
     alignItems: "center",
   },
   btnExport: {

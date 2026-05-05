@@ -1,10 +1,11 @@
 import { ZipgradeScanner } from "@/services/zipgradeScanner";
-import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as ImageManipulator from "expo-image-manipulator";
 import React, { useRef, useState } from "react";
 import {
     Alert,
-    StyleSheet,
+    Platform,
+  StyleSheet,
     Text,
     TouchableOpacity,
     View,
@@ -14,8 +15,8 @@ import { ScanResult } from "../../types/scanning";
 
 interface CameraScannerProps {
   questionCount?: number; // Number of questions in the exam
-  choicesPerQuestion?: 4 | 5; // Expected answer choices for this exam
-  scanStage?: { current: 1 | 2; total: 2 }; // For 2-stage 200-item scanning
+  choicesPerQuestion?: 4 | 5;
+  scanStage?: { current: 1 | 2; total: number };
   onScanComplete: (result: ScanResult, imageUri: string) => void;
   onScanError?: (message: string) => void;
   onCancel: () => void;
@@ -33,7 +34,20 @@ export default function CameraScanner({
   const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false); // controls history overlay
   const cameraRef = useRef<CameraView>(null);
+  const guideCropEnabledRef = useRef(true);
+
+  const isImageManipulatorRuntimeMismatch = (error: unknown) => {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "");
+
+    return (
+      message.includes("ExpoImageManipulator.manipulate") ||
+      message.includes("getRuntimeContext") ||
+      message.includes("NoSuchMethodError")
+    );
+  };
 
   if (!permission) {
     // Camera permissions are still loading
@@ -49,12 +63,6 @@ export default function CameraScanner({
           { justifyContent: "center", alignItems: "center", padding: 20 },
         ]}
       >
-        <Ionicons
-          name="camera-outline"
-          size={64}
-          color="white"
-          style={{ marginBottom: 20 }}
-        />
         <Text
           style={{
             color: "white",
@@ -103,23 +111,33 @@ export default function CameraScanner({
 
   // Calculate frame dimensions based on template aspect ratio
   const getFrameDimensions = () => {
+    // We want a very close-up capture to maximize image resolution for bubble detection.
     // Fit the guide frame inside the screen with a consistent margin
     const maxW = screenWidth * 0.88;
     const maxH = screenHeight * 0.72;
 
     if (questionCount <= 20) {
+      // 20-item: 105mm × 148.5mm (aspect ~0.707)
+      const targetWidth = screenWidth * 0.92;
+      return { width: targetWidth, height: targetWidth / 0.707 };
       // 20-item: quarter-page portrait — 105mm × 148.5mm (aspect ~0.707)
       const aspect = 105 / 148.5;
       const h = Math.min(maxH, maxW / aspect);
       const w = h * aspect;
       return { width: Math.round(w), height: Math.round(h) };
     } else if (questionCount <= 50) {
+      // 50-item: 105mm × 297mm (aspect ~0.354, very tall/narrow)
+      const targetHeight = screenHeight * 0.82;
+      return { width: targetHeight * 0.354, height: targetHeight };
       // 50-item: half-page LANDSCAPE — 210mm × 148.5mm (aspect ~1.414, wider than tall)
       const aspect = 210 / 148.5;
       const w = Math.min(maxW, maxH * aspect);
       const h = w / aspect;
       return { width: Math.round(w), height: Math.round(h) };
     } else {
+      // 100-item: 210mm × 297mm (aspect ~0.707, A4 paper)
+      const targetWidth = screenWidth * 0.92;
+      return { width: targetWidth, height: targetWidth / 0.707 };
       // 100-item / 200-item: full A4 portrait — 210mm × 297mm (aspect ~0.707)
       const aspect = 210 / 297;
       const h = Math.min(maxH, maxW / aspect);
@@ -130,50 +148,157 @@ export default function CameraScanner({
 
   const frameDimensions = getFrameDimensions();
 
-  // Returns scan region zones to overlay on the guide frame.
-  // Coordinates mirror the scanner's getLayoutRegions() fractions exactly.
-  const getScanRegions = (): Array<{
-    label: string;
-    xMin: number;
-    xMax: number;
-    yMin: number;
-    yMax: number;
-  }> => {
-    if (questionCount <= 20) {
-      return [
-        { label: "Q1–10", xMin: 0.26, xMax: 0.5, yMin: 0.38, yMax: 0.95 },
-        { label: "Q11–20", xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95 },
-      ];
-    } else if (questionCount <= 50) {
-      // 5 horizontal columns matching the template's single-row layout
-      return [
-        { label: "Q1–10", xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97 },
-        { label: "Q11–20", xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97 },
-        { label: "Q21–30", xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97 },
-        { label: "Q31–40", xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97 },
-        { label: "Q41–50", xMin: 0.77, xMax: 0.97, yMin: 0.52, yMax: 0.97 },
-      ];
-    } else {
-      // 5 columns × 2 rows matching the 100q template grid
-      // Derived from drawFullSheet() physical measurements in templatePdfGenerator.ts
-      return [
-        // Row 0 (top)
-        { label: "Q1–10", xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49 },
-        { label: "Q21–30", xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49 },
-        { label: "Q41–50", xMin: 0.4, xMax: 0.6, yMin: 0.27, yMax: 0.49 },
-        { label: "Q61–70", xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49 },
-        { label: "Q81–90", xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49 },
-        // Row 1 (bottom)
-        { label: "Q11–20", xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.7 },
-        { label: "Q31–40", xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.7 },
-        { label: "Q51–60", xMin: 0.4, xMax: 0.6, yMin: 0.47, yMax: 0.7 },
-        { label: "Q71–80", xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.7 },
-        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.7 },
-      ];
+  // Helper to draw expected bubble locations based on zipgradeScanner.ts grid models
+  const renderGridDots = (
+    cols: number,
+    rows: number,
+    startX: number,
+    startY: number,
+    spacingX: number,
+    spacingY: number,
+    color: string
+  ) => {
+    const dots = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        dots.push(
+          <View
+            key={`dot-${startX}-${startY}-${r}-${c}`}
+            style={{
+              position: "absolute",
+              left: `${startX + c * spacingX}%`,
+              top: `${startY + r * spacingY}%`,
+              width: 10,
+              height: 10,
+              borderRadius: 5,
+              borderWidth: 1.5,
+              borderColor: color,
+              backgroundColor: "rgba(255, 255, 255, 0.2)",
+              transform: [{ translateX: -5 }, { translateY: -5 }],
+            }}
+          />
+        );
+      }
     }
+    return dots;
   };
 
-  const scanRegions = getScanRegions();
+  const clamp = (value: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, value));
+
+  const cropCapturedPhotoToGuide = async (photo: {
+    uri: string;
+    width: number;
+    height: number;
+  }) => {
+    if (!photo.width || !photo.height) return null;
+
+    let pWidth = photo.width;
+    let pHeight = photo.height;
+
+    // Vision Camera sometimes returns landscape dimensions (e.g. 4080x3060) even if the app and device are portrait.
+    // If the image's aspect ratio orientation differs from the screen, swap them to map correctly.
+    if (screenWidth < screenHeight && pWidth > pHeight) {
+      pWidth = photo.height;
+      pHeight = photo.width;
+    }
+
+    // Camera preview behaves like "cover"; map guide-rect from screen space to photo space.
+    const previewScale = Math.max(
+      screenWidth / pWidth,
+      screenHeight / pHeight,
+    );
+    const displayedPhotoWidth = pWidth * previewScale;
+    const displayedPhotoHeight = pHeight * previewScale;
+    const overflowX = Math.max(0, (displayedPhotoWidth - screenWidth) / 2);
+    const overflowY = Math.max(0, (displayedPhotoHeight - screenHeight) / 2);
+
+    const guideLeft = (screenWidth - frameDimensions.width) / 2;
+    const guideTop = (screenHeight - frameDimensions.height) / 2;
+
+    const mappedX = (guideLeft + overflowX) / previewScale;
+    const mappedY = (guideTop + overflowY) / previewScale;
+    const mappedW = frameDimensions.width / previewScale;
+    const mappedH = frameDimensions.height / previewScale;
+
+    // Remove padding so the cropped image matches the guide frame exactly as seen by the user
+    const padX = 0;
+    const padY = 0;
+    const originX = clamp(mappedX - padX, 0, pWidth - 2);
+    const originY = clamp(mappedY - padY, 0, pHeight - 2);
+    const width = clamp(mappedW + padX * 2, 2, pWidth - originX);
+    const height = clamp(mappedH + padY * 2, 2, pHeight - originY);
+
+    const cropped = await ImageManipulator.manipulateAsync(
+      photo.uri,
+      [
+        {
+          crop: {
+            originX: Math.round(originX),
+            originY: Math.round(originY),
+            width: Math.round(width),
+            height: Math.round(height),
+          },
+        },
+      ],
+      {
+        compress: 1,
+        format: ImageManipulator.SaveFormat.JPEG,
+      },
+    );
+
+    return cropped.uri;
+  };
+
+  const getResultQualityScore = (
+    result: ScanResult,
+    expectedQuestions: number,
+  ) => {
+    const answeredCount = result.answers.filter(
+      (a) => a.selectedAnswer && a.selectedAnswer.trim().length > 0,
+    ).length;
+    const answerCoverage = answeredCount / Math.max(expectedQuestions, 1);
+
+    const cleanedId = String(result.studentId || "").replace(/\D/g, "");
+    const idIsAllZero = cleanedId.length > 0 && /^0+$/.test(cleanedId);
+    const idDigitCounts = cleanedId
+      .split("")
+      .reduce<Record<string, number>>((acc, digit) => {
+        acc[digit] = (acc[digit] ?? 0) + 1;
+        return acc;
+      }, {});
+    const dominantDigitRatio =
+      cleanedId.length > 0
+        ? Math.max(...Object.values(idDigitCounts)) / cleanedId.length
+        : 1;
+    const idIsRepeating =
+      /^([0-9])\1{5,}$/.test(cleanedId) ||
+      (cleanedId.length >= 6 && dominantDigitRatio >= 0.8);
+    const idLengthScore = Math.min(cleanedId.length, 10);
+
+    return (
+      answerCoverage * 100 +
+      answeredCount * 3 +
+      (idIsAllZero ? 0 : 20) +
+      (idIsRepeating ? -12 : 0) +
+      idLengthScore
+    );
+  };
+
+  const isReliableStudentId = (studentId: string | undefined | null) => {
+    const cleanedId = String(studentId || "").replace(/\D/g, "");
+    if (!cleanedId || /^0+$/.test(cleanedId) || cleanedId.length < 6)
+      return false;
+
+    const counts = cleanedId
+      .split("")
+      .reduce<Record<string, number>>((acc, digit) => {
+        acc[digit] = (acc[digit] ?? 0) + 1;
+        return acc;
+      }, {});
+    const dominantRatio = Math.max(...Object.values(counts)) / cleanedId.length;
+    return dominantRatio < 0.8;
+  };
 
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
@@ -182,7 +307,8 @@ export default function CameraScanner({
       setIsProcessing(true);
 
       const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
+        quality: 0.65,
+        skipProcessing: true,
         base64: false,
       });
 
@@ -191,75 +317,226 @@ export default function CameraScanner({
         return;
       }
 
-      // Enforce portrait-only captures for 200-item sheets.
-      // The 2-page 200-item template mapping expects portrait orientation.
-      if (
-        questionCount === 200 &&
-        typeof photo.width === "number" &&
-        typeof photo.height === "number" &&
-        photo.width > photo.height
-      ) {
-        Alert.alert(
-          "Portrait Mode Required",
-          "Please hold your phone in portrait orientation when scanning 200-item exams, then retake the photo.",
+      let scanImageUri = photo.uri;
+      let usedGuideCrop = false;
+      const preferFullImageFirst = questionCount <= 20;
+
+      if (preferFullImageFirst) {
+        console.log(
+          "[CameraScanner] 20q template: using full image first for faster/stabler scan",
         );
-        return;
       }
 
-      // 200-item pages use a dedicated fast path that validates all corner boxes.
-      // Running the generic OpenCV blur check here adds avoidable latency.
-      const qualityCheck =
-        questionCount === 200
-          ? {
-              isValid: true,
-              issues: [],
-              confidence: 0.95,
-              detectedTemplate: undefined,
-            }
-          : await ZipgradeScanner.validateZipgradeSheet(photo.uri);
+      try {
+        if (
+          !preferFullImageFirst &&
+          guideCropEnabledRef.current &&
+          typeof photo.width === "number" &&
+          typeof photo.height === "number"
+        ) {
+          const croppedUri = await cropCapturedPhotoToGuide({
+            uri: photo.uri,
+            width: photo.width,
+            height: photo.height,
+          });
+          if (croppedUri) {
+            scanImageUri = croppedUri;
+            usedGuideCrop = true;
+          }
+        }
+      } catch (cropError) {
+        if (
+          Platform.OS === "android" &&
+          isImageManipulatorRuntimeMismatch(cropError)
+        ) {
+          // Prevent repeated native calls when module/runtime versions are out of sync.
+          guideCropEnabledRef.current = false;
+          console.warn(
+            "[CameraScanner] Disabled guide crop for this session due to ImageManipulator runtime mismatch. Rebuild app after dependency updates.",
+          );
+        }
 
-      if (!qualityCheck.isValid) {
-        Alert.alert(
-          "Zipgrade Sheet Quality Issues",
-          `Please retake the photo:\n${qualityCheck.issues.join("\n")}`,
-          [{ text: "OK" }],
+        console.warn(
+          "[CameraScanner] Guide crop failed, using full image",
+          cropError,
         );
-        return;
+      }
+
+      // For 20q, skip the extra validation pass to cut latency.
+      // The scanner path already handles poor captures via confidence checks.
+      let detectedTemplate: Awaited<
+        ReturnType<typeof ZipgradeScanner.validateZipgradeSheet>
+      >["detectedTemplate"];
+      if (questionCount > 20) {
+        // Enforce portrait-only captures for 200-item sheets.
+        // The 2-page 200-item template mapping expects portrait orientation.
+        if (
+          questionCount === 200 &&
+          typeof photo.width === "number" &&
+          typeof photo.height === "number" &&
+          photo.width > photo.height
+        ) {
+          Alert.alert(
+            "Portrait Mode Required",
+            "Please hold your phone in portrait orientation when scanning 200-item exams, then retake the photo.",
+          );
+          return;
+        }
+
+        // 200-item pages use a dedicated fast path that validates all corner boxes.
+        // Running the generic OpenCV blur check here adds avoidable latency.
+        let qualityCheck =
+          questionCount === 200
+            ? {
+                isValid: true as boolean,
+                issues: [] as string[],
+                confidence: 0.95,
+                detectedTemplate: undefined as undefined,
+              }
+            : await ZipgradeScanner.validateZipgradeSheet(scanImageUri);
+
+        if (!qualityCheck.isValid && usedGuideCrop) {
+          console.warn(
+            "[CameraScanner] Cropped image failed validation, retrying full image",
+          );
+          scanImageUri = photo.uri;
+          qualityCheck =
+            await ZipgradeScanner.validateZipgradeSheet(scanImageUri);
+        }
+
+        if (!qualityCheck.isValid) {
+          Alert.alert(
+            "Zipgrade Sheet Quality Issues",
+            `Please retake the photo:\n${qualityCheck.issues.join("\n")}`,
+            [{ text: "OK" }],
+          );
+          return;
+        }
+
+        detectedTemplate = qualityCheck.detectedTemplate;
+      } else {
+        console.log("[CameraScanner] 20q fast path: skipping pre-validation");
       }
 
       // Process the Zipgrade answer sheet
-      const templateName = qualityCheck.detectedTemplate || "standard20";
+      const templateName = detectedTemplate || "standard20";
       console.log(
-        `[CameraScanner] Processing with ${questionCount} questions, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
+        `[CameraScanner] Processing with ${questionCount} questions`,
       );
 
-      const scanResult = await ZipgradeScanner.processZipgradeSheet(
-        photo.uri,
+      let scanResult = await ZipgradeScanner.processZipgradeSheet(
+        scanImageUri,
         questionCount,
         templateName,
-        scanStage?.current as 1 | 2 | undefined,
-        choicesPerQuestion,
       );
 
-      console.log("[CameraScanner] Scan complete, calling onScanComplete");
-      onScanComplete(scanResult, photo.uri);
-    } catch (error) {
-      console.error("Error taking picture:", error);
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : "Failed to process Zipgrade answer sheet. Please try again.";
+      const detectedAnswers = scanResult.answers.filter(
+        (a) => a.selectedAnswer && a.selectedAnswer.trim().length > 0,
+      ).length;
+      const minExpectedAnswers = Math.max(3, Math.floor(questionCount * 0.45));
+      const strongCoverageAnswers = Math.max(
+        minExpectedAnswers,
+        Math.floor(questionCount * 0.85),
+      );
+      const looksSuspiciousId =
+        !scanResult.studentId ||
+        /^0+$/.test(scanResult.studentId) ||
+        !isReliableStudentId(scanResult.studentId);
 
-      const isCornerBoxDetectionError =
-        questionCount === 200 &&
-        /could not detect all 4 corner boxes/i.test(message);
+      // Compare against full image only when the cropped pass looks weak.
+      // This keeps accuracy fallback while avoiding a guaranteed 2nd full scan.
+      const shouldCompareWithFullImage =
+        usedGuideCrop &&
+        (detectedAnswers < strongCoverageAnswers || looksSuspiciousId);
 
-      if (isCornerBoxDetectionError && onScanError) {
-        onScanError(message);
-        return;
+      if (shouldCompareWithFullImage) {
+        const fullImageReason =
+          detectedAnswers < strongCoverageAnswers
+            ? `coverage check (${detectedAnswers}/${questionCount})`
+            : looksSuspiciousId
+              ? `suspicious student ID (${scanResult.studentId || "empty"})`
+              : "accuracy check";
+
+        console.warn(
+          `[CameraScanner] Comparing with full image: ${fullImageReason}`,
+        );
+
+        const fullImageResult = await ZipgradeScanner.processZipgradeSheet(
+          photo.uri,
+          questionCount,
+          templateName,
+        );
+
+        const croppedScore = getResultQualityScore(scanResult, questionCount);
+        const fullScore = getResultQualityScore(fullImageResult, questionCount);
+
+        const fullWins = fullScore > croppedScore;
+        const primaryResult = fullWins ? fullImageResult : scanResult;
+        const secondaryResult = fullWins ? scanResult : fullImageResult;
+        const primaryLabel = fullWins ? "full image" : "cropped image";
+        const secondaryLabel = fullWins ? "cropped image" : "full image";
+        const primaryAnsweredCount = primaryResult.answers.filter(
+          (a) => a.selectedAnswer && a.selectedAnswer.trim().length > 0,
+        ).length;
+        const secondaryAnsweredCount = secondaryResult.answers.filter(
+          (a) => a.selectedAnswer && a.selectedAnswer.trim().length > 0,
+        ).length;
+        const minTrustworthyAnswers = Math.max(
+          4,
+          Math.floor(questionCount * 0.45),
+        );
+        const secondaryIdCanBeTrusted =
+          secondaryAnsweredCount >= minTrustworthyAnswers;
+
+        let mergedResult = primaryResult;
+        if (
+          !isReliableStudentId(primaryResult.studentId) &&
+          isReliableStudentId(secondaryResult.studentId) &&
+          secondaryIdCanBeTrusted
+        ) {
+          mergedResult = {
+            ...primaryResult,
+            studentId: secondaryResult.studentId,
+          };
+          console.log(
+            `[CameraScanner] Using ${secondaryLabel} student ID (${secondaryResult.studentId}) with ${primaryLabel} answers`,
+          );
+        } else if (
+          !isReliableStudentId(primaryResult.studentId) &&
+          isReliableStudentId(secondaryResult.studentId) &&
+          !secondaryIdCanBeTrusted
+        ) {
+          console.warn(
+            `[CameraScanner] Skipping ${secondaryLabel} student ID due to low answer coverage (${secondaryAnsweredCount}/${questionCount}); keeping ${primaryLabel} ID (${primaryResult.studentId || "empty"})`,
+          );
+        }
+
+        console.log(
+          `[CameraScanner] Result coverage: ${primaryLabel}=${primaryAnsweredCount}/${questionCount}, ${secondaryLabel}=${secondaryAnsweredCount}/${questionCount}`,
+        );
+
+        if (fullWins) {
+          console.log(
+            `[CameraScanner] Full image chosen (score ${fullScore.toFixed(1)} > ${croppedScore.toFixed(1)})`,
+          );
+          scanResult = mergedResult;
+          scanImageUri = photo.uri;
+        } else {
+          console.log(
+            `[CameraScanner] Cropped image retained (score ${croppedScore.toFixed(1)} >= ${fullScore.toFixed(1)})`,
+          );
+          scanResult = mergedResult;
+        }
       }
 
-      Alert.alert("Error", message);
+      console.log("[CameraScanner] Scan complete, calling onScanComplete");
+      onScanComplete(scanResult, scanResult.processedImageUri || scanImageUri);
+    } catch (error) {
+      console.error("Error taking picture:", error);
+      Alert.alert(
+        "Error",
+        "Failed to process Zipgrade answer sheet. Please try again.",
+      );
     } finally {
       setIsProcessing(false);
     }
@@ -327,98 +604,32 @@ export default function CameraScanner({
                 {
                   width: frameDimensions.width,
                   height: frameDimensions.height,
+                  borderWidth: questionCount <= 20 ? 0 : 3, // Remove full border for 20q
                 },
               ]}
             >
-              <View style={styles.frameContent}>
-                <Ionicons name="camera-outline" size={54} color="#00FF7F" />
-              </View>
-
-              {/* Scan region zone indicators */}
-              {scanRegions.map((region, i) => (
-                <View
-                  key={i}
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    left: region.xMin * frameDimensions.width,
-                    top: region.yMin * frameDimensions.height,
-                    width: (region.xMax - region.xMin) * frameDimensions.width,
-                    height:
-                      (region.yMax - region.yMin) * frameDimensions.height,
-                    borderWidth: 1,
-                    borderColor: "rgba(0, 255, 127, 0.45)",
-                    borderStyle: "dashed",
-                    backgroundColor: "rgba(0, 255, 127, 0.06)",
-                    justifyContent: "flex-start",
-                    alignItems: "center",
-                    paddingTop: 3,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "rgba(0, 255, 127, 0.85)",
-                      fontSize: questionCount > 50 ? 7 : 8,
-                      fontWeight: "600",
-                      letterSpacing: 0.2,
-                    }}
-                  >
-                    {region.label}
-                  </Text>
-                </View>
-              ))}
-
+             
               {/* Corner Markers */}
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
+              {questionCount <= 20 ? (
+                // 4 Full Boxes for 20q to guide alignment of the black squares
+                <>
+                  <View style={[styles.cornerBox, { top: -5, left: -5 }]} />
+                  <View style={[styles.cornerBox, { top: -5, right: -5 }]} />
+                  <View style={[styles.cornerBox, { bottom: -5, left: -5 }]} />
+                  <View style={[styles.cornerBox, { bottom: -5, right: -5 }]} />
+                </>
+              ) : (
+                // Brackets for other templates
+                <>
+                  <View style={[styles.corner, styles.topLeft]} />
+                  <View style={[styles.corner, styles.topRight]} />
+                  <View style={[styles.corner, styles.bottomLeft]} />
+                  <View style={[styles.corner, styles.bottomRight]} />
+                </>
+              )}
             </View>
           </View>
           <View style={{ flex: 1 }} />
-
-          {/* Stage Indicator Banner (200-item 2-stage mode) */}
-          {scanStage && (
-            <View style={styles.stageBanner}>
-              <View style={styles.stageIndicatorRow}>
-                <View
-                  style={[
-                    styles.stageDot,
-                    scanStage.current >= 1 && styles.stageDotActive,
-                  ]}
-                />
-                <View
-                  style={[
-                    styles.stageDot,
-                    scanStage.current >= 2 && styles.stageDotActive,
-                  ]}
-                />
-              </View>
-              <Text style={styles.stageText}>
-                Page {scanStage.current} of {scanStage.total}
-              </Text>
-              <Text style={styles.stageSubtext}>
-                {scanStage.current === 1
-                  ? "Scan Page 1 (Q1-100)"
-                  : "Scan Page 2 (Q101-200)"}
-              </Text>
-              <View style={styles.checklistCard}>
-                <Text style={styles.checklistTitle}>200-item checklist</Text>
-                <Text style={styles.checklistItem}>
-                  - Use portrait orientation only
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Keep all 4 corner boxes visible
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Fill frame with sheet inside green guide
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Avoid glare/shadows on bubbles
-                </Text>
-              </View>
-            </View>
-          )}
 
           {/* Controls Panel (Absolute bottom) */}
           <View style={styles.shutterContainer}>
@@ -466,21 +677,21 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   torchButton: {
-    flex: 1,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   scanFrame: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: "#00FF7F",
-    borderStyle: "dashed",
     backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
     position: "relative",
   },
-  frameContent: {
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
+  guideOverlay: {
+    position: "absolute",
+    borderRadius: 4,
   },
   frameText: {
     color: "#fff",
@@ -497,6 +708,14 @@ const styles = StyleSheet.create({
     height: 30,
     borderColor: "#00FF7F",
     borderWidth: 5,
+  },
+  cornerBox: {
+    position: "absolute",
+    width: 40,
+    height: 40,
+    borderColor: "#00FF7F",
+    borderWidth: 3,
+    backgroundColor: "rgba(0, 255, 127, 0.1)", // Slight green tint
   },
   topLeft: {
     top: -2,
@@ -554,72 +773,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "500",
     letterSpacing: 0.3,
-  },
-  stageBanner: {
-    position: "absolute",
-    top: 140,
-    left: 0,
-    right: 0,
-    alignItems: "center" as const,
-    zIndex: 200,
-  },
-  stageIndicatorRow: {
-    flexDirection: "row" as const,
-    gap: 8,
-    marginBottom: 8,
-  },
-  stageDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "rgba(255,255,255,0.3)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.5)",
-  },
-  stageDotActive: {
-    backgroundColor: "#00FF7F",
-    borderColor: "#00FF7F",
-  },
-  stageText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700" as const,
-    textAlign: "center" as const,
-    textShadowColor: "rgba(0,0,0,0.8)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  stageSubtext: {
-    color: "rgba(255,255,255,0.8)",
-    fontSize: 13,
-    fontWeight: "500" as const,
-    textAlign: "center" as const,
-    marginTop: 4,
-    textShadowColor: "rgba(0,0,0,0.8)",
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  checklistCard: {
-    marginTop: 10,
-    backgroundColor: "rgba(10, 20, 16, 0.72)",
-    borderWidth: 1,
-    borderColor: "rgba(0, 255, 127, 0.5)",
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    width: 280,
-  },
-  checklistTitle: {
-    color: "#C8FFE4",
-    fontSize: 12,
-    fontWeight: "700" as const,
-    marginBottom: 4,
-    textAlign: "left" as const,
-  },
-  checklistItem: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 11,
-    lineHeight: 16,
-    textAlign: "left" as const,
   },
 });
