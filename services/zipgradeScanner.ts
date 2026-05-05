@@ -724,7 +724,7 @@ export class ZipgradeScanner {
         );
         threshCandidates.push({ mat: tAdapt, label: `Adaptive-${bs}` });
         matsToCleanup.push(tAdapt);
-      } catch (_) {}
+      } catch (_) { }
 
       const scoringMin = Math.pow(IMG_W * 0.02, 2);
       const scoringMax = Math.pow(IMG_W * 0.12, 2);
@@ -770,7 +770,7 @@ export class ZipgradeScanner {
       const imgWidth: number = threshJs.cols;
       const imgHeight: number = threshJs.rows;
       const imgArea = imgWidth * imgHeight;
-      const processedImageUri = `data:image/jpeg;base64,${threshJs.base64}`;
+      let processedImageUri = `data:image/jpeg;base64,${threshJs.base64}`;
 
       // ── 4. Find contours ───────────────────────────────────────────────────
       const contoursVec = OpenCV.createObject(ObjectType.MatVector);
@@ -871,7 +871,7 @@ export class ZipgradeScanner {
             OpenCV.createObject(ObjectType.Rect, x, y, w, h),
           );
           fill = (OpenCV.invoke("countNonZero", crop) as any).value / area;
-        } catch (_) {}
+        } catch (_) { }
 
         rawShapes.push({
           x: x + w / 2,
@@ -929,16 +929,16 @@ export class ZipgradeScanner {
       const filledRefArea =
         filledShapes.length > 5
           ? findModalClusterMedian(
-              filledShapes.map((s) => s.area),
-              0.5,
-            )
+            filledShapes.map((s) => s.area),
+            0.5,
+          )
           : 0;
       const emptyRefArea =
         emptyShapes.length > 5
           ? findModalClusterMedian(
-              emptyShapes.map((s) => s.area),
-              0.5,
-            )
+            emptyShapes.map((s) => s.area),
+            0.5,
+          )
           : 0;
 
       // Merge both groups using their respective reference areas
@@ -992,11 +992,11 @@ export class ZipgradeScanner {
 
       const medianH =
         allBubbles.map((b) => b.h).sort((a, b) => a - b)[
-          Math.floor(allBubbles.length / 2)
+        Math.floor(allBubbles.length / 2)
         ] || 20;
       const medianW =
         allBubbles.map((b) => b.w).sort((a, b) => a - b)[
-          Math.floor(allBubbles.length / 2)
+        Math.floor(allBubbles.length / 2)
         ] || 20;
       console.log(`[OMR] medianH: ${medianH}, medianW: ${medianW}`);
 
@@ -1007,22 +1007,22 @@ export class ZipgradeScanner {
       const timingMarks =
         qCount > 20
           ? rawShapes.filter((s) => {
-              const isBlockMarker =
-                qCount === 100
-                  ? s.area >= bubbleRefArea * 1.3 && // Even more relaxed for 100q
-                    s.area <= bubbleRefArea * 12 &&
-                    s.extent >= 0.55 && // More lenient
-                    s.fill >= 0.6 && // More lenient
-                    s.w / s.h >= 0.3 && // More lenient aspect ratio
-                    s.w / s.h <= 3.0
-                  : s.area >= bubbleRefArea * 1.5 &&
-                    s.area <= bubbleRefArea * 10 &&
-                    s.extent >= 0.6 &&
-                    s.fill >= 0.65 &&
-                    s.w / s.h >= 0.4 &&
-                    s.w / s.h <= 2.5;
-              return isBlockMarker;
-            })
+            const isBlockMarker =
+              qCount === 100
+                ? s.area >= bubbleRefArea * 1.3 && // Even more relaxed for 100q
+                s.area <= bubbleRefArea * 12 &&
+                s.extent >= 0.55 && // More lenient
+                s.fill >= 0.6 && // More lenient
+                s.w / s.h >= 0.3 && // More lenient aspect ratio
+                s.w / s.h <= 3.0
+                : s.area >= bubbleRefArea * 1.5 &&
+                s.area <= bubbleRefArea * 10 &&
+                s.extent >= 0.6 &&
+                s.fill >= 0.65 &&
+                s.w / s.h >= 0.4 &&
+                s.w / s.h <= 2.5;
+            return isBlockMarker;
+          })
           : [];
 
       if (qCount > 20) {
@@ -1035,8 +1035,8 @@ export class ZipgradeScanner {
           timingMarks.forEach((m, idx) => {
             console.log(
               `[OMR] Timing mark ${idx + 1}: x=${Math.round(m.x)}, y=${Math.round(m.y)}, ` +
-                `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
-                `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
+              `area=${Math.round(m.area)} (${(m.area / bubbleRefArea).toFixed(1)}x bubble), ` +
+              `fill=${m.fill.toFixed(2)}, extent=${m.extent.toFixed(2)}, aspect=${(m.w / m.h).toFixed(2)}`,
             );
           });
         }
@@ -1078,7 +1078,7 @@ export class ZipgradeScanner {
             strict200Corners.topRight.x,
             strict200Corners.bottomRight.x,
           ) -
-            medianW * 2,
+          medianW * 2,
         );
         paperRight = Math.min(
           imgWidth,
@@ -1088,7 +1088,7 @@ export class ZipgradeScanner {
             strict200Corners.topRight.x,
             strict200Corners.bottomRight.x,
           ) +
-            medianW * 2,
+          medianW * 2,
         );
         paperTop = Math.max(
           0,
@@ -1098,7 +1098,7 @@ export class ZipgradeScanner {
             strict200Corners.bottomLeft.y,
             strict200Corners.bottomRight.y,
           ) -
-            medianH * 2,
+          medianH * 2,
         );
         paperBottom = Math.min(
           imgHeight,
@@ -1108,7 +1108,7 @@ export class ZipgradeScanner {
             strict200Corners.bottomLeft.y,
             strict200Corners.bottomRight.y,
           ) +
-            medianH * 2,
+          medianH * 2,
         );
         console.log(
           `[OMR] 200q strict crop from 4 corners: [${Math.round(paperLeft)},${Math.round(paperTop)}] → [${Math.round(paperRight)},${Math.round(paperBottom)}]`,
@@ -1361,11 +1361,11 @@ export class ZipgradeScanner {
       // Store detected corners for overlay visualization
       let detectedCorners:
         | {
-            topLeft: { x: number; y: number };
-            topRight: { x: number; y: number };
-            bottomLeft: { x: number; y: number };
-            bottomRight: { x: number; y: number };
-          }
+          topLeft: { x: number; y: number };
+          topRight: { x: number; y: number };
+          bottomLeft: { x: number; y: number };
+          bottomRight: { x: number; y: number };
+        }
         | undefined = undefined;
 
       // Helper: extract corner markers from regMarks for brightness scanning
@@ -1756,12 +1756,88 @@ export class ZipgradeScanner {
         );
       }
 
+      // =====================================================================
+      // 🎨 VISUALIZATION LAYER: DRAW BUBBLES AND CORNER MARKERS
+      // All wrapped in try/catch — any failure is silent and non-breaking.
+      // =====================================================================
+      let idRegionImageUri: string | undefined;
+
+      try {
+        const { ObjectType, DataTypes } = OpenCVTypes;
+
+        // 2. Draw Bubbles on the working image
+        const regions = getLayoutRegions(detectedQ);
+
+        for (const b of bubbles) {
+          const px = b.x / paperW;
+          const py = b.y / paperH;
+          let isValid = false;
+
+          for (const r of regions) {
+            if (
+              px >= r.xMin - 0.02 && px <= r.xMax + 0.02 &&
+              py >= r.yMin - 0.02 && py <= r.yMax + 0.02
+            ) {
+              isValid = true;
+              break;
+            }
+          }
+
+          if (!isValid) continue;
+
+          // Convert paper-space coords back to image coords for drawing
+          const cx = Math.round(b.x + paperLeft);
+          const cy = Math.round(b.y + paperTop);
+          const radius = Math.round(Math.max(b.w, b.h) / 3) + 3;
+          const isFilled = b.fill >= 0.45;
+
+          const center = OpenCV.createObject(ObjectType.Point, cx, cy);
+          // Green = filled, Blue = empty
+          const color = isFilled
+            ? OpenCV.createObject(ObjectType.Scalar, 0, 255, 0, 255)
+            : OpenCV.createObject(ObjectType.Scalar, 255, 0, 0, 255);
+
+          OpenCV.invoke("circle", workingMat, center, radius, color, isFilled ? 3 : 2, 8);
+        }
+
+        // 3. Draw Corner Boxes at paper boundaries
+        const cornerColor = OpenCV.createObject(ObjectType.Scalar, 0, 255, 0, 255);
+        const boxSize = Math.max(20, Math.round(Math.min(imgWidth, imgHeight) * 0.05));
+        const lineThickness = 5;
+
+        OpenCV.invoke("rectangle", workingMat,
+          OpenCV.createObject(ObjectType.Point, Math.round(paperLeft), Math.round(paperTop)),
+          OpenCV.createObject(ObjectType.Point, Math.round(paperLeft) + boxSize, Math.round(paperTop) + boxSize),
+          cornerColor, lineThickness, 8);
+        OpenCV.invoke("rectangle", workingMat,
+          OpenCV.createObject(ObjectType.Point, Math.round(paperRight) - boxSize, Math.round(paperTop)),
+          OpenCV.createObject(ObjectType.Point, Math.round(paperRight), Math.round(paperTop) + boxSize),
+          cornerColor, lineThickness, 8);
+        OpenCV.invoke("rectangle", workingMat,
+          OpenCV.createObject(ObjectType.Point, Math.round(paperLeft), Math.round(paperBottom) - boxSize),
+          OpenCV.createObject(ObjectType.Point, Math.round(paperLeft) + boxSize, Math.round(paperBottom)),
+          cornerColor, lineThickness, 8);
+        OpenCV.invoke("rectangle", workingMat,
+          OpenCV.createObject(ObjectType.Point, Math.round(paperRight) - boxSize, Math.round(paperBottom) - boxSize),
+          OpenCV.createObject(ObjectType.Point, Math.round(paperRight), Math.round(paperBottom)),
+          cornerColor, lineThickness, 8);
+
+        // 5. Re-encode processed image with overlays
+        const finalJs = OpenCV.toJSValue(workingMat, "jpeg") as any;
+        processedImageUri = `data:image/jpeg;base64,${finalJs.base64}`;
+
+      } catch (vizErr) {
+        console.warn("[OMR] Visualization overlay failed, continuing with normal output:", vizErr);
+      }
+      // =====================================================================
+
       return {
         studentId: numericId,
         answers: finalAnswers,
         confidence: 0.95,
         processedImageUri,
         detectedCorners,
+        idRegionImageUri,
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);

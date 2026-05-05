@@ -4,6 +4,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
     Alert,
+    Image,
     Modal,
     Platform,
     ScrollView,
@@ -180,6 +181,10 @@ export default function ScannerScreen({
   } | null>(null);
   const [twoStageCurrent, setTwoStageCurrent] = useState<1 | 2>(1);
   const [showPage1Confirmation, setShowPage1Confirmation] = useState(false);
+
+  // ── Exam code entry (legacy exam-code flow) ──────────────────────────────
+  const [examIdInput, setExamIdInput] = useState("");
+  const [isValidatingExam, setIsValidatingExam] = useState(false);
 
   // ── Manual student ID entry (fallback when OMR can't read bubbles) ──────
   const [manualIdModal, setManualIdModal] = useState<{
@@ -1051,6 +1056,34 @@ export default function ScannerScreen({
               The scanner could not read the student ID bubbles on this sheet.
               Please type the correct Student ID below to continue saving.
             </Text>
+
+            {/* ID Region Preview — shows cropped ID grid when available */}
+            {manualIdModal.pendingScan?.idRegionImageUri && (
+              <View
+                style={{
+                  backgroundColor: '#000',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  marginBottom: 16,
+                }}
+              >
+                <Image
+                  source={{ uri: manualIdModal.pendingScan.idRegionImageUri }}
+                  style={{ width: '100%', height: 120 }}
+                  resizeMode="contain"
+                />
+                <Text
+                  style={{
+                    color: '#aaa',
+                    fontSize: 11,
+                    textAlign: 'center',
+                    padding: 6,
+                  }}
+                >
+                  ID Region — Green = filled, Cyan = empty
+                </Text>
+              </View>
+            )}
 
             <TextInput
               style={styles.manualIdInput}
