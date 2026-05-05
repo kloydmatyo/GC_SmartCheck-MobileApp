@@ -3,12 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import {
-    Alert,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
@@ -127,6 +127,52 @@ export default function CameraScanner({
   };
 
   const frameDimensions = getFrameDimensions();
+
+  // Returns expected corner marker positions based on template specifications
+  // These coordinates match the physical corner markers on the printed sheets
+  const getExpectedCornerMarkers = (): Array<{
+    x: number;
+    y: number;
+    label: string;
+  }> => {
+    // Corner marker specifications from template generator:
+    // cornerInset = 2mm, markerSize = 8mm
+    // Marker centers are at cornerInset + markerSize/2 = 2 + 4 = 6mm from edges
+
+    if (questionCount <= 20) {
+      // 20-item: quarter-page portrait — 105mm × 148.5mm
+      const width = 105;
+      const height = 148.5;
+      return [
+        { x: 6 / width, y: 6 / height, label: "TL" },
+        { x: (width - 6) / width, y: 6 / height, label: "TR" },
+        { x: 6 / width, y: (height - 6) / height, label: "BL" },
+        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+      ];
+    } else if (questionCount <= 50) {
+      // 50-item: half-page landscape — 210mm × 148.5mm
+      const width = 210;
+      const height = 148.5;
+      return [
+        { x: 6 / width, y: 6 / height, label: "TL" },
+        { x: (width - 6) / width, y: 6 / height, label: "TR" },
+        { x: 6 / width, y: (height - 6) / height, label: "BL" },
+        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+      ];
+    } else {
+      // 100-item / 200-item: full A4 portrait — 210mm × 297mm
+      const width = 210;
+      const height = 297;
+      return [
+        { x: 6 / width, y: 6 / height, label: "TL" },
+        { x: (width - 6) / width, y: 6 / height, label: "TR" },
+        { x: 6 / width, y: (height - 6) / height, label: "BL" },
+        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+      ];
+    }
+  };
+
+  const expectedCorners = getExpectedCornerMarkers();
 
   // Returns scan region zones to overlay on the guide frame.
   // Coordinates mirror the scanner's getLayoutRegions() fractions exactly.
@@ -345,6 +391,25 @@ export default function CameraScanner({
                     {region.label}
                   </Text>
                 </View>
+              ))}
+
+              {/* Expected Corner Marker Positions (Green Squares) */}
+              {expectedCorners.map((corner, i) => (
+                <View
+                  key={`corner-${i}`}
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    left: corner.x * frameDimensions.width - 8,
+                    top: corner.y * frameDimensions.height - 8,
+                    width: 16,
+                    height: 16,
+                    backgroundColor: "rgba(0, 255, 0, 0.7)",
+                    borderWidth: 2,
+                    borderColor: "#FFFFFF",
+                    borderRadius: 2,
+                  }}
+                />
               ))}
 
               {/* Corner Markers */}

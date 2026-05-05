@@ -1358,6 +1358,16 @@ export class ZipgradeScanner {
       let allAnswers: StudentAnswer[] = [];
       // studentId was already declared in section 8.5 above
 
+      // Store detected corners for overlay visualization
+      let detectedCorners:
+        | {
+            topLeft: { x: number; y: number };
+            topRight: { x: number; y: number };
+            bottomLeft: { x: number; y: number };
+            bottomRight: { x: number; y: number };
+          }
+        | undefined = undefined;
+
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
         if (qCount === 200 && strict200Corners) {
@@ -1368,6 +1378,7 @@ export class ZipgradeScanner {
             `BL=(${Math.round(strict200Corners.bottomLeft.x)},${Math.round(strict200Corners.bottomLeft.y)})`,
             `BR=(${Math.round(strict200Corners.bottomRight.x)},${Math.round(strict200Corners.bottomRight.y)})`,
           );
+          detectedCorners = strict200Corners; // Store for return
           return strict200Corners;
         }
 
@@ -1447,6 +1458,7 @@ export class ZipgradeScanner {
           `BL=(${Math.round(markers.bottomLeft.x)},${Math.round(markers.bottomLeft.y)})`,
           `BR=(${Math.round(markers.bottomRight.x)},${Math.round(markers.bottomRight.y)})`,
         );
+        detectedCorners = markers; // Store for return
         return markers;
       };
 
@@ -1749,6 +1761,7 @@ export class ZipgradeScanner {
         answers: finalAnswers,
         confidence: 0.95,
         processedImageUri,
+        detectedCorners,
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);
