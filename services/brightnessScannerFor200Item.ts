@@ -10,7 +10,7 @@ import { Skia } from "@shopify/react-native-skia";
 import * as FileSystem from "expo-file-system/legacy";
 import { StudentAnswer } from "../types/scanning";
 
-const DEBUG_LOGS = false;
+const DEBUG_LOGS = true;
 const SCANNER_200Q_VERSION = "200Q-adaptive-bubble-grid-v8";
 
 interface Markers {
@@ -263,7 +263,10 @@ function distance(a: PixelPoint, b: PixelPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function getAverageFrameSize(markers: Markers): { width: number; height: number } {
+function getAverageFrameSize(markers: Markers): {
+  width: number;
+  height: number;
+} {
   const top = distance(markers.topLeft, markers.topRight);
   const bottom = distance(markers.bottomLeft, markers.bottomRight);
   const left = distance(markers.topLeft, markers.bottomLeft);
@@ -275,7 +278,12 @@ function getAverageFrameSize(markers: Markers): { width: number; height: number 
   };
 }
 
-function lumaAt(pixels: Uint8Array, width: number, x: number, y: number): number {
+function lumaAt(
+  pixels: Uint8Array,
+  width: number,
+  x: number,
+  y: number,
+): number {
   const idx = (y * width + x) * 4;
   return (pixels[idx] * 77 + pixels[idx + 1] * 150 + pixels[idx + 2] * 29) >> 8;
 }
@@ -299,9 +307,7 @@ function buildSampleOffsets(
   for (let dy = -Math.ceil(innerRY); dy <= Math.ceil(innerRY); dy += step) {
     for (let dx = -Math.ceil(innerRX); dx <= Math.ceil(innerRX); dx += step) {
       const outside =
-        (dx * dx) / (innerRX * innerRX) +
-          (dy * dy) / (innerRY * innerRY) >
-        1;
+        (dx * dx) / (innerRX * innerRX) + (dy * dy) / (innerRY * innerRY) > 1;
       if (outside) continue;
 
       const ox = Math.round(dx);
@@ -353,7 +359,8 @@ function sampleBubbleAtOffsets(
     const py = baseY + dy;
     if (px >= 0 && px < imgW && py >= 0 && py < imgH) {
       const idx = (py * imgW + px) * 4;
-      sumLuma += pixels[idx] * 77 + pixels[idx + 1] * 150 + pixels[idx + 2] * 29;
+      sumLuma +=
+        pixels[idx] * 77 + pixels[idx + 1] * 150 + pixels[idx + 2] * 29;
       count++;
     }
   }
@@ -449,7 +456,10 @@ function buildRingOffsets(radiusX: number, radiusY: number): PixelOffset[] {
   return offsets.length > 0 ? offsets : [{ dx: 0, dy: 0 }];
 }
 
-function buildBackgroundOffsets(radiusX: number, radiusY: number): PixelOffset[] {
+function buildBackgroundOffsets(
+  radiusX: number,
+  radiusY: number,
+): PixelOffset[] {
   const offsets: PixelOffset[] = [];
   const seen = new Set<string>();
   const rings = [1.45, 1.75];
@@ -480,7 +490,9 @@ function sampleBubbleInkScore(
   ringOffsets: readonly PixelOffset[],
 ): number {
   // High score means the expected bubble outline/fill is present at this center.
-  return 255 - sampleBubbleAtOffsets(pixels, width, height, cx, cy, ringOffsets);
+  return (
+    255 - sampleBubbleAtOffsets(pixels, width, height, cx, cy, ringOffsets)
+  );
 }
 
 function applyGridCalibration(
@@ -654,7 +666,10 @@ function getGenerated200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
   const gapMM = 0.5;
   const blockGapMM = 3;
   const blockWidthMM =
-    headerSquareMM + labelWidthMM + physicalChoices * bubbleMM + (physicalChoices + 1) * gapMM;
+    headerSquareMM +
+    labelWidthMM +
+    physicalChoices * bubbleMM +
+    (physicalChoices + 1) * gapMM;
   const firstBubbleXMM =
     headerSquareMM + gapMM + labelWidthMM + gapMM + bubbleMM / 2;
   const markerXMM = headerSquareMM / 2;
@@ -671,7 +686,8 @@ function getGenerated200ItemPageLayout(physicalChoices: 4 | 5): TemplateLayout {
     blockMarkerOffsetNX: (firstBubbleXMM - markerXMM) / frameWidthMM,
     blockMarkerOffsetNY: markerToBubbleYMM / frameHeightMM,
     topFirstNY: (topFirstYMM - markerTopMM) / frameHeightMM,
-    bottomFirstNY: (topFirstYMM + answerBandGapMM - markerTopMM) / frameHeightMM,
+    bottomFirstNY:
+      (topFirstYMM + answerBandGapMM - markerTopMM) / frameHeightMM,
     rowSpacingNY: (bubbleMM + 0.8) / frameHeightMM,
     bubbleDiameterNX: bubbleMM / frameWidthMM,
     bubbleDiameterNY: bubbleMM / frameHeightMM,
@@ -755,7 +771,10 @@ function findGridCalibration(
     );
   });
 
-  const shiftRadius = Math.max(8, Math.round(Math.max(bubbleRX, bubbleRY) * 1.8));
+  const shiftRadius = Math.max(
+    8,
+    Math.round(Math.max(bubbleRX, bubbleRY) * 1.8),
+  );
   const shiftStep = Math.max(2, Math.round(shiftRadius / 3));
   const shifts = buildOffsetCandidates(shiftRadius, shiftStep);
   const scales = [0.96, 1, 1.04, 1.08];
@@ -833,12 +852,7 @@ function sampleDarkDensityInTemplateRegion(
     const ny = y0 + ((y1 - y0) * (row + 0.5)) / rows;
     for (let col = 0; col < cols; col++) {
       const nx = x0 + ((x1 - x0) * (col + 0.5)) / cols;
-      const { px, py } = mapTemplatePointToPixel(
-        markers,
-        nx,
-        ny,
-        orientation,
-      );
+      const { px, py } = mapTemplatePointToPixel(markers, nx, ny, orientation);
       const x = Math.round(px);
       const y = Math.round(py);
 
@@ -913,7 +927,10 @@ function scoreBlockMarkersForOrientation(
     10,
     Math.round(Math.max(bubbleRX, bubbleRY) * 4.6),
   );
-  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.45));
+  const searchStep = Math.max(
+    2,
+    Math.round(Math.min(bubbleRX, bubbleRY) * 0.45),
+  );
   let score = 0;
 
   for (const block of layout.answerBlocks) {
@@ -1048,8 +1065,7 @@ function findBestPageCalibration(
       bubbleRX,
       bubbleRY,
     );
-    const layoutPreference =
-      layout.profileName.startsWith("generated") ? 2 : 0;
+    const layoutPreference = layout.profileName.startsWith("generated") ? 2 : 0;
     const combinedScore = grid.score + markerScore * 0.45 + layoutPreference;
 
     console.log(
@@ -1109,7 +1125,10 @@ function getCalibratedBlockMarkerPoint(
   return grid ? applyGridCalibration(point, grid) : point;
 }
 
-function getBandBlocks(layout: TemplateLayout, bandIndex: 0 | 1): AnswerBlock[] {
+function getBandBlocks(
+  layout: TemplateLayout,
+  bandIndex: 0 | 1,
+): AnswerBlock[] {
   return layout.answerBlocks.slice(bandIndex * 5, bandIndex * 5 + 5);
 }
 
@@ -1131,7 +1150,10 @@ function sampleBlockMarkerScore(
     backgroundOffsets,
   );
   const paperMean = Math.max(background.mean, background.p75);
-  const darkThreshold = Math.max(45, paperMean - Math.max(28, paperMean * 0.18));
+  const darkThreshold = Math.max(
+    45,
+    paperMean - Math.max(28, paperMean * 0.18),
+  );
   const center = sampleLumaStatsAtOffsets(
     pixels,
     width,
@@ -1229,7 +1251,10 @@ function calibrateBlockAnchors(
     14,
     Math.round(Math.max(bubbleRX, bubbleRY) * 5.2),
   );
-  const searchStep = Math.max(2, Math.round(Math.min(bubbleRX, bubbleRY) * 0.32));
+  const searchStep = Math.max(
+    2,
+    Math.round(Math.min(bubbleRX, bubbleRY) * 0.32),
+  );
   const anchors = layout.answerBlocks.map((block) => {
     const markerPoint = getRawBlockMarkerPoint(markers, block, orientation);
     const marker = findBestBlockMarkerOffset(
@@ -1376,8 +1401,14 @@ function calibrateAnswerBandGrid(
   const totalCols = physicalChoices * blocks.length;
   const probeRows = [0, 3, 6, 9];
   const maxBubbleR = Math.max(bubbleRX, bubbleRY);
-  const rowSpacingPx = Math.max(4, layout.answerBlocks[0].rowSpacingNY * frameSize.height);
-  const colSpacingPx = Math.max(4, layout.answerBlocks[0].bubbleSpacingNX * frameSize.width);
+  const rowSpacingPx = Math.max(
+    4,
+    layout.answerBlocks[0].rowSpacingNY * frameSize.height,
+  );
+  const colSpacingPx = Math.max(
+    4,
+    layout.answerBlocks[0].bubbleSpacingNX * frameSize.width,
+  );
   const baseRadius = Math.max(4, Math.round(maxBubbleR * 1.15));
   const baseStep = Math.max(1, Math.round(Math.min(bubbleRX, bubbleRY) * 0.35));
   const baseOffsets = buildOffsetCandidates(baseRadius, baseStep);
@@ -1512,10 +1543,7 @@ function calibrateAnswerBandGrid(
       markerAnchor.dx - baseDx,
       markerAnchor.dy - baseDy,
     );
-    const maxMarkerAnchorDistance = Math.max(
-      45,
-      Math.round(maxBubbleR * 2.1),
-    );
+    const maxMarkerAnchorDistance = Math.max(45, Math.round(maxBubbleR * 2.1));
 
     if (
       markerAnchor.score >= 95 &&
@@ -1613,10 +1641,17 @@ function findBestQuestionRowOffset(
   return bestOffset;
 }
 
-function histogramPercentile(histogram: readonly number[], total: number, percentile: number): number {
+function histogramPercentile(
+  histogram: readonly number[],
+  total: number,
+  percentile: number,
+): number {
   if (total <= 0) return 255;
 
-  const target = Math.max(0, Math.min(total - 1, Math.floor(total * percentile)));
+  const target = Math.max(
+    0,
+    Math.min(total - 1, Math.floor(total * percentile)),
+  );
   let seen = 0;
 
   for (let value = 0; value < histogram.length; value++) {
@@ -1864,7 +1899,10 @@ function extractColumnGroups(
   rows: readonly AxisCluster[],
   physicalChoices: 4 | 5,
   expectedBubblePx: number,
-): { groups: AxisCluster[][]; rowCandidates: RectifiedBubbleCandidate[] } | null {
+): {
+  groups: AxisCluster[][];
+  rowCandidates: RectifiedBubbleCandidate[];
+} | null {
   const rowCandidates = rowCandidateSubset(candidates, rows, expectedBubblePx);
   const minColumnCount = Math.max(4, Math.floor(rows.length * 0.42));
   const xClusters = clusterCandidatesByAxis(
@@ -1882,7 +1920,9 @@ function extractColumnGroups(
 
   while (i <= xClusters.length - physicalChoices && groups.length < 5) {
     const group = xClusters.slice(i, i + physicalChoices);
-    const gaps = group.slice(1).map((cluster, idx) => cluster.center - group[idx].center);
+    const gaps = group
+      .slice(1)
+      .map((cluster, idx) => cluster.center - group[idx].center);
     const looksLikeChoices =
       gaps.length === physicalChoices - 1 &&
       gaps.every((gap) => gap >= minChoiceGap && gap <= maxChoiceGap);
@@ -1908,7 +1948,10 @@ function extractColumnGroups(
       .sort((a, b) => a.center - b.center);
     return {
       groups: Array.from({ length: 5 }, (_, groupIndex) =>
-        strongest.slice(groupIndex * physicalChoices, (groupIndex + 1) * physicalChoices),
+        strongest.slice(
+          groupIndex * physicalChoices,
+          (groupIndex + 1) * physicalChoices,
+        ),
       ),
       rowCandidates,
     };
@@ -2045,9 +2088,7 @@ function rectifiedToTemplatePoint(
 }
 
 function chooseMarkedChoice(fills: BubbleInteriorSample[]): string {
-  const byBrightness = [...fills].sort(
-    (a, b) => a.brightness - b.brightness,
-  );
+  const byBrightness = [...fills].sort((a, b) => a.brightness - b.brightness);
   const darkest = byBrightness[0].brightness;
   const secondDark =
     byBrightness.length >= 2 ? byBrightness[1].brightness : 255;
@@ -2680,11 +2721,17 @@ function findCornerMarker(
     const avgDim = (compW + compH) / 2;
     const sizeScore = Math.max(
       0.12,
-      Math.exp(-Math.abs(Math.log(avgDim / Math.max(1, expectedMarkerDim))) * 1.15),
+      Math.exp(
+        -Math.abs(Math.log(avgDim / Math.max(1, expectedMarkerDim))) * 1.15,
+      ),
     );
     const targetScore = 1 / (1 + targetDist * 7);
     const score =
-      Math.sqrt(count) * density * (0.8 + squareScore) * sizeScore * targetScore;
+      Math.sqrt(count) *
+      density *
+      (0.8 + squareScore) *
+      sizeScore *
+      targetScore;
 
     if (!best || score > best.score) {
       best = { x: centerX, y: centerY, width: compW, height: compH, score };
