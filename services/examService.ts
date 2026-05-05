@@ -50,11 +50,13 @@ export class ExamService {
       const currentUser = auth.currentUser;
       if (!currentUser) return [];
 
-      // 1. Load from Staging & Cache Realm
-      const stagingRealm = await RealmService.getStagingRealm();
-      const staging = stagingRealm.objects<OfflineQuiz>("OfflineQuiz");
+      // 1. Load from Staging & Cache Realm concurrently for speed
+      const [stagingRealm, cacheRealm] = await Promise.all([
+        RealmService.getStagingRealm(),
+        RealmService.getCacheRealm()
+      ]);
 
-      const cacheRealm = await RealmService.getCacheRealm();
+      const staging = stagingRealm.objects<OfflineQuiz>("OfflineQuiz");
       const cached = cacheRealm.objects<QuizCache>("QuizCache");
 
       const examMap = new Map<string, any>();
@@ -101,13 +103,28 @@ export class ExamService {
         });
       });
 
+      const localExams = Array.from(examMap.values());
+
       const { NetworkService } = await import("./networkService");
       const isOnline = await NetworkService.isOnline();
+
+      // --- LOCAL-FIRST OPTIMIZATION ---
+      // Return cached data immediately if available for instant UI responsiveness
+      if (localExams.length > 0) {
+        if (isOnline) {
+          this.backgroundSyncExams(currentUser.uid).catch((err) =>
+            console.error("[ExamService] Background sync failed:", err),
+          );
+        }
+        return localExams.sort(
+          (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+        );
+      }
 
       if (isOnline) {
         try {
           console.log(
-            "[ExamService] Online - fetching fresh from Firestore...",
+            "[ExamService] No local exams, fetching fresh from Firestore...",
           );
           const q = query(
             collection(db, "exams"),

@@ -2,6 +2,7 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ClassService } from "@/services/classService";
 import { ExamService } from "@/services/examService";
 import { UserService } from "@/services/userService";
 import { Ionicons } from "@expo/vector-icons";
