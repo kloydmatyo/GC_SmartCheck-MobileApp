@@ -174,51 +174,6 @@ export default function CameraScanner({
 
   const expectedCorners = getExpectedCornerMarkers();
 
-  // Returns scan region zones to overlay on the guide frame.
-  // Coordinates mirror the scanner's getLayoutRegions() fractions exactly.
-  const getScanRegions = (): Array<{
-    label: string;
-    xMin: number;
-    xMax: number;
-    yMin: number;
-    yMax: number;
-  }> => {
-    if (questionCount <= 20) {
-      return [
-        { label: "Q1–10", xMin: 0.26, xMax: 0.5, yMin: 0.38, yMax: 0.95 },
-        { label: "Q11–20", xMin: 0.54, xMax: 0.84, yMin: 0.38, yMax: 0.95 },
-      ];
-    } else if (questionCount <= 50) {
-      // 5 horizontal columns matching the template's single-row layout
-      return [
-        { label: "Q1–10", xMin: 0.03, xMax: 0.23, yMin: 0.52, yMax: 0.97 },
-        { label: "Q11–20", xMin: 0.21, xMax: 0.41, yMin: 0.52, yMax: 0.97 },
-        { label: "Q21–30", xMin: 0.39, xMax: 0.61, yMin: 0.52, yMax: 0.97 },
-        { label: "Q31–40", xMin: 0.59, xMax: 0.79, yMin: 0.52, yMax: 0.97 },
-        { label: "Q41–50", xMin: 0.77, xMax: 0.97, yMin: 0.52, yMax: 0.97 },
-      ];
-    } else {
-      // 5 columns × 2 rows matching the 100q template grid
-      // Derived from drawFullSheet() physical measurements in templatePdfGenerator.ts
-      return [
-        // Row 0 (top)
-        { label: "Q1–10", xMin: 0.04, xMax: 0.24, yMin: 0.27, yMax: 0.49 },
-        { label: "Q21–30", xMin: 0.22, xMax: 0.42, yMin: 0.27, yMax: 0.49 },
-        { label: "Q41–50", xMin: 0.4, xMax: 0.6, yMin: 0.27, yMax: 0.49 },
-        { label: "Q61–70", xMin: 0.58, xMax: 0.78, yMin: 0.27, yMax: 0.49 },
-        { label: "Q81–90", xMin: 0.76, xMax: 0.96, yMin: 0.27, yMax: 0.49 },
-        // Row 1 (bottom)
-        { label: "Q11–20", xMin: 0.04, xMax: 0.24, yMin: 0.47, yMax: 0.7 },
-        { label: "Q31–40", xMin: 0.22, xMax: 0.42, yMin: 0.47, yMax: 0.7 },
-        { label: "Q51–60", xMin: 0.4, xMax: 0.6, yMin: 0.47, yMax: 0.7 },
-        { label: "Q71–80", xMin: 0.58, xMax: 0.78, yMin: 0.47, yMax: 0.7 },
-        { label: "Q91–100", xMin: 0.76, xMax: 0.96, yMin: 0.47, yMax: 0.7 },
-      ];
-    }
-  };
-
-  const scanRegions = getScanRegions();
-
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
 
@@ -359,40 +314,6 @@ export default function CameraScanner({
                 <Ionicons name="camera-outline" size={54} color="#00FF7F" />
               </View>
 
-              {/* Scan region zone indicators */}
-              {scanRegions.map((region, i) => (
-                <View
-                  key={i}
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    left: region.xMin * frameDimensions.width,
-                    top: region.yMin * frameDimensions.height,
-                    width: (region.xMax - region.xMin) * frameDimensions.width,
-                    height:
-                      (region.yMax - region.yMin) * frameDimensions.height,
-                    borderWidth: 1,
-                    borderColor: "rgba(0, 255, 127, 0.45)",
-                    borderStyle: "dashed",
-                    backgroundColor: "rgba(0, 255, 127, 0.06)",
-                    justifyContent: "flex-start",
-                    alignItems: "center",
-                    paddingTop: 3,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: "rgba(0, 255, 127, 0.85)",
-                      fontSize: questionCount > 50 ? 7 : 8,
-                      fontWeight: "600",
-                      letterSpacing: 0.2,
-                    }}
-                  >
-                    {region.label}
-                  </Text>
-                </View>
-              ))}
-
               {/* Expected Corner Marker Positions (Green Squares) */}
               {expectedCorners.map((corner, i) => (
                 <View
@@ -446,21 +367,6 @@ export default function CameraScanner({
                   ? "Scan Page 1 (Q1-100)"
                   : "Scan Page 2 (Q101-200)"}
               </Text>
-              <View style={styles.checklistCard}>
-                <Text style={styles.checklistTitle}>200-item checklist</Text>
-                <Text style={styles.checklistItem}>
-                  - Use portrait orientation only
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Keep all 4 corner boxes visible
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Fill frame with sheet inside green guide
-                </Text>
-                <Text style={styles.checklistItem}>
-                  - Avoid glare/shadows on bubbles
-                </Text>
-              </View>
             </View>
           )}
 
@@ -657,28 +563,5 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
-  },
-  checklistCard: {
-    marginTop: 10,
-    backgroundColor: "rgba(10, 20, 16, 0.72)",
-    borderWidth: 1,
-    borderColor: "rgba(0, 255, 127, 0.5)",
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    width: 280,
-  },
-  checklistTitle: {
-    color: "#C8FFE4",
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 4,
-    textAlign: "left",
-  },
-  checklistItem: {
-    color: "rgba(255,255,255,0.92)",
-    fontSize: 11,
-    lineHeight: 16,
-    textAlign: "left",
   },
 });
