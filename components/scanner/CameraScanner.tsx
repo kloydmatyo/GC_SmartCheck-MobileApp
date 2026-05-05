@@ -204,7 +204,7 @@ export default function CameraScanner({
         return;
       }
 
-      // 200-item pages use a dedicated fast path that validates all corner boxes.
+      // 200-item pages are scanned in two 100-item stages.
       // Running the generic OpenCV blur check here adds avoidable latency.
       const qualityCheck =
         questionCount === 200

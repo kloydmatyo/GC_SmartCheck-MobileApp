@@ -1,6 +1,5 @@
 import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
-import { scan200ItemPageFast } from "./brightnessScannerFor200Item";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
 const OMR_DEBUG_LOGS = false;
@@ -554,31 +553,6 @@ export class ZipgradeScanner {
           : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
       const qCount = rawQ > 0 ? rawQ : 20;
 
-      if (qCount === 200) {
-        const currentPage = pageNumber || 1;
-        const startedAt = Date.now();
-        console.log(
-          `[OMR] 200Q dedicated scanner config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
-        );
-
-        const answers = await scan200ItemPageFast(
-          imageUri,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        console.log(
-          `[OMR] 200Q dedicated scanner complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
-        );
-
-        return {
-          studentId: "00000000",
-          answers,
-          confidence: 0.98,
-          processedImageUri: imageUri,
-        };
-      }
-
       // Load OpenCV
       loadOpenCV();
       const {
@@ -1062,94 +1036,22 @@ export class ZipgradeScanner {
       );
       console.log(`[OMR] regMarks: ${regMarks.length}`);
 
-      const getStrict200CornerMarkers = () => {
-        if (regMarks.length < 4) return null;
-
-        const cornerTargets = [
-          { key: "topLeft", x: 0, y: 0 },
-          { key: "topRight", x: imgWidth, y: 0 },
-          { key: "bottomLeft", x: 0, y: imgHeight },
-          { key: "bottomRight", x: imgWidth, y: imgHeight },
-        ] as const;
-
-        const chosenIndices = new Set<number>();
-        const chosen: Record<string, { x: number; y: number }> = {};
-
-        for (const target of cornerTargets) {
-          let bestIdx = -1;
-          let bestScore = Number.POSITIVE_INFINITY;
-          for (let i = 0; i < regMarks.length; i++) {
-            if (chosenIndices.has(i)) continue;
-            const m = regMarks[i];
-            const dx = m.x - target.x;
-            const dy = m.y - target.y;
-            const score = dx * dx + dy * dy;
-            if (score < bestScore) {
-              bestScore = score;
-              bestIdx = i;
-            }
-          }
-
-          if (bestIdx < 0) return null;
-          chosenIndices.add(bestIdx);
-          chosen[target.key] = {
-            x: regMarks[bestIdx].x,
-            y: regMarks[bestIdx].y,
-          };
-        }
-
-        const tl = chosen.topLeft;
-        const tr = chosen.topRight;
-        const bl = chosen.bottomLeft;
-        const br = chosen.bottomRight;
-        const minWidth = imgWidth * 0.45;
-        const minHeight = imgHeight * 0.45;
-        const topWidth = Math.abs(tr.x - tl.x);
-        const bottomWidth = Math.abs(br.x - bl.x);
-        const leftHeight = Math.abs(bl.y - tl.y);
-        const rightHeight = Math.abs(br.y - tr.y);
-        const maxCornerOffsetX = imgWidth * 0.25;
-        const maxCornerOffsetY = imgHeight * 0.25;
-
-        const cornersNearImageEdges =
-          tl.x <= maxCornerOffsetX &&
-          tl.y <= maxCornerOffsetY &&
-          tr.x >= imgWidth - maxCornerOffsetX &&
-          tr.y <= maxCornerOffsetY &&
-          bl.x <= maxCornerOffsetX &&
-          bl.y >= imgHeight - maxCornerOffsetY &&
-          br.x >= imgWidth - maxCornerOffsetX &&
-          br.y >= imgHeight - maxCornerOffsetY;
-
-        const geometryLooksValid =
-          topWidth >= minWidth &&
-          bottomWidth >= minWidth &&
-          leftHeight >= minHeight &&
-          rightHeight >= minHeight;
-
-        if (!cornersNearImageEdges || !geometryLooksValid) {
-          return null;
-        }
-
-        return {
-          topLeft: tl,
-          topRight: tr,
-          bottomLeft: bl,
-          bottomRight: br,
-        };
-      };
-
       let paperLeft = imgWidth * 0.03,
         paperRight = imgWidth * 0.97;
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      // Use strict corner markers for 200-item sheets.
-      const strict200Corners =
-        qCount === 200 ? getStrict200CornerMarkers() : null;
+      const strict200Corners = (():
+        | {
+            topLeft: { x: number; y: number };
+            topRight: { x: number; y: number };
+            bottomLeft: { x: number; y: number };
+            bottomRight: { x: number; y: number };
+          }
+        | null => null)();
 
-      if (qCount === 200 && strict200Corners) {
+      if (strict200Corners) {
         paperLeft = Math.max(
           0,
           Math.min(
@@ -1501,10 +1403,10 @@ export class ZipgradeScanner {
       };
 
       // ── 200-item template: brightness scanning with page offset ──────────
-      if (qCount === 200 && strict200Corners) {
+      if (qCount === 200 && regMarks.length >= 3) {
         const currentPage = pageNumber || 1;
         console.log(
-          `[OMR] Using BRIGHTNESS scanning for 200-item template Page ${currentPage} (Skia pixel sampling)`,
+          `[OMR] Using 100-item BRIGHTNESS scanner for 200-item Page ${currentPage}`,
         );
 
         const { scan200ItemPage } = require("./brightnessScannerFor200Item");
@@ -1524,24 +1426,8 @@ export class ZipgradeScanner {
       }
       // ── 200-item strict guard: require all four edge corner boxes ───────
       else if (qCount === 200) {
-        const currentPage = pageNumber || 1;
         console.warn(
-          "[OMR] Strict 200Q corner validation failed; falling back to dedicated 200Q pixel scanner",
-        );
-
-        const {
-          scan200ItemPageFast,
-        } = require("./brightnessScannerFor200Item");
-        allAnswers = await scan200ItemPageFast(
-          imageUri,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        const rangeStart = currentPage === 1 ? 1 : 101;
-        const rangeEnd = currentPage === 1 ? 100 : 200;
-        console.log(
-          `[OMR] 200Q fallback scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+          "[OMR] Not enough corner markers for 200-item 100Q brightness scanning.",
         );
       }
       // ── 150-item template: brightness scanning ──────────────────────────
