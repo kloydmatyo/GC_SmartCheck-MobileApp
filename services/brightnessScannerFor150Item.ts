@@ -420,7 +420,7 @@ function detectStudentId(
   // + label(5.5) = 28.5mm
   // + boxes(4.0) + spacing(2) = 34.5mm ← Row 0 bubble center
   // Row 2 (digit "2") = 34.5 + 2*4.0 = 42.5mm
-  const firstIdNY = (38.5 - 6) / fh; // (28.5mm - marker offset) / frame height
+  const firstIdNY = (36.5 - 6) / fh; // (28.5mm - marker offset) / frame height
 
   const frameW = markers.topRight.x - markers.topLeft.x;
   const frameH = markers.bottomLeft.y - markers.topLeft.y;

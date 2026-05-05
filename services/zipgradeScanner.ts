@@ -1612,15 +1612,18 @@ export class ZipgradeScanner {
           scan100ItemWithBrightness,
         } = require("./brightnessScannerFor100Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan100ItemWithBrightness(
+        const result = await scan100ItemWithBrightness(
           imageUri,
           markers,
           choicesPerQuestion,
           true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
         );
 
+        allAnswers = result.answers;
+        studentId = result.studentId;
+
         console.log(
-          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,
+          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers, ID: ${studentId}`,
         );
       } else if (detectedQ === 100) {
         // Fallback: not enough markers for hybrid scanning
