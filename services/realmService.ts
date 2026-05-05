@@ -26,7 +26,7 @@ export class OfflineGrade extends Realm.Object<OfflineGrade> {
     properties: {
       _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
       studentId: "string",
-      examId: "string",
+      examId: { type: "string", indexed: true },
       score: "int",
       totalPoints: "int",
       percentage: "double",
@@ -63,7 +63,7 @@ export class OfflineClass extends Realm.Object<OfflineClass> {
       section_block: "string?",
       students: "string",
       status: "string",
-      createdBy: "string",
+      createdBy: { type: "string", indexed: true },
       createdAt: "date",
     },
   };
@@ -95,12 +95,12 @@ export class OfflineQuiz extends Realm.Object<OfflineQuiz> {
       subject: "string",
       className: "string?",
       classId: "string?",
-      examId: "string?",
+      examId: { type: "string", optional: true, indexed: true },
       templateId: "string?",
       questionCount: "int",
       answerKey: "string",
       status: "string",
-      createdBy: "string",
+      createdBy: { type: "string", indexed: true },
       createdAt: "date",
       instructorId: "string?",
       examCode: "string?",
@@ -125,7 +125,7 @@ export class OfflinePendingUpdate extends Realm.Object<OfflinePendingUpdate> {
     properties: {
       _id: { type: "objectId", default: () => new Realm.BSON.ObjectId() },
       updateId: "string",
-      examId: "string",
+      examId: { type: "string", indexed: true },
       action: "string",
       data: "string",
       timestamp: "date",
@@ -150,7 +150,7 @@ export class ScanHistory extends Realm.Object<ScanHistory> {
       timestamp: { type: "int", indexed: true },
       data: "string",
       studentId: "string",
-      examId: "string",
+      examId: { type: "string", indexed: true },
     },
   };
 }
@@ -195,7 +195,7 @@ export class ClassCache extends Realm.Object<ClassCache> {
       section_block: "string?",
       isArchived: { type: "bool", default: false },
       students: "string",
-      createdBy: "string",
+      createdBy: { type: "string", indexed: true },
       updatedAt: "date",
     },
   };
@@ -236,7 +236,7 @@ export class QuizCache extends Realm.Object<QuizCache> {
             papersCount: { type: "int", default: 0 },
             questionCount: "int",
             answerKey: "string?",
-            createdBy: "string",
+            createdBy: { type: "string", indexed: true },
             createdAt: "date",
             updatedAt: "date",
             version: { type: "int", default: 1 },
@@ -265,7 +265,7 @@ export class GradeCache extends Realm.Object<GradeCache> {
     properties: {
       id: "string",
       studentId: "string",
-      examId: "string",
+      examId: { type: "string", indexed: true },
       score: "int",
       totalPoints: "int",
       percentage: "double",
@@ -302,7 +302,7 @@ export class StudentCache extends Realm.Object<StudentCache> {
       email: "string?",
       section: "string?",
       is_active: { type: "bool", default: true },
-      createdBy: "string",
+      createdBy: { type: "string", indexed: true },
       created_at: "string",
       updated_at: "string",
     },
@@ -324,7 +324,7 @@ const STAGING_CONFIG: Realm.Configuration = {
     SystemKV,
     ScanHistory,
   ],
-  schemaVersion: 14,
+  schemaVersion: 15,
   onMigration: (oldRealm: any, newRealm: any) => {
     if (oldRealm.schemaVersion < 8) {
       const oldObjects = oldRealm.objects("OfflineClass");
@@ -340,7 +340,7 @@ const STAGING_CONFIG: Realm.Configuration = {
 const CACHE_CONFIG: Realm.Configuration = {
   path: "cache.realm",
   schema: [ClassCache, QuizCache, GradeCache, StudentCache],
-  schemaVersion: 12,
+  schemaVersion: 13,
   deleteRealmIfMigrationNeeded: true, // Safe for cache as it can be re-downloaded
 };
 
