@@ -12,6 +12,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
@@ -473,6 +474,9 @@ export class SyncService {
 
     if (stagingClasses.length === 0) return;
 
+    const batch = writeBatch(db);
+    const classesToDelete: OfflineClass[] = [];
+
     for (const sClass of stagingClasses) {
       try {
         const classData = {
@@ -487,14 +491,21 @@ export class SyncService {
         };
 
         const classId = sClass._id.toHexString();
-        await setDoc(doc(db, "classes", classId), classData);
-
-        realm.write(() => {
-          realm.delete(sClass);
-        });
+        const classRef = doc(db, "classes", classId);
+        batch.set(classRef, classData);
+        
+        classesToDelete.push(sClass);
       } catch (err) {
-        console.error("Failed to sync staging class:", err);
+        console.error("Failed to prepare staging class for batch:", err);
       }
+    }
+
+    if (classesToDelete.length > 0) {
+      await batch.commit();
+      realm.write(() => {
+        realm.delete(classesToDelete);
+      });
+      console.log(`[SyncService] Batched and synced ${classesToDelete.length} offline classes`);
     }
   }
 
@@ -503,6 +514,9 @@ export class SyncService {
     const stagingQuizzes = realm.objects<OfflineQuiz>("OfflineQuiz");
 
     if (stagingQuizzes.length === 0) return;
+
+    const batch = writeBatch(db);
+    const quizzesToDelete: OfflineQuiz[] = [];
 
     for (const sQuiz of stagingQuizzes) {
       try {
@@ -522,13 +536,13 @@ export class SyncService {
 
         const examId = sQuiz._id.toHexString();
         const examRef = doc(db, "exams", examId);
-        await setDoc(examRef, quizData);
+        batch.set(examRef, quizData);
 
         // Also sync answer key if it exists
         if (sQuiz.answerKey) {
           const akData = JSON.parse(sQuiz.answerKey);
-          // Use a deterministic ID for the initial answer key to prevent duplicates on retry
-          await setDoc(doc(db, "answerKeys", `ak_${examRef.id}_initial`), {
+          const akRef = doc(db, "answerKeys", `ak_${examRef.id}_initial`);
+          batch.set(akRef, {
             examId: examRef.id,
             ...akData,
             createdAt: Timestamp.now(),
@@ -536,30 +550,30 @@ export class SyncService {
         }
 
         // Create initial template for consistency with CreateQuizScreen
-        try {
-          await setDoc(doc(db, "templates", `temp_${examRef.id}`), {
-            name: `${sQuiz.title}_Template`,
-            numQuestions: sQuiz.questionCount,
-            choicesPerQuestion: sQuiz.choicesPerItem || 4,
-            createdBy: sQuiz.createdBy,
-            examId: examRef.id,
-            examName: sQuiz.title,
-            examCode: sQuiz.examCode || "",
-            createdAt: Timestamp.now(),
-          });
-        } catch (templateErr) {
-          console.warn(
-            "Failed to sync template for staging quiz:",
-            templateErr,
-          );
-        }
-
-        realm.write(() => {
-          realm.delete(sQuiz);
+        const templateRef = doc(db, "templates", `temp_${examRef.id}`);
+        batch.set(templateRef, {
+          name: `${sQuiz.title}_Template`,
+          numQuestions: sQuiz.questionCount,
+          choicesPerQuestion: sQuiz.choicesPerItem || 4,
+          createdBy: sQuiz.createdBy,
+          examId: examRef.id,
+          examName: sQuiz.title,
+          examCode: sQuiz.examCode || "",
+          createdAt: Timestamp.now(),
         });
+
+        quizzesToDelete.push(sQuiz);
       } catch (err) {
-        console.error("Failed to sync staging quiz:", err);
+        console.error("Failed to prepare staging quiz for batch:", err);
       }
+    }
+
+    if (quizzesToDelete.length > 0) {
+      await batch.commit();
+      realm.write(() => {
+        realm.delete(quizzesToDelete);
+      });
+      console.log(`[SyncService] Batched and synced ${quizzesToDelete.length} offline exams`);
     }
   }
 
