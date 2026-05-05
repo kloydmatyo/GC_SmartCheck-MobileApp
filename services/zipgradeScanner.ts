@@ -1308,6 +1308,7 @@ export class ZipgradeScanner {
 
       // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
+      let studentId = "00000000"; // Default, may be overwritten by brightness scanner
 
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
@@ -1435,20 +1436,41 @@ export class ZipgradeScanner {
           "[OMR] Using BRIGHTNESS scanning for 150-item template (Skia pixel sampling)",
         );
 
-        const {
-          scan150ItemWithBrightness,
-        } = require("./brightnessScannerFor150Item");
-        const markers = extractCornerMarkers();
-        allAnswers = await scan150ItemWithBrightness(
-          imageUri,
-          markers,
-          choicesPerQuestion,
-          true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
-        );
+        try {
+          const {
+            scan150ItemWithBrightness,
+          } = require("./brightnessScannerFor150Item");
+          const markers = extractCornerMarkers();
+          const result = await scan150ItemWithBrightness(
+            imageUri,
+            markers,
+            choicesPerQuestion,
+            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+          );
 
-        console.log(
-          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers`,
-        );
+          if (result && result.answers) {
+            allAnswers = result.answers;
+            studentId = result.studentId || "000000000";
+            console.log(
+              `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers, ID: ${studentId}`,
+            );
+          } else {
+            console.error(
+              "[OMR] 150Q scanner returned invalid result:",
+              result,
+            );
+            allAnswers = Array.from({ length: 150 }, (_, i) => ({
+              questionNumber: i + 1,
+              selectedAnswer: "",
+            }));
+          }
+        } catch (scanError) {
+          console.error("[OMR] 150Q brightness scanner error:", scanError);
+          allAnswers = Array.from({ length: 150 }, (_, i) => ({
+            questionNumber: i + 1,
+            selectedAnswer: "",
+          }));
+        }
       } else if (detectedQ === 150) {
         // Fallback: not enough markers for brightness scanning
         console.warn(
@@ -1476,15 +1498,18 @@ export class ZipgradeScanner {
           scan100ItemWithBrightness,
         } = require("./brightnessScannerFor100Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan100ItemWithBrightness(
+        const result = await scan100ItemWithBrightness(
           imageUri,
           markers,
           choicesPerQuestion,
           true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
         );
 
+        allAnswers = result.answers;
+        studentId = result.studentId;
+
         console.log(
-          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers`,
+          `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers, ID: ${studentId}`,
         );
       } else if (detectedQ === 100) {
         // Fallback: not enough markers for hybrid scanning
@@ -1553,16 +1578,23 @@ export class ZipgradeScanner {
       //
       // NOTE: Student ID auto-detection is disabled for stability
       // Users can manually edit the ID after scanning
-      let studentId = "00000000";
-      console.log(
-        `[OMR] Student ID: Using default (manual edit available after scan)`,
-      );
+      // For 100q/150q templates, ID is detected by brightness scanner
+      if (!studentId || studentId === "00000000") {
+        studentId = "00000000";
+        console.log(
+          `[OMR] Student ID: Using default (manual edit available after scan)`,
+        );
+      } else {
+        console.log(
+          `[OMR] Student ID: Detected from brightness scanner: ${studentId}`,
+        );
+      }
 
       // Ensure numeric
       const numericId = studentId
         .replace(/[^0-9]/g, "")
-        .padStart(8, "0")
-        .slice(0, 8);
+        .padStart(9, "0")
+        .slice(0, 9);
       console.log(`[OMR] Final studentId: ${numericId}`);
       if (OMR_DEBUG_LOGS) {
         console.log("--- OPENCV EXTRACTED ANSWERS ---");

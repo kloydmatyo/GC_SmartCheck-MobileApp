@@ -12,6 +12,7 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { NetworkService } from "./networkService";
 import { OfflineStorageService, PendingUpdate } from "./offlineStorageService";
@@ -134,7 +135,7 @@ export class SyncService {
       // 4. Flush queued document updates
       try {
         const rawUpdates = await OfflineStorageService.getPendingUpdates();
-        
+
         // --- DEDUPLICATE UPDATES ---
         const pendingUpdates: PendingUpdate[] = [];
         const updateMap = new Map<string, PendingUpdate>();
@@ -146,7 +147,7 @@ export class SyncService {
               // Merge data into existing update, keeping the existing ID
               const existing = updateMap.get(key)!;
               existing.data = { ...existing.data, ...update.data };
-              
+
               // Remove this duplicate from local storage so it doesn't stay pending
               await OfflineStorageService.removePendingUpdate(update.id);
             } else {
@@ -256,19 +257,28 @@ export class SyncService {
     const lastSyncDate = lastSync ? Timestamp.fromDate(lastSync) : null;
 
     // Sync Classes
-    const classConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
-    if (lastSyncDate) classConstraints.push(where("updatedAt", ">", lastSyncDate));
-    const classesQuery = query(collection(db, "classes"), ...classConstraints);
+    const classesQuery = query(collection(db, "classes"), where("createdBy", "==", currentUser.uid));
     const classesSnap = await getDocs(classesQuery);
+    
+    // In-memory delta filter to bypass Firestore composite index requirement
+    const newOrUpdatedClasses = classesSnap.docs.filter(doc => {
+      if (!lastSyncDate) return true;
+      const data = doc.data();
+      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+    });
 
     // Sync Exams + their latest answer keys
-    const examConstraints: any[] = [where("createdBy", "==", currentUser.uid)];
-    if (lastSyncDate) examConstraints.push(where("updatedAt", ">", lastSyncDate));
-    const examsQuery = query(collection(db, "exams"), ...examConstraints);
+    const examsQuery = query(collection(db, "exams"), where("createdBy", "==", currentUser.uid));
     const examsSnap = await getDocs(examsQuery);
+    
+    const newOrUpdatedExams = examsSnap.docs.filter(doc => {
+      if (!lastSyncDate) return true;
+      const data = doc.data();
+      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+    });
     const examsWithAK: any[] = [];
 
-    for (const examDoc of examsSnap.docs) {
+    for (const examDoc of newOrUpdatedExams) {
       const akQuery = query(
         collection(db, "answerKeys"),
         where("examId", "==", examDoc.id),
@@ -298,12 +308,12 @@ export class SyncService {
 
     // 4. Fetch all staging data to ensure Cache reflects local reality
     const stagingRealm = await RealmService.getStagingRealm();
-    
+
     // Get pending updates (edits/deletes)
     const pendingUpdates = stagingRealm.objects<OfflinePendingUpdate>(
       "OfflinePendingUpdate",
     );
-        const updateMap = new Map<string, any>();
+    const updateMap = new Map<string, any>();
     const deletedIds = new Set<string>();
     pendingUpdates.forEach((u) => {
       if (u.action === "delete") {
@@ -328,8 +338,8 @@ export class SyncService {
 
       // 1. Insert fresh classes (Server + Staging)
       const processedClassIds = new Set<string>();
-      
-      classesSnap.docs.forEach((doc) => {
+
+      newOrUpdatedClasses.forEach((doc) => {
         if (deletedIds.has(doc.id)) return;
         const data = doc.data();
         processedClassIds.add(doc.id);
@@ -378,7 +388,7 @@ export class SyncService {
           status: pendingData?.status || item.data.status || "Draft",
           papersCount: item.data.scanned_papers || 0,
           questionCount: pendingData?.num_items || item.data.num_items || 0,
-          answerKey: pendingData?.answers 
+          answerKey: pendingData?.answers
             ? JSON.stringify({ ...JSON.parse(item.answerKey || "{}"), answers: pendingData.answers })
             : item.answerKey,
           createdBy: item.data.createdBy,
@@ -464,6 +474,9 @@ export class SyncService {
 
     if (stagingClasses.length === 0) return;
 
+    const batch = writeBatch(db);
+    const classesToDelete: OfflineClass[] = [];
+
     for (const sClass of stagingClasses) {
       try {
         const classData = {
@@ -478,14 +491,21 @@ export class SyncService {
         };
 
         const classId = sClass._id.toHexString();
-        await setDoc(doc(db, "classes", classId), classData);
-
-        realm.write(() => {
-          realm.delete(sClass);
-        });
+        const classRef = doc(db, "classes", classId);
+        batch.set(classRef, classData);
+        
+        classesToDelete.push(sClass);
       } catch (err) {
-        console.error("Failed to sync staging class:", err);
+        console.error("Failed to prepare staging class for batch:", err);
       }
+    }
+
+    if (classesToDelete.length > 0) {
+      await batch.commit();
+      realm.write(() => {
+        realm.delete(classesToDelete);
+      });
+      console.log(`[SyncService] Batched and synced ${classesToDelete.length} offline classes`);
     }
   }
 
@@ -494,6 +514,9 @@ export class SyncService {
     const stagingQuizzes = realm.objects<OfflineQuiz>("OfflineQuiz");
 
     if (stagingQuizzes.length === 0) return;
+
+    const batch = writeBatch(db);
+    const quizzesToDelete: OfflineQuiz[] = [];
 
     for (const sQuiz of stagingQuizzes) {
       try {
@@ -513,13 +536,13 @@ export class SyncService {
 
         const examId = sQuiz._id.toHexString();
         const examRef = doc(db, "exams", examId);
-        await setDoc(examRef, quizData);
+        batch.set(examRef, quizData);
 
         // Also sync answer key if it exists
         if (sQuiz.answerKey) {
           const akData = JSON.parse(sQuiz.answerKey);
-          // Use a deterministic ID for the initial answer key to prevent duplicates on retry
-          await setDoc(doc(db, "answerKeys", `ak_${examRef.id}_initial`), {
+          const akRef = doc(db, "answerKeys", `ak_${examRef.id}_initial`);
+          batch.set(akRef, {
             examId: examRef.id,
             ...akData,
             createdAt: Timestamp.now(),
@@ -527,30 +550,30 @@ export class SyncService {
         }
 
         // Create initial template for consistency with CreateQuizScreen
-        try {
-          await setDoc(doc(db, "templates", `temp_${examRef.id}`), {
-            name: `${sQuiz.title}_Template`,
-            numQuestions: sQuiz.questionCount,
-            choicesPerQuestion: sQuiz.choicesPerItem || 4,
-            createdBy: sQuiz.createdBy,
-            examId: examRef.id,
-            examName: sQuiz.title,
-            examCode: sQuiz.examCode || "",
-            createdAt: Timestamp.now(),
-          });
-        } catch (templateErr) {
-          console.warn(
-            "Failed to sync template for staging quiz:",
-            templateErr,
-          );
-        }
-
-        realm.write(() => {
-          realm.delete(sQuiz);
+        const templateRef = doc(db, "templates", `temp_${examRef.id}`);
+        batch.set(templateRef, {
+          name: `${sQuiz.title}_Template`,
+          numQuestions: sQuiz.questionCount,
+          choicesPerQuestion: sQuiz.choicesPerItem || 4,
+          createdBy: sQuiz.createdBy,
+          examId: examRef.id,
+          examName: sQuiz.title,
+          examCode: sQuiz.examCode || "",
+          createdAt: Timestamp.now(),
         });
+
+        quizzesToDelete.push(sQuiz);
       } catch (err) {
-        console.error("Failed to sync staging quiz:", err);
+        console.error("Failed to prepare staging quiz for batch:", err);
       }
+    }
+
+    if (quizzesToDelete.length > 0) {
+      await batch.commit();
+      realm.write(() => {
+        realm.delete(quizzesToDelete);
+      });
+      console.log(`[SyncService] Batched and synced ${quizzesToDelete.length} offline exams`);
     }
   }
 
@@ -628,8 +651,8 @@ export class SyncService {
           ) {
             console.warn(
               `[SyncService] Ownership mismatch for exam ${update.examId}: ` +
-                `createdBy="${serverData.createdBy}", instructorId="${serverData.instructorId}", ` +
-                `currentUser="${currentUser.uid}"`,
+              `createdBy="${serverData.createdBy}", instructorId="${serverData.instructorId}", ` +
+              `currentUser="${currentUser.uid}"`,
             );
             throw Object.assign(new Error("Permission denied: not the owner"), {
               code: "permission-denied",

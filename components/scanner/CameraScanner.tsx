@@ -262,41 +262,32 @@ export default function CameraScanner({
         enableTorch={torch}
         flash={torch ? "on" : "off"}
       >
-        <TouchableOpacity
-          style={styles.torchButton}
-          onPress={() => setTorch(!torch)}
-        >
-          {/* Precise Mask (Dims everything outside the border tightly) */}
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {/* Top Mask - flex: 1 for perfect vertical centering */}
+        {/* Precise Mask (Dims everything outside the border tightly) */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          {/* Top Mask - flex: 1 for perfect vertical centering */}
+          <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
+
+          <View
+            style={{ flexDirection: "row", height: frameDimensions.height }}
+          >
+            {/* Left Side Mask */}
             <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
 
+            {/* Transparent Center Area (Width matches frame) */}
             <View
-              style={{ flexDirection: "row", height: frameDimensions.height }}
-            >
-              {/* Left Side Mask */}
-              <View
-                style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }}
-              />
+              style={{
+                width: frameDimensions.width,
+                backgroundColor: "transparent",
+              }}
+            />
 
-              {/* Transparent Center Area (Width matches frame) */}
-              <View
-                style={{
-                  width: frameDimensions.width,
-                  backgroundColor: "transparent",
-                }}
-              />
-
-              {/* Right Side Mask */}
-              <View
-                style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }}
-              />
-            </View>
-
-            {/* Bottom Mask - flex: 1 for perfect vertical centering */}
+            {/* Right Side Mask */}
             <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
           </View>
-        </TouchableOpacity>
+
+          {/* Bottom Mask - flex: 1 for perfect vertical centering */}
+          <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
+        </View>
 
         {/* UI Overlay Layer (Frame and Controls) */}
         <View style={StyleSheet.absoluteFill}>
@@ -409,7 +400,20 @@ export default function CameraScanner({
           )}
 
           {/* Controls Panel (Absolute bottom) */}
-          <View style={styles.shutterContainer}>
+          <View style={styles.controlsRow}>
+            {/* Flashlight Toggle Button */}
+            <TouchableOpacity
+              style={styles.flashlightButton}
+              onPress={() => setTorch(!torch)}
+            >
+              <Ionicons
+                name={torch ? "flash" : "flash-off"}
+                size={28}
+                color={torch ? "#00FF7F" : "#fff"}
+              />
+            </TouchableOpacity>
+
+            {/* Shutter Button */}
             <TouchableOpacity
               style={[
                 styles.shutterButton,
@@ -421,10 +425,13 @@ export default function CameraScanner({
               <View style={styles.shutterInner} />
             </TouchableOpacity>
 
-            <Text style={styles.footerText}>
-              Supports ZipGrade-compatible sheets
-            </Text>
+            {/* Spacer to balance layout */}
+            <View style={styles.flashlightButton} />
           </View>
+
+          <Text style={styles.footerText}>
+            Supports ZipGrade-compatible sheets
+          </Text>
         </View>
       </CameraView>
     </View>
@@ -439,22 +446,25 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
-  centerFrameContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  shutterContainer: {
+  controlsRow: {
     position: "absolute",
-    bottom: 25,
+    bottom: 60,
     left: 0,
     right: 0,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
+    justifyContent: "space-between",
+    paddingHorizontal: 40,
   },
-  torchButton: {
-    flex: 1,
+  flashlightButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   scanFrame: {
     borderWidth: 2,
@@ -510,13 +520,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 0,
     borderTopWidth: 0,
   },
-  bottomControls: {
-    width: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    paddingBottom: 20,
-  },
   shutterButton: {
     width: 84,
     height: 84,
@@ -538,6 +541,9 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   footerText: {
+    position: "absolute",
+    bottom: 20,
+    alignSelf: "center",
     color: "rgba(255,255,255,0.6)",
     fontSize: 12,
     fontWeight: "500",
@@ -548,11 +554,11 @@ const styles = StyleSheet.create({
     top: 140,
     left: 0,
     right: 0,
-    alignItems: "center" as const,
+    alignItems: "center",
     zIndex: 200,
   },
   stageIndicatorRow: {
-    flexDirection: "row" as const,
+    flexDirection: "row",
     gap: 8,
     marginBottom: 8,
   },
@@ -571,8 +577,8 @@ const styles = StyleSheet.create({
   stageText: {
     color: "#fff",
     fontSize: 16,
-    fontWeight: "700" as const,
-    textAlign: "center" as const,
+    fontWeight: "700",
+    textAlign: "center",
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -580,8 +586,8 @@ const styles = StyleSheet.create({
   stageSubtext: {
     color: "rgba(255,255,255,0.8)",
     fontSize: 13,
-    fontWeight: "500" as const,
-    textAlign: "center" as const,
+    fontWeight: "500",
+    textAlign: "center",
     marginTop: 4,
     textShadowColor: "rgba(0,0,0,0.8)",
     textShadowOffset: { width: 0, height: 1 },
@@ -600,14 +606,14 @@ const styles = StyleSheet.create({
   checklistTitle: {
     color: "#C8FFE4",
     fontSize: 12,
-    fontWeight: "700" as const,
+    fontWeight: "700",
     marginBottom: 4,
-    textAlign: "left" as const,
+    textAlign: "left",
   },
   checklistItem: {
     color: "rgba(255,255,255,0.92)",
     fontSize: 11,
     lineHeight: 16,
-    textAlign: "left" as const,
+    textAlign: "left",
   },
 });
