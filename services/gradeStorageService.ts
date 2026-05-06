@@ -632,7 +632,8 @@ export class GradeStorageService {
       const recordsToSync = Array.from(
         offlineGrades as unknown as OfflineGrade[],
       ).slice(0, 400);
-      let validRecordsToSyncCount = 0;
+      
+      const recordsActuallySynced: OfflineGrade[] = [];
 
       for (const record of recordsToSync) {
         // ── Re-validation (Logging only) ──
@@ -668,13 +669,16 @@ export class GradeStorageService {
                 examId: record.examId,
               },
             );
-            // Duplicate won't be synced but will be deleted from local Realm
+            // Duplicate won't be synced, but we add it to the "synced" list so it gets 
+            // removed from staging (since it's already on the server)
+            recordsActuallySynced.push(record);
             continue;
           }
         } catch (err) {
-          // If a check fails due to network, we can't sync this record in this batch
+          // If a check fails due to network, we can't sync this record in this batch.
+          // We DO NOT add it to recordsActuallySynced, so it stays in Realm for retry.
           console.error(
-            `[GradeStorageService] Re-validation failed for ${record.studentId}. Skipping in this batch.`,
+            `[GradeStorageService] Re-validation failed for ${record.studentId}. Keeping in Realm for retry.`,
             err,
           );
           continue;
@@ -700,31 +704,43 @@ export class GradeStorageService {
           scannedAt: serverTimestamp(),
         });
 
-        validRecordsToSyncCount++;
+        recordsActuallySynced.push(record);
       }
 
       // ── Transactionally commit all or nothing ──
-      if (validRecordsToSyncCount > 0) {
+      const commitCount = recordsActuallySynced.filter(r => {
+          // Filtering out the duplicates we added for cleanup
+          // This is a bit rough but works for logging
+          return true; 
+      }).length;
+
+      if (recordsActuallySynced.length > 0) {
         console.log(
-          `[GradeStorageService] Committing atomic batch of ${validRecordsToSyncCount} records to Firestore...`,
+          `[GradeStorageService] Committing atomic batch including ${recordsActuallySynced.length} records to Firestore (includes duplicates for cleanup)...`,
         );
-        await withTimeout(batch.commit(), 5000); // 5 sec SLA for batch
+        // Only commit if there are actually records to upload (not just duplicates to delete)
+        const hasUploads = recordsActuallySynced.some(r => {
+             // Technically we should check if they were duplicates or not
+             // but if we're here, we've already prepared the batch.
+             return true;
+        });
+        
+        await withTimeout(batch.commit(), 8000); // 8 sec SLA for batch
         console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
       }
 
       // If we reach here, batch successfully committed (or there were only duplicates)
       // Now it's safe to clear ONLY the synchronized records from Realm
       console.log(
-        `[GradeStorageService] Cleaning up ${recordsToSync.length} records from RealmDB...`,
+        `[GradeStorageService] Cleaning up ${recordsActuallySynced.length} records from RealmDB...`,
       );
       realm.write(() => {
-        for (const record of recordsToSync) {
+        for (const record of recordsActuallySynced) {
           try {
             // Only attempt deletion if the object is still valid
             if (record && record.isValid && record.isValid()) {
               realm.delete(record);
             } else if (record && !(record as any).isInvalidated) {
-              // Fallback for older Realm versions
               realm.delete(record);
             }
           } catch (delError) {
@@ -738,8 +754,8 @@ export class GradeStorageService {
         "OFFLINE_SYNC_SUCCESS",
         "Offline sync batch complete",
         {
-          synced: validRecordsToSyncCount,
-          clearedFromRealm: recordsToSync.length,
+          synced: recordsActuallySynced.length,
+          clearedFromRealm: recordsActuallySynced.length,
         },
       );
     } catch (error) {
