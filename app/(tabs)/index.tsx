@@ -411,11 +411,18 @@ export default function HomeScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
+    if (isOnline) {
+      try {
+        await SyncService.syncPendingUpdates();
+      } catch (err) {
+        console.error("Refresh sync error:", err);
+      }
+    }
     loadHome();
     setRefreshing(false);
-  }, [loadHome]);
+  }, [isOnline, loadHome]);
 
   useFocusEffect(loadHome);
 
