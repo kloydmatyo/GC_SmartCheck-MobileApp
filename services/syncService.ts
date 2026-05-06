@@ -428,14 +428,14 @@ export class SyncService {
         const data = doc.data();
         realm.create("GradeCache", {
           id: doc.id,
-          studentId: data.studentId,
-          examId: data.examId,
-          score: data.score,
-          totalPoints: data.totalPoints,
-          percentage: data.percentage,
-          gradeEquivalent: data.gradeEquivalent,
-          dateScanned: data.dateScanned,
-          scannedBy: data.scannedBy,
+          studentId: data.studentId || "Unknown",
+          examId: data.examId || "Unknown",
+          score: data.score ?? 0,
+          totalPoints: data.totalPoints ?? 0,
+          percentage: data.percentage ?? 0,
+          gradeEquivalent: data.gradeEquivalent || "",
+          dateScanned: data.dateScanned || new Date().toISOString(),
+          scannedBy: data.scannedBy || "",
           createdAt: data.createdAt?.toDate?.() || new Date(),
         }, "modified" as any);
       });
@@ -443,15 +443,15 @@ export class SyncService {
       stagingGrades.forEach((sGrade) => {
         realm.create("GradeCache", {
           id: sGrade._id.toHexString(),
-          studentId: sGrade.studentId,
-          examId: sGrade.examId,
-          score: sGrade.score,
-          totalPoints: sGrade.totalPoints,
-          percentage: sGrade.percentage,
-          gradeEquivalent: sGrade.gradeEquivalent,
-          dateScanned: sGrade.dateScanned,
-          scannedBy: sGrade.scannedBy,
-          createdAt: sGrade.createdAt,
+          studentId: sGrade.studentId || "Unknown",
+          examId: sGrade.examId || "Unknown",
+          score: sGrade.score ?? 0,
+          totalPoints: sGrade.totalPoints ?? 0,
+          percentage: sGrade.percentage ?? 0,
+          gradeEquivalent: sGrade.gradeEquivalent || "",
+          dateScanned: sGrade.dateScanned || new Date().toISOString(),
+          scannedBy: sGrade.scannedBy || "",
+          createdAt: sGrade.createdAt || new Date(),
         }, "modified" as any);
       });
     });
