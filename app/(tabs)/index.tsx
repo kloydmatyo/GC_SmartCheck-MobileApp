@@ -345,9 +345,13 @@ export default function HomeScreen() {
           ResultsService.getUnifiedResults(),
         ]);
 
-        const scanRows = unifiedResults.rows.filter(
-          (item) => item.source === "scan",
-        );
+        const scanRows = unifiedResults.rows
+          .filter((item) => item.source === "scan")
+          .sort((a, b) => {
+            const dateA = new Date(a.dateValue).getTime();
+            const dateB = new Date(b.dateValue).getTime();
+            return dateB - dateA;
+          });
 
         const averageScore =
           scanRows.length > 0
@@ -413,15 +417,19 @@ export default function HomeScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (isOnline) {
-      try {
+    try {
+      if (isOnline) {
+        // Trigger sync but don't let it hang the UI too long
+        // syncPendingUpdates already has internal isSyncing check
         await SyncService.syncPendingUpdates();
-      } catch (err) {
-        console.error("Refresh sync error:", err);
       }
+      // Re-load all data to reflect synced state
+      await loadHome();
+    } catch (err) {
+      console.error("Refresh error:", err);
+    } finally {
+      setRefreshing(false);
     }
-    loadHome();
-    setRefreshing(false);
   }, [isOnline, loadHome]);
 
   useFocusEffect(loadHome);

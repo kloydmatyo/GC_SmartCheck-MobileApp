@@ -13,6 +13,7 @@ import {
     TextInput,
     TouchableOpacity,
     View,
+    ActivityIndicator,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
@@ -432,6 +433,7 @@ export default function ScannerScreen({
   const [examChoicesPerQuestion, setExamChoicesPerQuestion] = useState<4 | 5>(
     4,
   );
+  const [isSaving, setIsSaving] = useState(false);
 
   // class/exam dropdown state
   const [classesList, setClassesList] = useState<
@@ -659,6 +661,8 @@ export default function ScannerScreen({
     scanResult: ScanResult,
     imageUri: string,
   ) => {
+    if (isSaving || currentState === "results") return;
+    setIsSaving(true);
     try {
       const studentId = scanResult.studentId;
 
@@ -670,6 +674,7 @@ export default function ScannerScreen({
         console.warn(
           `[ScannerScreen] Unreadable student ID ("${studentId}") — prompting manual entry`,
         );
+        setIsSaving(false);
         // Show manual entry modal instead of hard-blocking
         setManualIdModal({
           visible: true,
@@ -846,36 +851,37 @@ export default function ScannerScreen({
         setPendingResult(result);
         setDuplicateMatch(duplicateCheck);
         setShowDuplicateModal(true);
+        setIsSaving(false);
         return;
       }
 
       // ── 4. Save Pipeline ──
       const savedResult = await StorageService.saveScanResult(result, imageUri);
 
-      // Async Firestore/Realm save
-      GradeStorageService.saveGradingResult(result, activeExamId).then(
-        (saveResult) => {
-          if (saveResult.status === "saved") {
-            Toast.show({
-              type: "success",
-              text1: "Saved",
-              text2: `Score: ${result.score}/${result.totalPoints}`,
-            });
-          } else if (saveResult.status === "pending") {
-            Toast.show({
-              type: "info",
-              text1: "Queued Offline",
-              text2: "Data saved in RealmDB for later sync.",
-            });
-          } else if (saveResult.status === "error") {
-            Toast.show({
-              type: "error",
-              text1: "Save Failed",
-              text2: saveResult.message || "Could not save to server.",
-            });
-          }
-        },
-      );
+      // Await Firestore/Realm save to show loading
+      try {
+        const saveResult = await GradeStorageService.saveGradingResult(result, activeExamId);
+        
+        if (saveResult.status === "saved") {
+          Toast.show({
+            type: "success",
+            text1: "Synced to Cloud",
+            text2: `Score: ${result.score}/${result.totalPoints}`,
+          });
+        } else if (saveResult.status === "pending") {
+          // If offline, just hide loading. The user sees the score on the next screen anyway.
+          // No toast needed as per user request to "remove the offline toast".
+        } else if (saveResult.status === "error") {
+          Toast.show({
+            type: "error",
+            text1: "Save Failed",
+            text2: saveResult.message || "Could not save to server.",
+          });
+        }
+      } catch (saveErr) {
+        console.error("[ScannerScreen] Save error:", saveErr);
+        // Fallback for unexpected errors — still no toast as per request
+      }
 
       setGradingResult(savedResult);
       setScannedImage(imageUri);
@@ -883,6 +889,8 @@ export default function ScannerScreen({
     } catch (error) {
       console.error("[ScannerScreen] Error:", error);
       Alert.alert("Error", "Failed to process scan.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1441,6 +1449,16 @@ export default function ScannerScreen({
           </View>
         </View>
       </Modal>
+
+      {/* ── Loading Overlay ── */}
+      {isSaving && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#1FC27D" />
+            <Text style={styles.loadingText}>Syncing Grade...</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1595,6 +1613,27 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+  },
+  loadingBox: {
+    backgroundColor: "#1A1A1A",
+    padding: 30,
+    borderRadius: 20,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  loadingText: {
+    color: "#fff",
+    marginTop: 15,
+    fontSize: 16,
+    fontWeight: "600",
   },
   selectorsOverlay: {
     position: "absolute",

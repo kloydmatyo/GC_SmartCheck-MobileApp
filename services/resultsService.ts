@@ -273,7 +273,8 @@ export class ResultsService {
 
     // Add Offline Grades first (Highest priority as they are newest/unsynced)
     offlineGrades.forEach((og: any) => {
-      const examId = String(og.examId || "");
+      const examId = String(og.examId || "").trim();
+      const studentId = String(og.studentId || "").trim();
       const examMeta = examMetaById.get(examId);
 
       const totalQuestions = og.totalQuestions || og.totalPoints || 1;
@@ -281,7 +282,6 @@ export class ResultsService {
       const percentage =
         og.percentage || Math.round((score / totalQuestions) * 100);
       const dateValue = og.dateScanned || og.createdAt.toISOString();
-      const studentId = og.studentId;
 
       rows.push({
         id: `offline_${og._id}`,
@@ -337,6 +337,12 @@ export class ResultsService {
       if (!data || (data as any).isNullId) return;
 
       const examId = String(data.examId || "").trim();
+      const studentId = String(data.studentId || "").trim();
+      const dedupeKey = `scan:${studentId}:${examId}`;
+
+      // Skip if we already added this from offline staging
+      if (seenKeys.has(dedupeKey)) return;
+
       const examMeta = examMetaById.get(examId);
       if (!examMeta) return;
 
@@ -350,7 +356,6 @@ export class ResultsService {
           ? Math.round(data.percentage)
           : Math.round((score / totalQuestions) * 100);
       const dateValue = toIsoDate(data.scannedAt || data.dateScanned);
-      const studentId = String(data.studentId || "").trim();
 
       rows.push({
         id,

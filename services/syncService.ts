@@ -105,12 +105,11 @@ export class SyncService {
     const conflicts: ConflictInfo[] = [];
 
     try {
-      // 1. Flush Grades from Staging
       try {
         await this.syncStagingGrades();
         syncedCount++;
       } catch (e) {
-        console.error("Flush Grades Error", e);
+        console.warn("Flush Grades Warning:", e);
         failedCount++;
       }
 
@@ -119,7 +118,7 @@ export class SyncService {
         await this.syncStagingClasses();
         syncedCount++;
       } catch (e) {
-        console.error("Flush Classes Error", e);
+        console.warn("Flush Classes Warning:", e);
         failedCount++;
       }
 
@@ -128,7 +127,7 @@ export class SyncService {
         await this.syncStagingExams();
         syncedCount++;
       } catch (e) {
-        console.error("Flush Exams Error", e);
+        console.warn("Flush Exams Warning:", e);
         failedCount++;
       }
 
@@ -180,7 +179,7 @@ export class SyncService {
               );
 
             if (!isPermissionError) {
-              console.error(
+              console.warn(
                 `Failed to sync update ${update.id} for exam ${update.examId}:`,
                 updateError,
               );
@@ -206,7 +205,7 @@ export class SyncService {
           }
         }
       } catch (e) {
-        console.error("Pending update sync error", e);
+        console.warn("Pending update sync warning:", e);
         failedCount++;
       }
 
@@ -215,7 +214,7 @@ export class SyncService {
         await this.syncFirestoreToCache();
         syncedCount++;
       } catch (e) {
-        console.error("Refresh Cache Error", e);
+        console.warn("Refresh Cache Warning:", e);
         failedCount++;
       }
 
@@ -232,7 +231,7 @@ export class SyncService {
       this.notifyListeners(result);
       return result;
     } catch (error) {
-      console.error("Error during sync:", error);
+      console.warn("Sync warning during full process:", error);
       return {
         success: false,
         syncedCount,
@@ -264,7 +263,9 @@ export class SyncService {
     const newOrUpdatedClasses = classesSnap.docs.filter(doc => {
       if (!lastSyncDate) return true;
       const data = doc.data();
-      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+      const updatedAt = data.updatedAt;
+      const updatedDate = updatedAt?.toDate ? updatedAt.toDate() : updatedAt ? new Date(updatedAt) : null;
+      return !updatedDate || updatedDate > lastSyncDate.toDate();
     });
 
     // Sync Exams + their latest answer keys
@@ -274,7 +275,9 @@ export class SyncService {
     const newOrUpdatedExams = examsSnap.docs.filter(doc => {
       if (!lastSyncDate) return true;
       const data = doc.data();
-      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+      const updatedAt = data.updatedAt;
+      const updatedDate = updatedAt?.toDate ? updatedAt.toDate() : updatedAt ? new Date(updatedAt) : null;
+      return !updatedDate || updatedDate > lastSyncDate.toDate();
     });
     const examsWithAK: any[] = [];
 
@@ -503,7 +506,17 @@ export class SyncService {
     if (classesToDelete.length > 0) {
       await batch.commit();
       realm.write(() => {
-        realm.delete(classesToDelete);
+        for (const item of classesToDelete) {
+          try {
+            if (item && item.isValid && item.isValid()) {
+              realm.delete(item);
+            } else if (item && !(item as any).isInvalidated) {
+              realm.delete(item);
+            }
+          } catch (delError) {
+            console.warn("Failed to delete staging class from Realm:", delError);
+          }
+        }
       });
       console.log(`[SyncService] Batched and synced ${classesToDelete.length} offline classes`);
     }
@@ -571,7 +584,17 @@ export class SyncService {
     if (quizzesToDelete.length > 0) {
       await batch.commit();
       realm.write(() => {
-        realm.delete(quizzesToDelete);
+        for (const item of quizzesToDelete) {
+          try {
+            if (item && item.isValid && item.isValid()) {
+              realm.delete(item);
+            } else if (item && !(item as any).isInvalidated) {
+              realm.delete(item);
+            }
+          } catch (delError) {
+            console.warn("Failed to delete staging quiz from Realm:", delError);
+          }
+        }
       });
       console.log(`[SyncService] Batched and synced ${quizzesToDelete.length} offline exams`);
     }
