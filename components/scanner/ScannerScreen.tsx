@@ -447,6 +447,8 @@ export default function ScannerScreen({
   const [selectedExam, setSelectedExam] = useState<any | null>(null);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
   const [examDropdownOpen, setExamDropdownOpen] = useState(false);
+  const [examIdInput, setExamIdInput] = useState("");
+  const [isValidatingExam, setIsValidatingExam] = useState(false);
 
   // when resetFlag changes we should return to the initial exam-select
   // state and clear any existing exam context. this allows the home screen's
@@ -522,7 +524,7 @@ export default function ScannerScreen({
       }
     };
     fetchClasses();
-  }, []);
+  }, [initialClassId]);
 
   // when class changes fetch its exams
   React.useEffect(() => {
@@ -743,7 +745,7 @@ export default function ScannerScreen({
             ]);
             isValidId = !snapSnake.empty || !snapCamel.empty;
           }
-        } catch (err) {
+        } catch (_err) {
           console.warn(
             "[ScannerScreen] Student verification timed out. Assuming valid.",
           );
@@ -802,7 +804,7 @@ export default function ScannerScreen({
           } else {
             throw new Error("Missing key");
           }
-        } catch (error) {
+        } catch (_error) {
           console.warn(
             "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
           );
@@ -839,7 +841,7 @@ export default function ScannerScreen({
           ),
           900,
         );
-      } catch (err) {
+      } catch (_err) {
         /* proceed if check hangs */
       }
 
@@ -1036,7 +1038,7 @@ export default function ScannerScreen({
       let choicesPerQuestion: 4 | 5 = 5;
 
       // 1. Check Staging Realm (Offline creations)
-      const { RealmService, OfflineQuiz, QuizCache } =
+      const { RealmService } =
         await import("../../services/realmService");
       const stagingRealm = await RealmService.getStagingRealm();
       const sQuizzes = stagingRealm
