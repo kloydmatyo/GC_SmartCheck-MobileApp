@@ -1,6 +1,5 @@
 import { File } from "expo-file-system";
 import { ScanResult, StudentAnswer } from "../types/scanning";
-import { scan200ItemPageFast } from "./brightnessScannerFor200Item";
 import { ZipgradeGenerator } from "./zipgradeGenerator";
 
 const OMR_DEBUG_LOGS = false;
@@ -554,31 +553,6 @@ export class ZipgradeScanner {
           : Number(String(questionCount).replace(/[^0-9]/g, "")) || 20;
       const qCount = rawQ > 0 ? rawQ : 20;
 
-      if (qCount === 200) {
-        const currentPage = pageNumber || 1;
-        const startedAt = Date.now();
-        console.log(
-          `[OMR] 200Q dedicated scanner config: page=${currentPage}, choices=${choicesPerQuestion} (${choicesPerQuestion === 5 ? "A-E" : "A-D"})`,
-        );
-
-        const answers = await scan200ItemPageFast(
-          imageUri,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        console.log(
-          `[OMR] 200Q dedicated scanner complete in ${Date.now() - startedAt}ms: ${answers.filter((a) => a.selectedAnswer).length}/100 answers`,
-        );
-
-        return {
-          studentId: "00000000",
-          answers,
-          confidence: 0.98,
-          processedImageUri: imageUri,
-        };
-      }
-
       // Load OpenCV
       loadOpenCV();
       const {
@@ -845,12 +819,15 @@ export class ZipgradeScanner {
         maxAspect = 2.5;
         minExtent = 0.1;
       } else if (qCount <= 50) {
-        // 50q: relaxed filtering
-        minShapeArea = Math.pow(imgWidth / 120, 2);
-        maxShapeArea = imgArea * 0.1;
-        minAspect = 0.25;
-        maxAspect = 4.0;
-        minExtent = 0.03;
+        // 50q: VERY relaxed filtering (ID bubbles are 3.0mm, answer bubbles are 3.5mm)
+        minShapeArea = Math.pow(imgWidth / 150, 2); // Even smaller minimum for 3.0mm ID bubbles
+        maxShapeArea = imgArea * 0.12;
+        minAspect = 0.2; // More lenient
+        maxAspect = 5.0;
+        minExtent = 0.02; // More lenient
+        console.log(
+          `[OMR] 50q bubble filters: area[${Math.round(minShapeArea)}-${Math.round(maxShapeArea)}], aspect[${minAspect}-${maxAspect}], extent>=${minExtent}`,
+        );
       } else {
         // 100q: EXTREMELY relaxed filtering (smallest bubbles, most of them)
         minShapeArea = Math.pow(imgWidth / 200, 2); // Very small minimum
@@ -910,6 +887,23 @@ export class ZipgradeScanner {
       console.log(
         `[OMR] rawShapes: ${rawShapes.length} (from ${numContours} contours)`,
       );
+
+      // Debug: log filtering stats for 50q templates
+      if (qCount === 50) {
+        const tooSmall = rawShapes.filter((s) => s.area < minShapeArea).length;
+        const tooLarge = rawShapes.filter((s) => s.area > maxShapeArea).length;
+        const badAspect = rawShapes.filter(
+          (s) => s.w / s.h < minAspect || s.w / s.h > maxAspect,
+        ).length;
+        const badExtent = rawShapes.filter((s) => s.extent < minExtent).length;
+        console.log(
+          `[OMR] 50q filtering: ${numContours} contours → ${rawShapes.length} shapes`,
+        );
+        console.log(
+          `[OMR] Filtered out: ${tooSmall} too small, ${tooLarge} too large, ${badAspect} bad aspect, ${badExtent} bad extent`,
+        );
+      }
+
       if (rawShapes.length === 0) {
         return {
           studentId: "00000000",
@@ -1062,94 +1056,20 @@ export class ZipgradeScanner {
       );
       console.log(`[OMR] regMarks: ${regMarks.length}`);
 
-      const getStrict200CornerMarkers = () => {
-        if (regMarks.length < 4) return null;
-
-        const cornerTargets = [
-          { key: "topLeft", x: 0, y: 0 },
-          { key: "topRight", x: imgWidth, y: 0 },
-          { key: "bottomLeft", x: 0, y: imgHeight },
-          { key: "bottomRight", x: imgWidth, y: imgHeight },
-        ] as const;
-
-        const chosenIndices = new Set<number>();
-        const chosen: Record<string, { x: number; y: number }> = {};
-
-        for (const target of cornerTargets) {
-          let bestIdx = -1;
-          let bestScore = Number.POSITIVE_INFINITY;
-          for (let i = 0; i < regMarks.length; i++) {
-            if (chosenIndices.has(i)) continue;
-            const m = regMarks[i];
-            const dx = m.x - target.x;
-            const dy = m.y - target.y;
-            const score = dx * dx + dy * dy;
-            if (score < bestScore) {
-              bestScore = score;
-              bestIdx = i;
-            }
-          }
-
-          if (bestIdx < 0) return null;
-          chosenIndices.add(bestIdx);
-          chosen[target.key] = {
-            x: regMarks[bestIdx].x,
-            y: regMarks[bestIdx].y,
-          };
-        }
-
-        const tl = chosen.topLeft;
-        const tr = chosen.topRight;
-        const bl = chosen.bottomLeft;
-        const br = chosen.bottomRight;
-        const minWidth = imgWidth * 0.45;
-        const minHeight = imgHeight * 0.45;
-        const topWidth = Math.abs(tr.x - tl.x);
-        const bottomWidth = Math.abs(br.x - bl.x);
-        const leftHeight = Math.abs(bl.y - tl.y);
-        const rightHeight = Math.abs(br.y - tr.y);
-        const maxCornerOffsetX = imgWidth * 0.25;
-        const maxCornerOffsetY = imgHeight * 0.25;
-
-        const cornersNearImageEdges =
-          tl.x <= maxCornerOffsetX &&
-          tl.y <= maxCornerOffsetY &&
-          tr.x >= imgWidth - maxCornerOffsetX &&
-          tr.y <= maxCornerOffsetY &&
-          bl.x <= maxCornerOffsetX &&
-          bl.y >= imgHeight - maxCornerOffsetY &&
-          br.x >= imgWidth - maxCornerOffsetX &&
-          br.y >= imgHeight - maxCornerOffsetY;
-
-        const geometryLooksValid =
-          topWidth >= minWidth &&
-          bottomWidth >= minWidth &&
-          leftHeight >= minHeight &&
-          rightHeight >= minHeight;
-
-        if (!cornersNearImageEdges || !geometryLooksValid) {
-          return null;
-        }
-
-        return {
-          topLeft: tl,
-          topRight: tr,
-          bottomLeft: bl,
-          bottomRight: br,
-        };
-      };
-
       let paperLeft = imgWidth * 0.03,
         paperRight = imgWidth * 0.97;
       let paperTop = imgHeight * 0.03,
         paperBottom = imgHeight * 0.97;
       let detectedSheetType: "20" | "50" | "100" | null = null;
 
-      // Use strict corner markers for 200-item sheets.
-      const strict200Corners =
-        qCount === 200 ? getStrict200CornerMarkers() : null;
+      const strict200Corners = ((): {
+        topLeft: { x: number; y: number };
+        topRight: { x: number; y: number };
+        bottomLeft: { x: number; y: number };
+        bottomRight: { x: number; y: number };
+      } | null => null)();
 
-      if (qCount === 200 && strict200Corners) {
+      if (strict200Corners) {
         paperLeft = Math.max(
           0,
           Math.min(
@@ -1225,6 +1145,18 @@ export class ZipgradeScanner {
         `[OMR] bubbles in paper space: ${bubbles.length}, paper: ${Math.round(paperW)}x${Math.round(paperH)}`,
       );
 
+      // Debug: show bubble distribution for 50q templates
+      if (qCount === 50) {
+        const topThird = bubbles.filter((b) => b.y < paperH * 0.33).length;
+        const middleThird = bubbles.filter(
+          (b) => b.y >= paperH * 0.33 && b.y < paperH * 0.67,
+        ).length;
+        const bottomThird = bubbles.filter((b) => b.y >= paperH * 0.67).length;
+        console.log(
+          `[OMR] 50q bubble Y-distribution: top=${topThird}, middle=${middleThird}, bottom=${bottomThird}`,
+        );
+      }
+
       // ── DIAGNOSTIC: dump all bubble positions as % of paper ────────────────
       // Group into 10% X bands × 10% Y bands and log density
       const xBands = 10,
@@ -1257,10 +1189,10 @@ export class ZipgradeScanner {
       let detectedQ = qCount;
 
       if (qCount <= 20) {
-        // A 20-question sheet has exactly 100 bubbles (20 * 5).
-        // A 50-question sheet has 250 answer bubbles + 50 ID bubbles = 300 bubbles.
-        // Therefore, any sheet with > 160 bubbles is definitively a 50+ question sheet.
-        const looksLike50q = bubbles.length > 160;
+        // A 20-question sheet has 100 answer bubbles (20×5) + 90 ID bubbles (9×10) = 190 total
+        // A 50-question sheet has 250 answer bubbles (50×5) + 90 ID bubbles (9×10) = 340 total
+        // Therefore, any sheet with > 270 bubbles is definitively a 50-item sheet.
+        const looksLike50q = bubbles.length > 270;
 
         if (looksLike50q) {
           detectedQ = 50;
@@ -1279,134 +1211,162 @@ export class ZipgradeScanner {
         );
       }
 
-      // ── 9. Extract answers using timing mark-based or fallback regions ────
-      // For 20q: use fixed regions (like Main)
-      // For 50q: try to use timing marks to dynamically locate question blocks
-      // For 100q: use fixed regions (timing marks are unreliable)
-      let regions = getLayoutRegions(detectedQ);
+      // ── 8.5. Extract Student ID (50q sheets only) ──────────────────────────
+      //
+      // IMPORTANT: This must happen BEFORE answer extraction
+      //
+      // The Student ZipGrade ID grid is in the top section of 50q sheets:
+      //   Physical layout (from answerSheetGenerator.ts):
+      //   - 9 columns (9 digits)
+      //   - 10 rows (digits 0-9, top to bottom)
+      //   - Column spacing: 4.8mm
+      //   - Row spacing: 4.0mm
+      //   - Bubble size: 3.0mm
+      //   - Y position: After name/date fields, before answer section
+      //   - Approximate Y range: [8%, 50%] of paper height (answer regions start at 52%)
+      //
+      // For 100q/150q/200q templates, ID is detected by brightness scanner
+      let studentId = "00000000"; // Default
 
-      // DISABLED: Timing mark adjustment for 50q sheets
-      // The fixed regions are already calibrated correctly based on physical measurements
-      // Timing marks were causing misalignment (Q21-30 region was being incorrectly adjusted)
-      if (false && detectedQ === 50 && timingMarks.length >= 3) {
-      } else if (detectedQ === 100) {
-        // ── 100q: Use bubble density to automatically identify question blocks ────
+      if (detectedQ === 50 && bubbles.length > 0) {
         console.log(
-          `[OMR] Using bubble density analysis to identify regions for 100q`,
+          "[OMR] Attempting Student ID detection for 50-item template...",
         );
 
-        // Analyze bubble density to find question blocks
-        // Each block has ~50 bubbles (10 questions × 5 choices)
-        // Blocks are arranged in a grid pattern
-
-        // Group bubbles by X position (columns) and Y position (rows)
-        const xBands = 10;
-        const yBands = 10;
-        const densityGrid: number[][] = Array.from({ length: yBands }, () =>
-          new Array(xBands).fill(0),
-        );
-
-        for (const b of bubbles) {
-          const xi = Math.min(Math.floor((b.x / paperW) * xBands), xBands - 1);
-          const yi = Math.min(Math.floor((b.y / paperH) * yBands), yBands - 1);
-          densityGrid[yi][xi]++;
-        }
-
-        // Find dense regions (blocks with many bubbles)
-        const denseRegions: Array<{
-          xMin: number;
-          xMax: number;
-          yMin: number;
-          yMax: number;
-          density: number;
-        }> = [];
-
-        for (let yi = 0; yi < yBands - 1; yi++) {
-          for (let xi = 0; xi < xBands - 2; xi++) {
-            // Check if this 3×2 grid cell has high bubble density
-            const density =
-              densityGrid[yi][xi] +
-              densityGrid[yi][xi + 1] +
-              densityGrid[yi][xi + 2] +
-              (yi + 1 < yBands
-                ? densityGrid[yi + 1][xi] +
-                  densityGrid[yi + 1][xi + 1] +
-                  densityGrid[yi + 1][xi + 2]
-                : 0);
-
-            if (density >= 15) {
-              // At least 15 bubbles in this region
-              denseRegions.push({
-                xMin: xi / xBands,
-                xMax: (xi + 3) / xBands,
-                yMin: yi / yBands,
-                yMax: (yi + 2) / yBands,
-                density,
-              });
-            }
-          }
-        }
-
-        // Sort regions by position (top-to-bottom, left-to-right)
-        denseRegions.sort((a, b) => {
-          const rowDiff = Math.floor(a.yMin * 5) - Math.floor(b.yMin * 5);
-          if (rowDiff !== 0) return rowDiff;
-          return a.xMin - b.xMin;
-        });
-
-        // Merge overlapping regions
-        const mergedRegions: typeof denseRegions = [];
-        for (const region of denseRegions) {
-          const overlapping = mergedRegions.find(
-            (r) =>
-              Math.abs(r.xMin - region.xMin) < 0.2 &&
-              Math.abs(r.yMin - region.yMin) < 0.2,
+        try {
+          // Filter bubbles in the ID section
+          // The ID section is positioned between the header and answer regions
+          // Answer regions start at Y=52%, so ID should be in the range [8%, 50%]
+          const idYMin = paperH * 0.08;
+          const idYMax = paperH * 0.5;
+          const idBubbles = bubbles.filter(
+            (b) => b.y >= idYMin && b.y <= idYMax,
           );
-          if (overlapping) {
-            // Merge by expanding bounds
-            overlapping.xMin = Math.min(overlapping.xMin, region.xMin);
-            overlapping.xMax = Math.max(overlapping.xMax, region.xMax);
-            overlapping.yMin = Math.min(overlapping.yMin, region.yMin);
-            overlapping.yMax = Math.max(overlapping.yMax, region.yMax);
-            overlapping.density += region.density;
-          } else {
-            mergedRegions.push({ ...region });
-          }
-        }
 
-        console.log(
-          `[OMR] Found ${mergedRegions.length} dense regions via bubble density`,
-        );
-        mergedRegions.forEach((r, idx) => {
           console.log(
-            `[OMR] Dense region ${idx + 1}: X[${(r.xMin * 100).toFixed(0)}%-${(r.xMax * 100).toFixed(0)}%] ` +
-              `Y[${(r.yMin * 100).toFixed(0)}%-${(r.yMax * 100).toFixed(0)}%] density=${r.density}`,
+            `[OMR] ID section bubbles: ${idBubbles.length} (Y: ${Math.round(idYMin)}-${Math.round(idYMax)}px)`,
           );
-        });
 
-        // Use detected regions if we found at least 2
-        if (mergedRegions.length >= 2) {
-          regions = mergedRegions.slice(0, 10).map((r, idx) => ({
-            xMin: Math.max(0, r.xMin - 0.02),
-            xMax: Math.min(1, r.xMax + 0.02),
-            yMin: Math.max(0, r.yMin - 0.02),
-            yMax: Math.min(1, r.yMax + 0.02),
-            startQ: idx * 10 + 1,
-            numQ: 10,
-          }));
-          console.log(`[OMR] Using ${regions.length} density-based regions`);
+          if (idBubbles.length >= 30) {
+            // Need at least 30 bubbles for 9 columns × 3-4 rows minimum
+            // Cluster bubbles into rows by Y-coordinate
+            const idRows = clusterByY(idBubbles, medianH * 0.65);
+
+            // Filter to rows with 5-10 bubbles (valid ID rows)
+            const validIdRows = idRows.filter(
+              (r) => r.length >= 5 && r.length <= 10,
+            );
+
+            console.log(
+              `[OMR] ID rows detected: ${validIdRows.length} (need 10 for full ID)`,
+            );
+
+            if (validIdRows.length >= 5) {
+              // Need at least 5 rows to attempt detection
+              // Sort rows top-to-bottom
+              const sortedRows = validIdRows
+                .sort((a, b) => {
+                  const ay = a.reduce((s, b) => s + b.y, 0) / a.length;
+                  const by = b.reduce((s, b) => s + b.y, 0) / b.length;
+                  return ay - by;
+                })
+                .slice(0, 10); // Take first 10 rows
+
+              // Derive column centroids from all rows
+              const allRowBubbles = sortedRows.flat();
+              const sortedByX = [...allRowBubbles].sort((a, b) => a.x - b.x);
+
+              // Estimate 9 column positions by dividing X range
+              const xMin = sortedByX[0].x;
+              const xMax = sortedByX[sortedByX.length - 1].x;
+              const colSpacing = (xMax - xMin) / 8; // 8 gaps for 9 columns
+              const colCentroids = Array.from(
+                { length: 9 },
+                (_, i) => xMin + i * colSpacing,
+              );
+
+              console.log(
+                `[OMR] ID column centroids: ${colCentroids.map((c) => Math.round(c)).join(", ")}`,
+              );
+
+              // Extract digit for each column
+              const digits: string[] = [];
+
+              for (let col = 0; col < 9; col++) {
+                const colX = colCentroids[col];
+                const colTolerance = colSpacing * 0.4;
+
+                // Find darkest bubble in this column across all rows
+                let darkestFill = 0;
+                let darkestRow = 0;
+
+                for (let row = 0; row < sortedRows.length; row++) {
+                  const rowBubbles = sortedRows[row];
+                  // Find bubble closest to this column position
+                  const colBubble = rowBubbles.reduce((closest, b) => {
+                    const dist = Math.abs(b.x - colX);
+                    const closestDist = Math.abs(closest.x - colX);
+                    return dist < closestDist ? b : closest;
+                  });
+
+                  // Check if bubble is within column tolerance
+                  if (Math.abs(colBubble.x - colX) <= colTolerance) {
+                    if (colBubble.fill > darkestFill) {
+                      darkestFill = colBubble.fill;
+                      darkestRow = row;
+                    }
+                  }
+                }
+
+                // Convert row index to digit (0-9)
+                // Row 0 = digit 0, Row 1 = digit 1, ..., Row 9 = digit 9
+                const digit = darkestFill > 0.35 ? darkestRow.toString() : "0";
+                digits.push(digit);
+
+                if (col < 3) {
+                  // Log first 3 columns for debugging
+                  console.log(
+                    `[OMR] ID Col ${col}: darkestFill=${darkestFill.toFixed(2)}, row=${darkestRow} → digit=${digit}`,
+                  );
+                }
+              }
+
+              studentId = digits.join("");
+              console.log(
+                `[OMR] Detected Student ID from bubbles: ${studentId}`,
+              );
+            } else {
+              console.warn(
+                `[OMR] Not enough ID rows detected (${validIdRows.length}/10), using default`,
+              );
+            }
+          } else {
+            console.warn(
+              `[OMR] Not enough bubbles in ID section (${idBubbles.length}), using default`,
+            );
+          }
+        } catch (idError) {
+          console.error("[OMR] Error detecting student ID:", idError);
         }
-      } else {
-        console.log(
-          `[OMR] Using fixed layout regions (timing marks: ${timingMarks.length})`,
-        );
       }
 
-      console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
+      // ── 9. Extract answers using timing mark-based or fallback regions ────
+      // For 20q: use fixed regions (like Main)
+      // For 50q: try brightness scanning first, fallback to regions
+      // For 100q/150q/200q: use brightness scanning
 
-      // ── 9. Extract answers ────────────────────────────────────────────────
       let allAnswers: StudentAnswer[] = [];
-      let studentId = "00000000"; // Default, may be overwritten by brightness scanner
+      // studentId was already declared in section 8.5 above
+
+      // Store detected corners for overlay visualization
+      let detectedCorners:
+        | {
+            topLeft: { x: number; y: number };
+            topRight: { x: number; y: number };
+            bottomLeft: { x: number; y: number };
+            bottomRight: { x: number; y: number };
+          }
+        | undefined = undefined;
 
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
@@ -1418,6 +1378,7 @@ export class ZipgradeScanner {
             `BL=(${Math.round(strict200Corners.bottomLeft.x)},${Math.round(strict200Corners.bottomLeft.y)})`,
             `BR=(${Math.round(strict200Corners.bottomRight.x)},${Math.round(strict200Corners.bottomRight.y)})`,
           );
+          detectedCorners = strict200Corners; // Store for return
           return strict200Corners;
         }
 
@@ -1497,24 +1458,138 @@ export class ZipgradeScanner {
           `BL=(${Math.round(markers.bottomLeft.x)},${Math.round(markers.bottomLeft.y)})`,
           `BR=(${Math.round(markers.bottomRight.x)},${Math.round(markers.bottomRight.y)})`,
         );
+        detectedCorners = markers; // Store for return
         return markers;
       };
 
+      // ── 20q template: try brightness scanning FIRST if we have corner markers ──
+      console.log(
+        `[OMR] 20q check: detectedQ=${detectedQ}, regMarks.length=${regMarks.length}, qCount=${qCount}`,
+      );
+      if (detectedQ === 20 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 20-item template (Skia pixel sampling)",
+        );
+
+        try {
+          const {
+            scan20ItemWithBrightness,
+          } = require("./brightnessScannerFor20Item");
+          const markers = extractCornerMarkers();
+          const result = await scan20ItemWithBrightness(
+            imageUri,
+            markers,
+            choicesPerQuestion,
+            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+          );
+
+          if (result && result.answers) {
+            allAnswers = result.answers;
+            studentId = result.studentId || "000000000";
+            console.log(
+              `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/20 answers, ID: ${studentId}`,
+            );
+          } else {
+            console.error("[OMR] 20Q scanner returned invalid result:", result);
+            allAnswers = Array.from({ length: 20 }, (_, i) => ({
+              questionNumber: i + 1,
+              selectedAnswer: "",
+            }));
+          }
+        } catch (scanError) {
+          console.error("[OMR] 20Q brightness scanner error:", scanError);
+          // Will fall through to region-based detection below
+          allAnswers = []; // Reset to trigger fallback
+        }
+      }
+
+      // ── 50q template: try brightness scanning FIRST if we have corner markers ──
+      console.log(
+        `[OMR] 50q check: detectedQ=${detectedQ}, regMarks.length=${regMarks.length}, qCount=${qCount}`,
+      );
+      if (detectedQ === 50 && regMarks.length >= 3) {
+        console.log(
+          "[OMR] Using BRIGHTNESS scanning for 50-item template (Skia pixel sampling)",
+        );
+
+        try {
+          const {
+            scan50ItemWithBrightness,
+          } = require("./brightnessScannerFor50Item");
+          const markers = extractCornerMarkers();
+          const result = await scan50ItemWithBrightness(
+            imageUri,
+            markers,
+            choicesPerQuestion,
+            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+          );
+
+          if (result && result.answers) {
+            allAnswers = result.answers;
+            studentId = result.studentId || "000000000";
+            console.log(
+              `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/50 answers, ID: ${studentId}`,
+            );
+          } else {
+            console.error("[OMR] 50Q scanner returned invalid result:", result);
+            allAnswers = Array.from({ length: 50 }, (_, i) => ({
+              questionNumber: i + 1,
+              selectedAnswer: "",
+            }));
+          }
+        } catch (scanError) {
+          console.error("[OMR] 50Q brightness scanner error:", scanError);
+          // Will fall through to region-based detection below
+          allAnswers = []; // Reset to trigger fallback
+        }
+      }
+
+      // ── Fallback: Region-based detection for 20q/50q (if brightness failed) ──
+      if (allAnswers.length === 0 && (detectedQ === 20 || detectedQ === 50)) {
+        console.log("[OMR] Using region-based detection for answers");
+
+        let regions = getLayoutRegions(detectedQ);
+        console.log(`[OMR] layout: ${detectedQ}q → ${regions.length} regions`);
+
+        for (const region of regions) {
+          const regionAnswers = extractAnswersFromRegion(
+            bubbles,
+            region,
+            paperW,
+            paperH,
+            medianH,
+          );
+          allAnswers.push(...regionAnswers);
+        }
+      }
+
       // ── 200-item template: brightness scanning with page offset ──────────
-      if (qCount === 200 && strict200Corners) {
+      if (qCount === 200 && regMarks.length >= 3 && allAnswers.length === 0) {
         const currentPage = pageNumber || 1;
         console.log(
-          `[OMR] Using BRIGHTNESS scanning for 200-item template Page ${currentPage} (Skia pixel sampling)`,
+          `[OMR] Using 100-item BRIGHTNESS scanner for 200-item Page ${currentPage}`,
         );
 
         const { scan200ItemPage } = require("./brightnessScannerFor200Item");
         const markers = extractCornerMarkers();
-        allAnswers = await scan200ItemPage(
+        const result = await scan200ItemPage(
           imageUri,
           markers,
           currentPage,
           choicesPerQuestion,
         );
+
+        if (result && result.answers) {
+          allAnswers = result.answers;
+          studentId = result.studentId || "000000000";
+        } else {
+          console.error("[OMR] 200Q scanner returned invalid result:", result);
+          const questionOffset = currentPage === 1 ? 0 : 100;
+          allAnswers = Array.from({ length: 100 }, (_, i) => ({
+            questionNumber: questionOffset + i + 1,
+            selectedAnswer: "",
+          }));
+        }
 
         const rangeStart = currentPage === 1 ? 1 : 101;
         const rangeEnd = currentPage === 1 ? 100 : 200;
@@ -1523,29 +1598,17 @@ export class ZipgradeScanner {
         );
       }
       // ── 200-item strict guard: require all four edge corner boxes ───────
-      else if (qCount === 200) {
-        const currentPage = pageNumber || 1;
+      else if (qCount === 200 && allAnswers.length === 0) {
         console.warn(
-          "[OMR] Strict 200Q corner validation failed; falling back to dedicated 200Q pixel scanner",
-        );
-
-        const {
-          scan200ItemPageFast,
-        } = require("./brightnessScannerFor200Item");
-        allAnswers = await scan200ItemPageFast(
-          imageUri,
-          currentPage,
-          choicesPerQuestion,
-        );
-
-        const rangeStart = currentPage === 1 ? 1 : 101;
-        const rangeEnd = currentPage === 1 ? 100 : 200;
-        console.log(
-          `[OMR] 200Q fallback scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers (Q${rangeStart}-${rangeEnd})`,
+          "[OMR] Not enough corner markers for 200-item 100Q brightness scanning.",
         );
       }
       // ── 150-item template: brightness scanning ──────────────────────────
-      else if (detectedQ === 150 && regMarks.length >= 3) {
+      else if (
+        detectedQ === 150 &&
+        regMarks.length >= 3 &&
+        allAnswers.length === 0
+      ) {
         console.log(
           "[OMR] Using BRIGHTNESS scanning for 150-item template (Skia pixel sampling)",
         );
@@ -1591,6 +1654,7 @@ export class ZipgradeScanner {
           "[OMR] Not enough corner markers for brightness scanning, falling back to region-based detection",
         );
 
+        let regions = getLayoutRegions(detectedQ);
         for (const region of regions) {
           const regionAnswers = extractAnswersFromRegion(
             bubbles,
@@ -1603,7 +1667,11 @@ export class ZipgradeScanner {
         }
       }
       // ── 100-item template: brightness scanning ──────────────────────────
-      else if (detectedQ === 100 && regMarks.length >= 3) {
+      else if (
+        detectedQ === 100 &&
+        regMarks.length >= 3 &&
+        allAnswers.length === 0
+      ) {
         console.log(
           "[OMR] Using BRIGHTNESS scanning for 100-item template (Skia pixel sampling)",
         );
@@ -1625,24 +1693,13 @@ export class ZipgradeScanner {
         console.log(
           `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers, ID: ${studentId}`,
         );
-      } else if (detectedQ === 100) {
-        // Fallback: not enough markers for hybrid scanning
+      } else if (detectedQ === 100 || detectedQ === 150) {
+        // Fallback: not enough markers for brightness scanning
         console.warn(
-          "[OMR] Not enough corner markers for hybrid scanning, falling back to region-based detection",
+          "[OMR] Not enough corner markers for brightness scanning, falling back to region-based detection",
         );
 
-        for (const region of regions) {
-          const regionAnswers = extractAnswersFromRegion(
-            bubbles,
-            region,
-            paperW,
-            paperH,
-            medianH,
-          );
-          allAnswers.push(...regionAnswers);
-        }
-      } else {
-        // 20q/50q templates: use existing region-based detection (UNCHANGED)
+        let regions = getLayoutRegions(detectedQ);
         for (const region of regions) {
           const regionAnswers = extractAnswersFromRegion(
             bubbles,
@@ -1655,19 +1712,7 @@ export class ZipgradeScanner {
         }
       }
 
-      // Log detailed region information for debugging
-      regions.forEach((r, idx) => {
-        const xMinPx = Math.round(r.xMin * paperW);
-        const xMaxPx = Math.round(r.xMax * paperW);
-        const yMinPx = Math.round(r.yMin * paperH);
-        const yMaxPx = Math.round(r.yMax * paperH);
-        console.log(
-          `[OMR] Region ${idx + 1} (Q${r.startQ}-${r.startQ + r.numQ - 1}): ` +
-            `X[${(r.xMin * 100).toFixed(1)}%-${(r.xMax * 100).toFixed(1)}%] (${xMinPx}-${xMaxPx}px) ` +
-            `Y[${(r.yMin * 100).toFixed(1)}%-${(r.yMax * 100).toFixed(1)}%] (${yMinPx}-${yMaxPx}px)`,
-        );
-      });
-
+      // ── 10. Final answer validation and formatting ────────────────────────
       // Sort by question number
       allAnswers.sort((a, b) => a.questionNumber - b.questionNumber);
 
@@ -1684,15 +1729,7 @@ export class ZipgradeScanner {
         );
       }
 
-      // ── 9. Extract Student ID (50q sheets only) ────────────────────────────
-      //
-      // The Student ZipGrade ID grid is in the top section of 50q sheets:
-      //   y ∈ [26%, 33%] of paper height
-      //   5 digit columns, 10 rows each (digits 1-9 then 0, top to bottom)
-      //
-      // NOTE: Student ID auto-detection is disabled for stability
-      // Users can manually edit the ID after scanning
-      // For 100q/150q templates, ID is detected by brightness scanner
+      // Log final student ID status
       if (!studentId || studentId === "00000000") {
         studentId = "00000000";
         console.log(
@@ -1700,7 +1737,7 @@ export class ZipgradeScanner {
         );
       } else {
         console.log(
-          `[OMR] Student ID: Detected from brightness scanner: ${studentId}`,
+          `[OMR] Student ID: Detected ${detectedQ === 50 ? "from bubbles" : "from brightness scanner"}: ${studentId}`,
         );
       }
 
@@ -1724,6 +1761,7 @@ export class ZipgradeScanner {
         answers: finalAnswers,
         confidence: 0.95,
         processedImageUri,
+        detectedCorners,
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);

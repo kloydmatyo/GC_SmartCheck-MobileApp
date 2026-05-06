@@ -1,19 +1,4 @@
-﻿﻿/**
- * Brightness-Based Scanner for 100-Item Templates
- *
- * This scanner uses brightness sampling instead of contour detection
- * to achieve >99% accuracy for 100-item answer sheets.
- *
- * Ported from Web-Based-for-SIA/src/components/scanning/OMRScanner.tsx
- *
- * Key differences from contour-based scanning:
- * - Samples pixel brightness at calculated positions
- * - Uses bilinear coordinate mapping for perspective correction
- * - Compares brightness values within each question
- * - More robust to lighting variations and small bubbles
- */
-
-import { StudentAnswer } from "../types/scanning";
+﻿﻿import { StudentAnswer } from "../types/scanning";
 const DEBUG_LOGS = true;
 
 // ─── TYPES ───
@@ -135,89 +120,120 @@ function sampleBubbleAt(
 }
 
 // ─── TEMPLATE LAYOUT ───
-// 100-question full page A4 (210 × 297 mm)
-// Source: drawFullSheet() in templatePdfGenerator.ts
+// 50-question mini sheet (210 × 148.5 mm) — HALF A4 PAGE
+// Source: drawMiniSheet() in answerSheetGenerator.ts
 //
-// Corner markers: cornerInset=2mm, markerSize=8mm → marker centers at (6,6) and (204,291)
-// Frame between marker centers: fw = 198mm, fh = 285mm
+// Physical dimensions:
+//   pageWidth = 210mm, pageHeight = 297mm
+//   sheetWidth = 210mm, sheetHeight = 148.5mm (half page)
+//   margin = 10mm
+//   cornerInset = 2mm
+//   markerSize = 8mm (8×8mm squares)
 //
-// Template grid: 5 columns × 2 rows, sequential left-to-right, top-to-bottom:
-//   Col 0: Q1-10  (row 0), Q11-20  (row 1)
-//   Col 1: Q21-30 (row 0), Q31-40  (row 1)
-//   Col 2: Q41-50 (row 0), Q51-60  (row 1)
-//   Col 3: Q61-70 (row 0), Q71-80  (row 1)
-//   Col 4: Q81-90 (row 0), Q91-100 (row 1)
+// Corner marker centers:
+//   Top-left: (2+4, 2+4) = (6, 6)
+//   Top-right: (210-8-2+4, 2+4) = (204, 6)
+//   Bottom-left: (6, 148.5-8-2+4) = (6, 142.5)
+//   Bottom-right: (204, 142.5)
 //
-// Physical measurements (drawFullSheet, A4 210×297mm):
-//   margin=10, usableW=190, numChoices=5, bubbleGap=5.5, bubbleSize=3.5
-//   qBlockW = 10 + (5-1)×5.5 + 3.5 = 35.5mm
-//   colGap = (190 - 5×35.5) / 6 = 12.5/6 ≈ 2.0833mm
-//   bx[col] = 10 + 2.0833 + col×37.5833
-//   firstBubbleX[col] = bx[col] + numW(10)  (A-choice center)
-//     Col 0: 22.0833mm → NX = (22.0833-6)/198 = 0.08123
-//     Col 1: 59.6667mm → NX = (59.6667-6)/198 = 0.27104
-//     Col 2: 97.2500mm → NX = (97.2500-6)/198 = 0.46086
-//     Col 3: 134.8333mm → NX = (134.8333-6)/198 = 0.65067
-//     Col 4: 172.4167mm → NX = (172.4167-6)/198 = 0.84049
+// Frame between marker centers:
+//   fw = 204 - 6 = 198mm
+//   fh = 142.5 - 6 = 136.5mm
 //
-//   currentY after header+ID ≈ 79mm from page top
-//   drawQBlock adds 5mm header → first bubble row at currentY+5
-//   Row 0 first bubble Y: 79+5 = 84mm → NY = (84-6)/285 = 0.27368
-//   blockVGap = 10×5.2 + 10 = 62mm
-//   Row 1 first bubble Y: 79+62+5 = 146mm → NY = (146-6)/285 = 0.49123
+// Template grid: 5 columns × 1 row, sequential left-to-right:
+//   Col 0: Q1-10
+//   Col 1: Q11-20
+//   Col 2: Q21-30
+//   Col 3: Q31-40
+//   Col 4: Q41-50
 //
-//   bubbleSpacingNX = 5.5 / 198 = 0.027778
-//   rowSpacingNY    = 5.2 / 285 = 0.018246
-function get100ItemTemplateLayout(physicalChoices: 4 | 5 = 5): TemplateLayout {
+// Physical measurements (drawMiniSheet, 210×148.5mm):
+//   margin=10, width=210, height=148.5
+//   usableW = 210 - 2×10 = 190mm
+//   blockWidth = 190 / 5 = 38mm
+//   bubbleSpacing=5.5, ansRowH=5.2, numW=10, bubbleSize=3.5, regMarkSize=2.0
+//
+//   Block positions:
+//   bx[col] = 10 + col×38
+//   firstBubbleX[col] = bx[col] + numW = 10 + col×38 + 10
+//     Col 0: 20.0mm → NX = (20.0-6)/198 = 0.07071
+//     Col 1: 58.0mm → NX = (58.0-6)/198 = 0.26263
+//     Col 2: 96.0mm → NX = (96.0-6)/198 = 0.45455
+//     Col 3: 134.0mm → NX = (134.0-6)/198 = 0.64646
+//     Col 4: 172.0mm → NX = (172.0-6)/198 = 0.83838
+//
+//   Y-position flow (traced from drawMiniSheet):
+//   startY=0 + cornerInset(2) + 3 = 5mm
+//   + logo/header: 8+2 = 15mm (no logo) or 10+2 = 17mm (with logo)
+//   + examCode(4) = 19mm (if present)
+//   + name/date line = 19mm
+//   + spacing(4) = 23mm
+//   + ID label(4.5) = 27.5mm
+//   + ID boxes(4) + spacing(2) = 33.5mm
+//   + ID bubbles: 10 rows × 4.0mm = 73.5mm
+//   + idBottomYMini + spacing(3) = 77.5mm ← answer blocks start (by parameter)
+//   + regMark(2mm) = 77.5-79.5mm
+//   + header "A B C D E" text at 80mm
+//   + qY += 5 → first question row at 82.5mm
+//   + bubble drawn at 82.5mm (top), CENTER at 84.25mm
+//
+//   First answer bubble Y: 84.25mm → NY = (84.25-6)/136.5 = 0.57326
+//
+//   bubbleSpacingNX = 5.5 / 198 = 0.02778
+//   rowSpacingNY    = 5.2 / 136.5 = 0.03810
+function get50ItemTemplateLayout(physicalChoices: 4 | 5 = 5): TemplateLayout {
   const fw = 198,
-    fh = 285;
+    fh = 136.5;
 
-  const bSpacingNX = 5.5 / fw; // 0.027778 — horizontal gap between choice bubbles
-  const rSpacingNY = 5.2 / fh; // 0.018246 — vertical gap between question rows
+  const bSpacingNX = 5.5 / fw; // 0.02778 — horizontal gap between choice bubbles
+  const rSpacingNY = 5.2 / fh; // 0.03810 — vertical gap between question rows
 
-  // Exact first-bubble NX per column (A-choice center, derived from template source).
-  // Four-choice sheets use narrower blocks, so the block columns spread slightly.
-  const usableW = 190;
-  const qBlockW = 10 + (physicalChoices - 1) * 5.5 + 3.5;
-  const colGap = (usableW - 5 * qBlockW) / 6;
+  // Exact first-bubble NX per column (A-choice center)
+  const blockWidth = 38;
+  const numW = 10;
   const colNX = Array.from({ length: 5 }, (_, col) => {
-    const bx = 10 + colGap + col * (qBlockW + colGap);
-    const firstBubbleX = bx + 10;
+    const bx = 10 + col * blockWidth;
+    const firstBubbleX = bx + numW;
     return (firstBubbleX - 6) / fw;
   });
-  // Exact first-bubble NY per row (first question row center, derived from template source)
-  // Template flow: currentY after ID = 79mm, drawQBlock adds 5mm header → first bubble at 84mm (row 0) and 146mm (row 1)
-  const rowNY = [(84 - 6) / fh, (146 - 6) / fh]; // [0.27368, 0.49123]
 
-  // 10 blocks: 5 cols × 2 rows
-  // Reading order: left-to-right across row 0, then row 1
-  //   Row 0: Q1-10, Q21-30, Q41-50, Q61-70, Q81-90
-  //   Row 1: Q11-20, Q31-40, Q51-60, Q71-80, Q91-100
-  const BLOCKS: { startQ: number; col: number; row: number }[] = [
-    { startQ: 1, col: 0, row: 0 },
-    { startQ: 21, col: 1, row: 0 },
-    { startQ: 41, col: 2, row: 0 },
-    { startQ: 61, col: 3, row: 0 },
-    { startQ: 81, col: 4, row: 0 },
-    { startQ: 11, col: 0, row: 1 },
-    { startQ: 31, col: 1, row: 1 },
-    { startQ: 51, col: 2, row: 1 },
-    { startQ: 71, col: 3, row: 1 },
-    { startQ: 91, col: 4, row: 1 },
+  // First answer bubble Y position
+  // Traced from drawMiniSheet():
+  // - currentY starts at 77.5mm (after ID section)
+  // - Registration mark: 77.5mm (2mm tall)
+  // - Header "A B C D E": text at 80mm
+  // - qY += 5 → first question row at 82.5mm
+  // - Bubble drawn at 82.5mm (top edge), CENTER at 82.5 + bubbleSize/2 = 84.25mm
+  const firstAnswerY = 84.25; // mm from top (center of first answer bubble)
+  const firstAnswerNY = (firstAnswerY - 6) / fh; // 0.57326
+
+  // 5 blocks: 1 row × 5 columns
+  // You can manually adjust X and Y offsets per block here:
+  const BLOCKS: {
+    startQ: number;
+    col: number;
+    xOffsetMM?: number; // Optional X offset in mm (positive = right, negative = left)
+    yOffsetMM?: number; // Optional Y offset in mm (positive = down, negative = up)
+  }[] = [
+    { startQ: 1, col: 0, xOffsetMM: 0, yOffsetMM: 0 }, // Block 1 (Q1-10)
+    { startQ: 11, col: 1, xOffsetMM: 0, yOffsetMM: 0 }, // Block 2 (Q11-20)
+    { startQ: 21, col: 2, xOffsetMM: 0, yOffsetMM: 0 }, // Block 3 (Q21-30)
+    { startQ: 31, col: 3, xOffsetMM: 0, yOffsetMM: -1 }, // Block 4 (Q31-40)
+    { startQ: 41, col: 4, xOffsetMM: 0, yOffsetMM: 0 }, // Block 5 (Q41-50)
   ];
 
   const answerBlocks: AnswerBlock[] = BLOCKS.map((b) => ({
     startQ: b.startQ,
     endQ: b.startQ + 9,
-    firstBubbleNX: colNX[b.col],
-    firstBubbleNY: rowNY[b.row],
+    firstBubbleNX: colNX[b.col] + (b.xOffsetMM || 0) / fw,
+    firstBubbleNY: firstAnswerNY + (b.yOffsetMM || 0) / fh,
     bubbleSpacingNX: bSpacingNX,
     rowSpacingNY: rSpacingNY,
   }));
 
   return {
     answerBlocks,
-    bubbleDiameterNX: 3.5 / fw, // slightly wider than physical (3.5mm) to tolerate small offsets
+    bubbleDiameterNX: 3.5 / fw,
     bubbleDiameterNY: 3.5 / fh,
   };
 }
@@ -244,7 +260,7 @@ function detectAnswersFromImage(
 
   if (DEBUG_LOGS) {
     console.log(
-      `[100Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
+      `[50Q-BRIGHTNESS] Frame: ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR: ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
     );
   }
 
@@ -294,7 +310,7 @@ function detectAnswersFromImage(
 
       if (DEBUG_LOGS) {
         console.log(
-          `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ} auto-align: dx=${blockDx}, dy=${blockDy}`,
+          `[50Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ} auto-align: dx=${blockDx}, dy=${blockDy}`,
         );
       }
     }
@@ -306,7 +322,7 @@ function detectAnswersFromImage(
         block.firstBubbleNY,
       );
       console.log(
-        `[100Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`,
+        `[50Q-BRIGHTNESS] Block Q${block.startQ}-${block.endQ}: firstBubble px=(${Math.round(firstPx.px)},${Math.round(firstPx.py)})`,
       );
     }
 
@@ -334,7 +350,7 @@ function detectAnswersFromImage(
       // Debug: Log all brightness values for first question in each block
       if (DEBUG_LOGS && q === block.startQ) {
         console.log(
-          `[100Q-BRIGHTNESS] Q${q} all choices: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")}`,
+          `[50Q-BRIGHTNESS] Q${q} all choices: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")}`,
         );
       }
 
@@ -381,7 +397,7 @@ function detectAnswersFromImage(
         (q <= block.startQ + 2 || q === block.endQ || !selectedChoice)
       ) {
         console.log(
-          `[100Q-BRIGHTNESS] Q${q}: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")} → ${selectedChoice || "?"} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`,
+          `[50Q-BRIGHTNESS] Q${q}: ${fills.map((f) => `${f.choice}=${f.brightness.toFixed(0)}`).join(", ")} → ${selectedChoice || "?"} (darkRatio=${darkRatio.toFixed(2)} gapRatio=${gapRatio.toFixed(2)} absGap=${absoluteGap.toFixed(0)} ref=${ref.toFixed(0)})`,
         );
       }
 
@@ -408,30 +424,40 @@ function detectStudentId(
   markers: Markers,
 ): string {
   const fw = 198,
-    fh = 285;
+    fh = 136.5;
 
-  // ID section physical measurements (from drawFullSheet in answerSheetGenerator.ts):
-  // idLabelW = 6mm, idPad = 2mm, idColGap = 4.8mm
-  // idContentW = 6 + 9×4.8 = 49.2mm
-  // idBorderW = 49.2 + 2×2 = 53.2mm
-  // idBorderX = 10mm (left margin)
-  // idStartX = 10 + 2 + 6 = 18mm (first bubble column center)
+  // ID section physical measurements (from drawMiniSheet in answerSheetGenerator.ts):
+  // For Mini Sheets (50-item exams):
+  // margin = 10mm (for 50-item mini sheet, full width 210mm)
+  // idLabelWMini = 6mm
+  // idPadMini = 2mm
+  // idColSpacing = 4.8mm
+  // idRowSpacing = 4.0mm
+  // idBubbleSize = 3.0mm
+  //
+  // ID section starts at: startX + margin = 0 + 10 = 10mm
+  // idBorderXMini = 10mm
+  // idContentXMini = idBorderXMini + idPadMini = 10 + 2 = 12mm
+  // idStartX = idContentXMini + idLabelWMini = 12 + 6 = 18mm (first bubble column center)
   //
   // Normalized coordinates (relative to marker frame):
-  const idColGap = 4.8 / fw; // 0.024242
-  const idRowH = 4.0 / fh; // 0.014035
+  // Corner markers at (6,6) and (204,142.5), so frame offset is 6mm
+  const idColGap = 4.8 / fw; // 0.02424
+  const idRowH = 4.0 / fh; // 0.02930
   const idBubbleSize = 3.0 / fw; // bubble diameter
 
   // First ID bubble position (column 0, row 0 = digit "0")
-  const firstIdNX = (18 - 6) / fw; // (18mm - marker offset) / frame width ≈ 0.0606
-  // Tracing template Y flow:
+  const firstIdNX = (18 - 6) / fw; // (18mm - marker offset) / frame width ≈ 0.06061
+
+  // Y-position flow for 50-item mini sheet:
   // startY=0 + cornerInset(2) + 3 = 5mm
-  // + logo(8) + 2 = 15mm
-  // + examCode(4) = 19mm
-  // + name/date(4) = 23mm (idTopY)
-  // + label(5.5) = 28.5mm
-  // + boxes(4.0) + spacing(2) = 34.5mm ← Row 0 bubble center
-  const firstIdNY = (36.5 - 6) / fh; // (28.5mm - marker offset) / frame height
+  // + logo/header ≈ 12mm (if logo) or 10mm (no logo) = 17mm
+  // + examCode(4) = 21mm (if present)
+  // + name/date(4) = 25mm
+  // + ID label(4.5) = 29.5mm
+  // + ID boxes(4.0) + spacing(2) = 35.5mm ← Row 0 bubble center
+  // Using 36mm as the first ID bubble row center (based on template flow)
+  const firstIdNY = (36 - 6) / fh; // (36mm - marker offset) / frame height ≈ 0.21978
 
   const frameW = markers.topRight.x - markers.topLeft.x;
   const frameH = markers.bottomLeft.y - markers.topLeft.y;
@@ -440,7 +466,7 @@ function detectStudentId(
 
   if (DEBUG_LOGS) {
     console.log(
-      `[100Q-BRIGHTNESS] ID Detection: Frame ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
+      `[50Q-BRIGHTNESS] ID Detection: Frame ${Math.round(frameW)}x${Math.round(frameH)}px, BubbleR ${bubbleRX.toFixed(1)}x${bubbleRY.toFixed(1)}px`,
     );
   }
 
@@ -496,7 +522,7 @@ function detectStudentId(
     if (DEBUG_LOGS && col < 3) {
       // Log first 3 columns for debugging
       console.log(
-        `[100Q-BRIGHTNESS] ID Col ${col}: darkest=${darkest.toFixed(0)} (digit ${sorted[0].digit}), gap=${absoluteGap.toFixed(0)}, ratio=${darkRatio.toFixed(2)} → ${selectedDigit}`,
+        `[50Q-BRIGHTNESS] ID Col ${col}: darkest=${darkest.toFixed(0)} (digit ${sorted[0].digit}), gap=${absoluteGap.toFixed(0)}, ratio=${darkRatio.toFixed(2)} → ${selectedDigit}`,
       );
     }
   }
@@ -504,20 +530,20 @@ function detectStudentId(
   const studentId = digits.join("");
 
   if (DEBUG_LOGS) {
-    console.log(`[100Q-BRIGHTNESS] Detected Student ID: ${studentId}`);
+    console.log(`[50Q-BRIGHTNESS] Detected Student ID: ${studentId}`);
   }
 
   return studentId;
 }
 
 // ─── MAIN EXPORT ───
-export async function scan100ItemWithBrightness(
+export async function scan50ItemWithBrightness(
   imageUri: string,
   markers: Markers,
   choicesPerQuestion: 4 | 5 = 5,
   enableBlockAutoAlign = false,
 ): Promise<{ studentId: string; answers: StudentAnswer[] }> {
-  console.log("[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
+  console.log("[50Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
 
   try {
     // Import Skia and FileSystem (using legacy API for compatibility)
@@ -541,7 +567,7 @@ export async function scan100ItemWithBrightness(
 
     const width = image.width();
     const height = image.height();
-    console.log(`[100Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
+    console.log(`[50Q-BRIGHTNESS] Image loaded: ${width}x${height}px`);
 
     // Read pixel data (RGBA format)
     const pixels = image.readPixels();
@@ -551,13 +577,13 @@ export async function scan100ItemWithBrightness(
     }
 
     console.log(
-      `[100Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`,
+      `[50Q-BRIGHTNESS] Pixel data loaded: ${pixels.length} bytes (${width}x${height}x4)`,
     );
 
     // Detect answers using brightness sampling
-    const numQuestions = 100;
+    const numQuestions = 50;
     const effectiveChoices = choicesPerQuestion === 4 ? 4 : 5;
-    const layout = get100ItemTemplateLayout(effectiveChoices);
+    const layout = get50ItemTemplateLayout(effectiveChoices);
 
     const answers = detectAnswersFromImage(
       pixels,
@@ -571,25 +597,25 @@ export async function scan100ItemWithBrightness(
     );
 
     const detectedCount = answers.filter((a) => a.selectedAnswer).length;
-    console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
+    console.log(`[50Q-BRIGHTNESS] Detected ${detectedCount}/50 answers`);
 
     // Detect student ID
     let studentId = "000000000";
     try {
       studentId = detectStudentId(pixels, width, height, markers);
     } catch (idError) {
-      console.error("[100Q-BRIGHTNESS] Error detecting student ID:", idError);
+      console.error("[50Q-BRIGHTNESS] Error detecting student ID:", idError);
       studentId = "000000000";
     }
 
     return { studentId, answers };
   } catch (error) {
-    console.error("[100Q-BRIGHTNESS] Error:", error);
+    console.error("[50Q-BRIGHTNESS] Error:", error);
 
     // Return empty result on error
     return {
       studentId: "000000000",
-      answers: Array.from({ length: 100 }, (_, i) => ({
+      answers: Array.from({ length: 50 }, (_, i) => ({
         questionNumber: i + 1,
         selectedAnswer: "",
       })),
