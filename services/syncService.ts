@@ -77,7 +77,7 @@ export class SyncService {
   /**
    * Sync all pending updates
    */
-  static async syncPendingUpdates(): Promise<SyncResult> {
+  static async syncPendingUpdates(force: boolean = false): Promise<SyncResult> {
     if (this.isSyncing) {
       console.log("Sync already in progress");
       return {
@@ -89,7 +89,7 @@ export class SyncService {
     }
 
     const isOnline = await NetworkService.isOnline();
-    if (!isOnline) {
+    if (!isOnline && !force) {
       console.log("Device is offline, skipping sync");
       return {
         success: false,
@@ -106,7 +106,7 @@ export class SyncService {
 
     try {
       try {
-        await this.syncStagingGrades();
+        await this.syncStagingGrades(force);
         syncedCount++;
       } catch (e) {
         console.warn("Flush Grades Warning:", e);
@@ -463,12 +463,12 @@ export class SyncService {
     console.log("Primary Cache Realm updated from Firestore via Delta Fetch");
   }
 
-  private static async syncStagingGrades(): Promise<void> {
+  private static async syncStagingGrades(force: boolean = false): Promise<void> {
     // This is handled by GradeStorageService.syncOfflineQueue()
     // We can call it here for centralization
     console.log("Syncing staging grades...");
     const { GradeStorageService } = await import("./gradeStorageService");
-    await GradeStorageService.syncOfflineQueue();
+    await GradeStorageService.syncOfflineQueue(force);
   }
 
   private static async syncStagingClasses(): Promise<void> {

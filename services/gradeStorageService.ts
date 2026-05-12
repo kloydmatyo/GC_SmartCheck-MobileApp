@@ -259,13 +259,17 @@ export class GradeStorageService {
       `[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`,
     );
 
-    // ── Check Connectivity First ──
+    // ── Check Connectivity and Latency First ──
     const netState = await NetInfo.fetch();
     const isOnline = !!(netState.isConnected && netState.isInternetReachable);
+    
+    // Use an adaptive QoS check: if online but latency is >= 200ms, fall back to offline mode
+    const { NetworkService } = await import("./networkService");
+    const isResponsive = isOnline ? await NetworkService.isFirestoreResponsive() : false;
 
-    if (!isOnline) {
+    if (!isOnline || !isResponsive) {
       console.log(
-        "[GradeStorageService] Offline detected. Bypassing validation and queueing to RealmDB.",
+        `[GradeStorageService] Connection degraded (Online: ${isOnline}, Fast: ${isResponsive}). Bypassing validation and queueing to RealmDB.`,
       );
       const record: GradeStorageRecord = {
         studentId: result.studentId,
@@ -574,10 +578,10 @@ export class GradeStorageService {
     }
   }
 
-  static async syncOfflineQueue(): Promise<void> {
+  static async syncOfflineQueue(force: boolean = false): Promise<void> {
     try {
       const netState = await NetInfo.fetch();
-      if (!netState.isConnected || !netState.isInternetReachable) {
+      if ((!netState.isConnected || !netState.isInternetReachable) && !force) {
         console.log("[GradeStorageService] Skipping offline sync: detected offline.");
         return;
       }

@@ -207,14 +207,15 @@ export default function HomeScreen() {
   }, [syncBannerOffset, syncBannerOpacity]);
 
   const handleSyncPress = useCallback(async () => {
-    if (isSyncing || !isOnline) {
+    if (isSyncing) {
       animateSyncBannerOut();
       return;
     }
     
     setIsSyncing(true);
     try {
-      await SyncService.syncPendingUpdates();
+      // Pass true to force the sync attempt, ignoring both latency and isOnline checks
+      await SyncService.syncPendingUpdates(true);
       setTimeout(() => animateSyncBannerOut(), 2000);
     } catch (error) {
       console.error("Manual sync failed", error);
