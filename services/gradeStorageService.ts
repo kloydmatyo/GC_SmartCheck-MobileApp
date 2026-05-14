@@ -269,8 +269,9 @@ export class GradeStorageService {
 
     if (!isOnline || !isResponsive) {
       console.log(
-        `[GradeStorageService] Connection degraded (Online: ${isOnline}, Fast: ${isResponsive}). Bypassing validation and queueing to RealmDB.`,
+        `[GradeStorageService] OFFLINE MODE: Connection degraded (Online: ${isOnline}, Fast: ${isResponsive}).`,
       );
+      console.log(`[GradeStorageService] OFFLINE MODE: Bypassing online validation for student ${result.studentId} and building offline record.`);
       const record: GradeStorageRecord = {
         studentId: result.studentId,
         examId: resolvedExamId,
@@ -486,11 +487,12 @@ export class GradeStorageService {
   ): Promise<SaveResult> {
     try {
       console.log(
-        `[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`,
+        `[GradeStorageService] OFFLINE MODE: Opening RealmDB to queue offline record for student ${record.studentId}...`,
       );
       const realm = await RealmService.getStagingRealm();
 
       realm.write(() => {
+        console.log(`[GradeStorageService] OFFLINE MODE: Executing Realm write transaction...`);
         realm.create("OfflineGrade", {
           studentId: record.studentId,
           examId: record.examId,
@@ -511,7 +513,7 @@ export class GradeStorageService {
 
       const queueLength = realm.objects("OfflineGrade").length;
       console.log(
-        `[GradeStorageService] Record successfully queued in RealmDB. Total offline items: ${queueLength}`,
+        `[GradeStorageService] OFFLINE MODE: Record successfully committed in RealmDB. Total offline queue size is now: ${queueLength}`,
       );
 
       await LogService.info(
@@ -533,11 +535,13 @@ export class GradeStorageService {
 
       // Attempt immediate sync in background — if online, this pushes the
       // queued grade to Firestore right away without waiting for app resume.
+      console.log(`[GradeStorageService] OFFLINE MODE: Checking if immediate background sync is possible...`);
       NetInfo.fetch().then((state) => {
         if (state.isConnected && state.isInternetReachable) {
+          console.log(`[GradeStorageService] OFFLINE MODE: Network restored immediately. Triggering background sync...`);
           GradeStorageService.syncOfflineQueue().catch((err) =>
             console.warn(
-              "[GradeStorageService] Immediate sync after queue failed:",
+              "[GradeStorageService] OFFLINE MODE: Immediate background sync failed:",
               err,
             ),
           );
@@ -582,7 +586,7 @@ export class GradeStorageService {
     try {
       const netState = await NetInfo.fetch();
       if ((!netState.isConnected || !netState.isInternetReachable) && !force) {
-        console.log("[GradeStorageService] Skipping offline sync: detected offline.");
+        console.log(`[GradeStorageService] SYNC ABORTED: Device is offline (Connected: ${netState.isConnected}, Reachable: ${netState.isInternetReachable}).`);
         return;
       }
 
@@ -641,6 +645,8 @@ export class GradeStorageService {
         offlineGrades as unknown as OfflineGrade[],
       ).slice(0, 100);
       
+      console.log(`[GradeStorageService] Preparing to build Firestore batch with ${recordsToSync.length} records...`);
+
       const recordsActuallySynced: OfflineGrade[] = [];
 
       for (const record of recordsToSync) {
@@ -679,6 +685,7 @@ export class GradeStorageService {
             scannedAt: serverTimestamp(),
           });
 
+          console.log(`[GradeStorageService] Added student ${record.studentId} to batch (Exam: ${record.examId}).`);
           recordsActuallySynced.push(record);
         } catch (err) {
           console.error(
@@ -700,6 +707,7 @@ export class GradeStorageService {
           console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
           
           // Successful batch — clear from Realm
+          console.log(`[GradeStorageService] Removing ${recordsActuallySynced.length} successfully synced records from local staging...`);
           realm.write(() => {
             for (const record of recordsActuallySynced) {
               if (record && record.isValid && record.isValid()) {
@@ -707,6 +715,7 @@ export class GradeStorageService {
               }
             }
           });
+          console.log("[GradeStorageService] Local staging cleaned up successfully.");
         } catch (batchError: any) {
           console.warn(
             "[GradeStorageService] Atomic batch failed, falling back to individual syncs to isolate error:",
@@ -753,7 +762,7 @@ export class GradeStorageService {
                   realm.delete(record);
                 }
               });
-              console.log(`[GradeStorageService] Individual sync SUCCESS for student ${snap.studentId}`);
+              console.log(`[GradeStorageService] Individual sync SUCCESS for student ${snap.studentId}. Record removed from staging.`);
             } catch (indError: any) {
               const isPermissionError =
                 indError?.message?.includes("permissions") ||

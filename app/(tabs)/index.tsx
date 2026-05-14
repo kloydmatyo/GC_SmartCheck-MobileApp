@@ -206,26 +206,6 @@ export default function HomeScreen() {
     });
   }, [syncBannerOffset, syncBannerOpacity]);
 
-  const handleSyncPress = useCallback(async () => {
-    if (isSyncing) {
-      animateSyncBannerOut();
-      return;
-    }
-    
-    setIsSyncing(true);
-    try {
-      // Pass true to force the sync attempt, ignoring both latency and isOnline checks
-      await SyncService.syncPendingUpdates(true);
-      setTimeout(() => animateSyncBannerOut(), 2000);
-    } catch (error) {
-      console.error("Manual sync failed", error);
-      animateSyncBannerOut();
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [isSyncing, isOnline, animateSyncBannerOut]);
-
-
   const showSyncBannerTemporarily = useCallback(() => {
     setShowSyncBanner(true);
     syncBannerOpacity.setValue(0);
@@ -244,6 +224,32 @@ export default function HomeScreen() {
       }),
     ]).start();
   }, [syncBannerOffset, syncBannerOpacity]);
+
+  const handleSyncPress = useCallback(async () => {
+    if (isSyncing) {
+      console.log("[HomeScreen] Manual sync ignored: Sync is already in progress.");
+      return;
+    }
+    
+    console.log("[HomeScreen] Manual sync triggered by user.");
+    setIsSyncing(true);
+    showSyncBannerTemporarily();
+
+    try {
+      // Pass true to force the sync attempt, ignoring both latency and isOnline checks
+      console.log("[HomeScreen] Calling SyncService.syncPendingUpdates with force=true");
+      const result = await SyncService.syncPendingUpdates(true);
+      console.log(`[HomeScreen] Manual sync completed. Success: ${result.success}, Synced: ${result.syncedCount}, Failed: ${result.failedCount}`);
+      
+      setTimeout(() => animateSyncBannerOut(), 2000);
+    } catch (error) {
+      console.error("[HomeScreen] Manual sync failed unexpectedly:", error);
+      animateSyncBannerOut();
+    } finally {
+      setIsSyncing(false);
+      console.log("[HomeScreen] Manual sync process finished.");
+    }
+  }, [isSyncing, animateSyncBannerOut, showSyncBannerTemporarily]);
 
   useEffect(() => {
     let mounted = true;
@@ -581,7 +587,7 @@ export default function HomeScreen() {
             <View style={styles.topActions}>
               <TouchableOpacity
                 style={styles.settingsButton}
-                onPress={() => {}}
+                onPress={handleSyncPress}
                 activeOpacity={0.85}
               >
                 <Ionicons name="sync-outline" size={20} color="#111827" />

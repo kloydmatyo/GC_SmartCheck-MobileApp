@@ -104,34 +104,43 @@ export class SyncService {
     let failedCount = 0;
     const conflicts: ConflictInfo[] = [];
 
+    console.log(`[SyncService] Starting full sync cycle. Force mode: ${force}`);
+
     try {
+      console.log("[SyncService] Phase 1/5: Syncing Staging Grades...");
       try {
         await this.syncStagingGrades(force);
+        console.log("[SyncService] Phase 1/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.warn("Flush Grades Warning:", e);
+        console.warn("[SyncService] Phase 1/5 (Flush Grades) Warning:", e);
         failedCount++;
       }
 
       // 2. Flush Classes from Staging
+      console.log("[SyncService] Phase 2/5: Syncing Staging Classes...");
       try {
         await this.syncStagingClasses();
+        console.log("[SyncService] Phase 2/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.warn("Flush Classes Warning:", e);
+        console.warn("[SyncService] Phase 2/5 (Flush Classes) Warning:", e);
         failedCount++;
       }
 
       // 3. Flush Exams from Staging
+      console.log("[SyncService] Phase 3/5: Syncing Staging Exams...");
       try {
         await this.syncStagingExams();
+        console.log("[SyncService] Phase 3/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.warn("Flush Exams Warning:", e);
+        console.warn("[SyncService] Phase 3/5 (Flush Exams) Warning:", e);
         failedCount++;
       }
 
       // 4. Flush queued document updates
+      console.log("[SyncService] Phase 4/5: Syncing Document Updates...");
       try {
         const rawUpdates = await OfflineStorageService.getPendingUpdates();
 
@@ -210,11 +219,13 @@ export class SyncService {
       }
 
       // 5. Update the Cache Realm from Firestore
+      console.log("[SyncService] Phase 5/5: Updating Cache Realm from Firestore...");
       try {
         await this.syncFirestoreToCache();
+        console.log("[SyncService] Phase 5/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.warn("Refresh Cache Warning:", e);
+        console.warn("[SyncService] Phase 5/5 (Refresh Cache) Warning:", e);
         failedCount++;
       }
 
@@ -226,7 +237,7 @@ export class SyncService {
       };
 
       console.log(
-        `Full sync complete. Synced: ${syncedCount}, Failed: ${failedCount}`,
+        `[SyncService] Full sync cycle completed. Synced operations: ${syncedCount}, Failed operations: ${failedCount}`,
       );
       this.notifyListeners(result);
       return result;
