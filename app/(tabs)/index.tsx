@@ -381,6 +381,8 @@ export default function HomeScreen() {
           };
         });
 
+        const activeClassesCount = classDocs.filter((c) => !c.isArchived).length;
+
         if (!active) {
           return;
         }
@@ -388,7 +390,7 @@ export default function HomeScreen() {
         setStats({
           scans: scanRows.length,
           averageScore,
-          classes: classDocs.length,
+          classes: activeClassesCount,
         });
 
         setRecentScans(
