@@ -141,8 +141,6 @@ export default function ScannerScreen({
   const [selectedExam, setSelectedExam] = useState<any | null>(null);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
   const [examDropdownOpen, setExamDropdownOpen] = useState(false);
-  const [examIdInput, setExamIdInput] = useState("");
-  const [isValidatingExam, setIsValidatingExam] = useState(false);
 
   // when resetFlag changes we should return to the initial exam-select
   // state and clear any existing exam context. this allows the home screen's
@@ -439,7 +437,7 @@ export default function ScannerScreen({
             ]);
             isValidId = !snapSnake.empty || !snapCamel.empty;
           }
-        } catch (_err) {
+        } catch {
           console.warn(
             "[ScannerScreen] Student verification timed out. Assuming valid.",
           );
@@ -497,7 +495,7 @@ export default function ScannerScreen({
           } else {
             throw new Error("Missing key");
           }
-        } catch (_error) {
+        } catch {
           console.warn(
             "[ScannerScreen] Answer key fetch failed/timed out. using default key.",
           );
@@ -528,7 +526,7 @@ export default function ScannerScreen({
           ),
           900,
         );
-      } catch (_err) {
+      } catch {
         /* proceed if check hangs */
       }
 
@@ -557,6 +555,20 @@ export default function ScannerScreen({
             text1: "Synced to Cloud",
             text2: `Score: ${result.score}/${result.totalPoints}`,
           });
+        } else if (saveResult.status === "retake") {
+          Toast.show({
+            type: "info",
+            text1: "Retake Exam Marked",
+            text2: `Score: ${result.score}/${result.totalPoints} (Saved)`,
+          });
+        } else if (saveResult.status === "duplicate") {
+          Toast.show({
+            type: "error",
+            text1: "Duplicate Scan",
+            text2: "This exact paper was already scanned.",
+          });
+          setIsSaving(false);
+          return;
         } else if (saveResult.status === "pending") {
           // If offline, just hide loading. The user sees the score on the next screen anyway.
           // No toast needed as per user request to "remove the offline toast".
@@ -701,6 +713,10 @@ export default function ScannerScreen({
     );
     if (saveResult.status === "saved") {
       Toast.show({ type: "success", text1: "Saved Successfully" });
+    } else if (saveResult.status === "retake") {
+      Toast.show({ type: "info", text1: "Retake Exam Marked", text2: "Saved Successfully" });
+    } else if (saveResult.status === "duplicate") {
+      Toast.show({ type: "error", text1: "Duplicate Scan", text2: "This exact paper was already scanned." });
     } else if (saveResult.status === "pending") {
       Toast.show({ type: "info", text1: "Saved Locally (Realm)" });
     } else {
@@ -709,99 +725,7 @@ export default function ScannerScreen({
         text1: "Still Failing",
         text2: saveResult.message,
       });
-    }
-  };
 
-  const handleConfirmExam = async () => {
-    const code = examIdInput.trim();
-    if (!code) return;
-    setIsValidatingExam(true);
-
-    try {
-      const { auth } = await import("../../config/firebase");
-      if (!auth.currentUser) {
-        Alert.alert("Auth Required", "Please sign in to search for exams.");
-        return;
-      }
-
-      let foundExamId: string | null = null;
-      let questionCount = 20;
-      let choicesPerQuestion: 4 | 5 = 5;
-
-      // 1. Check Staging Realm (Offline creations)
-      const { RealmService } =
-        await import("../../services/realmService");
-      const stagingRealm = await RealmService.getStagingRealm();
-      const sQuizzes = stagingRealm
-        .objects<any>("OfflineQuiz")
-        .filtered(`examCode == "${code}"`);
-      if (sQuizzes.length > 0) {
-        const sQuiz = sQuizzes[0];
-        foundExamId = `staging_${sQuiz._id.toHexString()}`;
-        questionCount = sQuiz.questionCount || 20;
-        choicesPerQuestion = sQuiz.choiceFormat === "A-D" ? 4 : 5;
-      }
-
-      // 2. Check Cache Realm (Downloaded/Synced exams)
-      if (!foundExamId) {
-        const cacheRealm = await RealmService.getCacheRealm();
-        const cQuizzes = cacheRealm
-          .objects<any>("QuizCache")
-          .filtered(`examCode == "${code}"`);
-        if (cQuizzes.length > 0) {
-          const cQuiz = cQuizzes[0];
-          foundExamId = cQuiz.id;
-          questionCount = cQuiz.questionCount || 20;
-          choicesPerQuestion = cQuiz.choiceFormat === "A-D" ? 4 : 5;
-        }
-      }
-
-      // 3. Check Firestore (Online)
-      if (!foundExamId) {
-        const netState = await NetInfo.fetch();
-        if (netState.isConnected && netState.isInternetReachable) {
-          try {
-            const examsRef = collection(db, "exams");
-            const q = query(examsRef, where("examCode", "==", code));
-            // Use withTimeout to prevent hanging if connection is flaky
-            const snap = await withTimeout(getDocs(q), 5000);
-
-            if (!snap.empty) {
-              const data = snap.docs[0].data();
-              foundExamId = snap.docs[0].id;
-              questionCount = data.num_items || 20;
-              choicesPerQuestion = data.choiceFormat === "A-D" ? 4 : 5;
-            }
-          } catch (firestoreErr) {
-            console.warn(
-              "[ScannerScreen] Firestore query failed:",
-              firestoreErr,
-            );
-            // Ignore - we will handle the null foundExamId below
-          }
-        }
-      }
-
-      // Setup scanner or show error
-      if (foundExamId) {
-        setExamQuestionCount(questionCount);
-        setExamChoicesPerQuestion(choicesPerQuestion);
-        setActiveExamId(foundExamId);
-        setCurrentState("camera");
-      } else {
-        Alert.alert(
-          "Error",
-          "Exam not found. Please check the code and try again.",
-        );
-      }
-    } catch (err) {
-      console.error("[ScannerScreen] Error validating exam code:", err);
-      Alert.alert(
-        "Error",
-        "An unexpected error occurred while searching for the exam.",
-      );
-    } finally {
-      setIsValidatingExam(false);
     }
   };
 

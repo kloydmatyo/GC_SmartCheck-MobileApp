@@ -20,7 +20,7 @@ const GRADE_RESULTS_COLLECTION = "scannedResults";
 
 export interface SaveResult {
   success: boolean;
-  status: "saved" | "duplicate" | "pending" | "error";
+  status: "saved" | "duplicate" | "pending" | "error" | "retake";
   docId?: string;
   message: string;
 }
@@ -183,33 +183,44 @@ export class GradeStorageService {
       }
     }
   }
-  static async isDuplicate(
+  static async checkDuplicateStatus(
     studentId: string,
     examId: string,
     uid: string,
+    newResult: GradingResult,
     includeStaging: boolean = true,
-  ): Promise<boolean> {
+  ): Promise<{ exists: boolean; isRetake: boolean }> {
     try {
+      const newAnswersStr = JSON.stringify(newResult.answers?.map(a => a.studentAnswer) ?? []);
+      const newScore = newResult.score;
+
       // 1. Check local storage (Staging and Cache)
       try {
         const { RealmService } = await import("./realmService");
         if (includeStaging) {
           const stagingRealm = await RealmService.getStagingRealm();
-          const pending = stagingRealm.objects("OfflineGrade").filtered(
+          const pending = stagingRealm.objects<any>("OfflineGrade").filtered(
             "studentId == $0 AND examId == $1",
             studentId,
             examId,
           );
-          if (pending.length > 0) return true;
+          if (pending.length > 0) {
+            const oldAnswersStr = pending[0].answers;
+            const isRetake = oldAnswersStr ? oldAnswersStr !== newAnswersStr : pending[0].score !== newScore;
+            return { exists: true, isRetake };
+          }
         }
 
         const cacheRealm = await RealmService.getCacheRealm();
-        const cached = cacheRealm.objects("GradeCache").filtered(
+        const cached = cacheRealm.objects<any>("GradeCache").filtered(
           "studentId == $0 AND examId == $1",
           studentId,
           examId,
         );
-        if (cached.length > 0) return true;
+        if (cached.length > 0) {
+          const isRetake = cached[0].score !== newScore; // GradeCache doesn't store answers, fallback to score
+          return { exists: true, isRetake };
+        }
       } catch (e) {
         console.warn("[GradeStorageService] Local duplicate check failed:", e);
       }
@@ -225,17 +236,22 @@ export class GradeStorageService {
           where("studentId", "==", studentId),
         );
         const snap = await getDocs(q);
-        return !snap.empty;
+        if (!snap.empty) {
+          const oldData = snap.docs[0].data();
+          const oldAnswersStr = JSON.stringify(oldData.answers ?? []);
+          const isRetake = oldData.answers ? oldAnswersStr !== newAnswersStr : oldData.score !== newScore;
+          return { exists: true, isRetake };
+        }
       }
 
-      return false;
+      return { exists: false, isRetake: false };
     } catch (error) {
       LogService.error("SAVE_FAILED", "Duplicate check query failed", {
         studentId,
         examId,
         error,
       });
-      return false;
+      return { exists: false, isRetake: false };
     }
   }
   static async saveGradingResult(
@@ -259,6 +275,35 @@ export class GradeStorageService {
       `[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`,
     );
 
+    // ── 3. Duplicate check BEFORE Offline/Online Routing ──
+    try {
+      const duplicateInfo = await withTimeout(
+        // Don't check staging — a pending offline record is not a "true" duplicate yet
+        GradeStorageService.checkDuplicateStatus(result.studentId, resolvedExamId, uid, result, false),
+        2000,
+      );
+      if (duplicateInfo && duplicateInfo.exists) {
+        if (duplicateInfo.isRetake) {
+          result.metadata = { ...result.metadata, isRetake: true } as any;
+          console.log(`[GradeStorageService] Retake detected for Student ${result.studentId}.`);
+        } else {
+          await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
+            studentId: result.studentId,
+            examId: resolvedExamId,
+          });
+          return {
+            success: false,
+            status: "duplicate",
+            message: `Duplicate scan for Student ${result.studentId}.`,
+          };
+        }
+      }
+    } catch {
+      console.warn(
+        "[GradeStorageService] Duplicate check timed out. Proceeding.",
+      );
+    }
+
     // ── Check Connectivity and Latency First ──
     const netState = await NetInfo.fetch();
     const isOnline = !!(netState.isConnected && netState.isInternetReachable);
@@ -272,7 +317,7 @@ export class GradeStorageService {
         `[GradeStorageService] OFFLINE MODE: Connection degraded (Online: ${isOnline}, Fast: ${isResponsive}).`,
       );
       console.log(`[GradeStorageService] OFFLINE MODE: Bypassing online validation for student ${result.studentId} and building offline record.`);
-      const record: GradeStorageRecord = {
+      const record: GradeStorageRecord & { isRetake?: boolean } = {
         studentId: result.studentId,
         examId: resolvedExamId,
         score: result.score,
@@ -287,8 +332,14 @@ export class GradeStorageService {
         createdAt: new Date(),
         answers: result.answers?.map((a) => a.studentAnswer) ?? [],
         isNullId: result.metadata?.isValidId === false,
+        isRetake: (result.metadata as any)?.isRetake,
       };
-      return GradeStorageService.queueOffline(record);
+      const offlineResult = await GradeStorageService.queueOffline(record);
+      // Preserve retake status if it was a retake
+      if ((result.metadata as any)?.isRetake) {
+        offlineResult.status = "retake";
+      }
+      return offlineResult;
     }
 
     await LogService.info(
@@ -332,36 +383,14 @@ export class GradeStorageService {
       );
     }
 
-    // ── 3. Duplicate check (with 2s SLA) ──
-    try {
-      const duplicate = await withTimeout(
-        // Don't check staging — a pending offline record is not a "true" duplicate yet
-        GradeStorageService.isDuplicate(result.studentId, resolvedExamId, uid, false),
-        2000,
-      );
-      if (duplicate) {
-        await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
-          studentId: result.studentId,
-          examId: resolvedExamId,
-        });
-        return {
-          success: false,
-          status: "duplicate",
-          message: `A grade for Student ${result.studentId} in this exam already exists.`,
-        };
-      }
-    } catch {
-      console.warn(
-        "[GradeStorageService] Duplicate check timed out. Proceeding.",
-      );
-    }
+    // (Duplicate check was moved to before offline check)
 
     console.log(
-      `[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`,
+      `[GradeStorageService] Validation passed for ${result.studentId}`,
     );
 
     // Build Firestore record
-    const record: GradeStorageRecord = {
+    const record: GradeStorageRecord & { isRetake?: boolean } = {
       studentId: result.studentId,
       examId: resolvedExamId,
       score: result.score,
@@ -376,9 +405,15 @@ export class GradeStorageService {
       createdAt: new Date(),
       answers: result.answers?.map((a) => a.studentAnswer) ?? [],
       isNullId: result.metadata?.isValidId === false,
+      isRetake: (result.metadata as any)?.isRetake,
     };
 
-    return GradeStorageService.writeToFirestore(record);
+    const writeResult = await GradeStorageService.writeToFirestore(record);
+    // If it's a retake and successfully written online, let the UI know it was a retake
+    if (writeResult.success && record.isRetake) {
+      writeResult.status = "retake";
+    }
+    return writeResult;
   }
   private static async writeToFirestore(
     record: GradeStorageRecord,
