@@ -6,7 +6,6 @@ import {
 } from "@/services/gradeExportService";
 import { GradingService } from "@/services/gradingService";
 import { ResultsService } from "@/services/resultsService";
-import { StorageService } from "@/services/storageService";
 import { GradingResult } from "@/types/scanning";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
@@ -48,6 +47,7 @@ type ResultRow = {
   rawLocalData?: GradingResult;
   // fields for individual export
   studentId: string;
+  examId: string;
   score: number;
   totalPoints: number;
   dateValue: string;
@@ -96,12 +96,9 @@ export default function ResultsScreen() {
           return;
         }
 
-        const [payload, localData] = await Promise.all([
-          ResultsService.getUnifiedResults(),
-          StorageService.getHistory(),
-        ]);
+        const payload = await ResultsService.getUnifiedResults();
 
-        const mappedSynced = payload.rows.map((item) => ({
+        const combined: ResultRow[] = payload.rows.map((item) => ({
           id: item.id,
           studentName: item.studentName,
           classLabel: item.classLabel,
@@ -112,49 +109,18 @@ export default function ResultsScreen() {
           sortValue: item.sortValue,
           source: "synced" as const,
           studentId: item.studentId,
+          examId: item.examId,
           score: item.score,
           totalPoints: item.totalQuestions,
           dateValue: item.dateValue,
         }));
 
-        const mappedLocal = localData.map((item) => ({
-          id: `local_${item.metadata?.timestamp || Math.random()}`,
-          studentName:
-            item.studentId === "00000000"
-              ? "Unknown Student"
-              : `ID: ${item.studentId}`,
-          classLabel: "Local Storage",
-          examLabel: "Offline Scan",
-          percentage: item.percentage,
-          dateLabel: formatDateLabel(
-            item.metadata?.timestamp
-              ? new Date(item.metadata.timestamp).toISOString()
-              : "",
-          ),
-          correctLabel: `${item.score}/${item.totalPoints} correct`,
-          sortValue: item.metadata?.timestamp || 0,
-          source: "local" as const,
-          rawLocalData: item,
-          studentId: item.studentId,
-          score: item.score,
-          totalPoints: item.totalPoints,
-          dateValue: item.metadata?.timestamp
-            ? new Date(item.metadata.timestamp).toISOString()
-            : "",
-        }));
-
-        const combined = [...mappedSynced, ...mappedLocal].sort(
-          (a, b) => b.sortValue - a.sortValue,
-        );
+        combined.sort((a, b) => b.sortValue - a.sortValue);
 
         if (!active) return;
         setResults(combined);
 
-        const filters = [...payload.classFilters];
-        if (mappedLocal.length > 0 && !filters.includes("Local Storage")) {
-          filters.push("Local Storage");
-        }
-        setClassFilters(filters);
+        setClassFilters([...payload.classFilters]);
       } catch (error) {
         console.error("Error loading results:", error);
         if (active) {
@@ -357,7 +323,7 @@ export default function ResultsScreen() {
         </TouchableOpacity>
       </TouchableOpacity>
     );
-  }, []);
+  }, [exportingId, handleStudentExport]);
 
   return (
     <View style={styles.container}>

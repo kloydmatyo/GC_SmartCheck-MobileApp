@@ -1,4 +1,5 @@
 import { auth, db } from "@/config/firebase";
+import NetInfo from "@react-native-community/netinfo";
 import { addDoc, collection, Timestamp } from "firebase/firestore";
 
 export type LogLevel = "info" | "warn" | "error";
@@ -15,6 +16,9 @@ export type LogEvent =
   | "OFFLINE_SYNC_STARTED"
   | "OFFLINE_SYNC_SUCCESS"
   | "OFFLINE_SYNC_FAILED"
+  | "OFFLINE_SYNC_CYCLE_COMPLETE"
+  | "OFFLINE_SYNC_CRITICAL_FAILURE"
+  | "SYNC_PERMISSION_DENIED"
   | "STUDENT_ID_INVALID"
   | "EXAM_ID_INVALID"
   | "AUTH_MISSING";
@@ -58,13 +62,17 @@ export class LogService {
     }
 
     
+    // Skip Firestore logging if offline to prevent background retry loops
     try {
-      await addDoc(collection(db, LOGS_COLLECTION), {
-        ...entry,
-        createdAt: Timestamp.now(),
-      });
+      const netState = await NetInfo.fetch();
+      if (netState.isConnected && netState.isInternetReachable) {
+        await addDoc(collection(db, LOGS_COLLECTION), {
+          ...entry,
+          createdAt: Timestamp.now(),
+        });
+      }
     } catch {
-      
+      // Ignore Firestore logging errors
     }
   }
 
