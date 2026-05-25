@@ -1,4 +1,6 @@
 import NetInfo, { NetInfoState } from "@react-native-community/netinfo";
+import { db } from "@/config/firebase";
+import { doc, getDoc, getDocFromServer } from "firebase/firestore";
 
 type NetworkListener = (isConnected: boolean) => void;
 
@@ -6,6 +8,54 @@ export class NetworkService {
   private static listeners: NetworkListener[] = [];
   private static isConnected: boolean = true;
   private static unsubscribe: (() => void) | null = null;
+  private static lastPingTime: number = 0;
+  private static lastPingResult: boolean = true;
+
+  /**
+   * Measure Firestore latency to determine if connection is fast enough (ping < 200ms).
+   * Result is cached for 5 seconds to avoid spamming the server.
+   */
+  static async isFirestoreResponsive(): Promise<boolean> {
+    const now = Date.now();
+    // Cache result for 5 seconds
+    if (now - this.lastPingTime < 5000) {
+      return this.lastPingResult;
+    }
+
+    try {
+      const pingDoc = doc(db, "system", "ping");
+      const startTime = Date.now();
+      
+      // Force server fetch to bypass local cache
+      await getDocFromServer(pingDoc);
+      
+      const latency = Date.now() - startTime;
+      this.lastPingResult = latency < 200;
+      this.lastPingTime = now;
+      
+      if (!this.lastPingResult) {
+         console.warn(`[NetworkService] Firestore latency too high: ${latency}ms`);
+      }
+      return this.lastPingResult;
+    } catch (err: any) {
+       const latency = Date.now() - now;
+       // If permission denied, the server successfully responded!
+       if (err?.code === "permission-denied") {
+          this.lastPingResult = latency < 200;
+          this.lastPingTime = now;
+          if (!this.lastPingResult) {
+            console.warn(`[NetworkService] Firestore latency too high: ${latency}ms`);
+          }
+          return this.lastPingResult;
+       }
+       
+       // Other errors (timeout, unavailable) mean not responsive
+       console.warn(`[NetworkService] Firestore ping failed or timed out.`, err?.message);
+       this.lastPingResult = false;
+       this.lastPingTime = now;
+       return false;
+    }
+  }
 
   private static resolveConnectionState(state: NetInfoState): boolean {
     if (!state.isConnected) return false;

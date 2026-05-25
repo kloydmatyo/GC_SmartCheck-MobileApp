@@ -77,7 +77,7 @@ export class SyncService {
   /**
    * Sync all pending updates
    */
-  static async syncPendingUpdates(): Promise<SyncResult> {
+  static async syncPendingUpdates(force: boolean = false): Promise<SyncResult> {
     if (this.isSyncing) {
       console.log("Sync already in progress");
       return {
@@ -89,7 +89,7 @@ export class SyncService {
     }
 
     const isOnline = await NetworkService.isOnline();
-    if (!isOnline) {
+    if (!isOnline && !force) {
       console.log("Device is offline, skipping sync");
       return {
         success: false,
@@ -104,35 +104,43 @@ export class SyncService {
     let failedCount = 0;
     const conflicts: ConflictInfo[] = [];
 
+    console.log(`[SyncService] Starting full sync cycle. Force mode: ${force}`);
+
     try {
-      // 1. Flush Grades from Staging
+      console.log("[SyncService] Phase 1/5: Syncing Staging Grades...");
       try {
-        await this.syncStagingGrades();
+        await this.syncStagingGrades(force);
+        console.log("[SyncService] Phase 1/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.error("Flush Grades Error", e);
+        console.warn("[SyncService] Phase 1/5 (Flush Grades) Warning:", e);
         failedCount++;
       }
 
       // 2. Flush Classes from Staging
+      console.log("[SyncService] Phase 2/5: Syncing Staging Classes...");
       try {
         await this.syncStagingClasses();
+        console.log("[SyncService] Phase 2/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.error("Flush Classes Error", e);
+        console.warn("[SyncService] Phase 2/5 (Flush Classes) Warning:", e);
         failedCount++;
       }
 
       // 3. Flush Exams from Staging
+      console.log("[SyncService] Phase 3/5: Syncing Staging Exams...");
       try {
         await this.syncStagingExams();
+        console.log("[SyncService] Phase 3/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.error("Flush Exams Error", e);
+        console.warn("[SyncService] Phase 3/5 (Flush Exams) Warning:", e);
         failedCount++;
       }
 
       // 4. Flush queued document updates
+      console.log("[SyncService] Phase 4/5: Syncing Document Updates...");
       try {
         const rawUpdates = await OfflineStorageService.getPendingUpdates();
 
@@ -180,7 +188,7 @@ export class SyncService {
               );
 
             if (!isPermissionError) {
-              console.error(
+              console.warn(
                 `Failed to sync update ${update.id} for exam ${update.examId}:`,
                 updateError,
               );
@@ -206,16 +214,18 @@ export class SyncService {
           }
         }
       } catch (e) {
-        console.error("Pending update sync error", e);
+        console.warn("Pending update sync warning:", e);
         failedCount++;
       }
 
       // 5. Update the Cache Realm from Firestore
+      console.log("[SyncService] Phase 5/5: Updating Cache Realm from Firestore...");
       try {
         await this.syncFirestoreToCache();
+        console.log("[SyncService] Phase 5/5 completed successfully.");
         syncedCount++;
       } catch (e) {
-        console.error("Refresh Cache Error", e);
+        console.warn("[SyncService] Phase 5/5 (Refresh Cache) Warning:", e);
         failedCount++;
       }
 
@@ -227,12 +237,12 @@ export class SyncService {
       };
 
       console.log(
-        `Full sync complete. Synced: ${syncedCount}, Failed: ${failedCount}`,
+        `[SyncService] Full sync cycle completed. Synced operations: ${syncedCount}, Failed operations: ${failedCount}`,
       );
       this.notifyListeners(result);
       return result;
     } catch (error) {
-      console.error("Error during sync:", error);
+      console.warn("Sync warning during full process:", error);
       return {
         success: false,
         syncedCount,
@@ -264,7 +274,9 @@ export class SyncService {
     const newOrUpdatedClasses = classesSnap.docs.filter(doc => {
       if (!lastSyncDate) return true;
       const data = doc.data();
-      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+      const updatedAt = data.updatedAt;
+      const updatedDate = updatedAt?.toDate ? updatedAt.toDate() : updatedAt ? new Date(updatedAt) : null;
+      return !updatedDate || updatedDate > lastSyncDate.toDate();
     });
 
     // Sync Exams + their latest answer keys
@@ -274,7 +286,9 @@ export class SyncService {
     const newOrUpdatedExams = examsSnap.docs.filter(doc => {
       if (!lastSyncDate) return true;
       const data = doc.data();
-      return !data.updatedAt || data.updatedAt.toDate() > lastSyncDate.toDate();
+      const updatedAt = data.updatedAt;
+      const updatedDate = updatedAt?.toDate ? updatedAt.toDate() : updatedAt ? new Date(updatedAt) : null;
+      return !updatedDate || updatedDate > lastSyncDate.toDate();
     });
     const examsWithAK: any[] = [];
 
@@ -428,14 +442,14 @@ export class SyncService {
         const data = doc.data();
         realm.create("GradeCache", {
           id: doc.id,
-          studentId: data.studentId,
-          examId: data.examId,
-          score: data.score,
-          totalPoints: data.totalPoints,
-          percentage: data.percentage,
-          gradeEquivalent: data.gradeEquivalent,
-          dateScanned: data.dateScanned,
-          scannedBy: data.scannedBy,
+          studentId: data.studentId || "Unknown",
+          examId: data.examId || "Unknown",
+          score: data.score ?? 0,
+          totalPoints: data.totalPoints ?? 0,
+          percentage: data.percentage ?? 0,
+          gradeEquivalent: data.gradeEquivalent || "",
+          dateScanned: data.dateScanned || new Date().toISOString(),
+          scannedBy: data.scannedBy || "",
           createdAt: data.createdAt?.toDate?.() || new Date(),
         }, "modified" as any);
       });
@@ -443,15 +457,15 @@ export class SyncService {
       stagingGrades.forEach((sGrade) => {
         realm.create("GradeCache", {
           id: sGrade._id.toHexString(),
-          studentId: sGrade.studentId,
-          examId: sGrade.examId,
-          score: sGrade.score,
-          totalPoints: sGrade.totalPoints,
-          percentage: sGrade.percentage,
-          gradeEquivalent: sGrade.gradeEquivalent,
-          dateScanned: sGrade.dateScanned,
-          scannedBy: sGrade.scannedBy,
-          createdAt: sGrade.createdAt,
+          studentId: sGrade.studentId || "Unknown",
+          examId: sGrade.examId || "Unknown",
+          score: sGrade.score ?? 0,
+          totalPoints: sGrade.totalPoints ?? 0,
+          percentage: sGrade.percentage ?? 0,
+          gradeEquivalent: sGrade.gradeEquivalent || "",
+          dateScanned: sGrade.dateScanned || new Date().toISOString(),
+          scannedBy: sGrade.scannedBy || "",
+          createdAt: sGrade.createdAt || new Date(),
         }, "modified" as any);
       });
     });
@@ -460,12 +474,12 @@ export class SyncService {
     console.log("Primary Cache Realm updated from Firestore via Delta Fetch");
   }
 
-  private static async syncStagingGrades(): Promise<void> {
+  private static async syncStagingGrades(force: boolean = false): Promise<void> {
     // This is handled by GradeStorageService.syncOfflineQueue()
     // We can call it here for centralization
     console.log("Syncing staging grades...");
     const { GradeStorageService } = await import("./gradeStorageService");
-    await GradeStorageService.syncOfflineQueue();
+    await GradeStorageService.syncOfflineQueue(force);
   }
 
   private static async syncStagingClasses(): Promise<void> {
@@ -503,7 +517,17 @@ export class SyncService {
     if (classesToDelete.length > 0) {
       await batch.commit();
       realm.write(() => {
-        realm.delete(classesToDelete);
+        for (const item of classesToDelete) {
+          try {
+            if (item && item.isValid && item.isValid()) {
+              realm.delete(item);
+            } else if (item && !(item as any).isInvalidated) {
+              realm.delete(item);
+            }
+          } catch (delError) {
+            console.warn("Failed to delete staging class from Realm:", delError);
+          }
+        }
       });
       console.log(`[SyncService] Batched and synced ${classesToDelete.length} offline classes`);
     }
@@ -571,7 +595,17 @@ export class SyncService {
     if (quizzesToDelete.length > 0) {
       await batch.commit();
       realm.write(() => {
-        realm.delete(quizzesToDelete);
+        for (const item of quizzesToDelete) {
+          try {
+            if (item && item.isValid && item.isValid()) {
+              realm.delete(item);
+            } else if (item && !(item as any).isInvalidated) {
+              realm.delete(item);
+            }
+          } catch (delError) {
+            console.warn("Failed to delete staging quiz from Realm:", delError);
+          }
+        }
       });
       console.log(`[SyncService] Batched and synced ${quizzesToDelete.length} offline exams`);
     }

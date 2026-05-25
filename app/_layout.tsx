@@ -154,23 +154,6 @@ export default function RootLayout() {
       <StatusBar style="auto" />
       <OfflineIndicator />
       <Toast config={toastConfig} />
-      {(isSyncing || syncStatus === "synced") && (
-        <View style={styles.syncOverlay} pointerEvents="none">
-          <View style={styles.syncContainer}>
-            {isSyncing ? (
-              <>
-                <ActivityIndicator color="#6B7280" size="small" />
-                <Text style={styles.syncText}>Syncing Data...</Text>
-              </>
-            ) : (
-              <>
-                <View style={styles.syncSuccessDot} />
-                <Text style={styles.syncText}>Synced to Web</Text>
-              </>
-            )}
-          </View>
-        </View>
-      )}
     </ThemeProvider>
   );
 }

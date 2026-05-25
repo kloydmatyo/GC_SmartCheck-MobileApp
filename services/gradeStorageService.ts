@@ -20,7 +20,7 @@ const GRADE_RESULTS_COLLECTION = "scannedResults";
 
 export interface SaveResult {
   success: boolean;
-  status: "saved" | "duplicate" | "pending" | "error";
+  status: "saved" | "duplicate" | "pending" | "error" | "retake";
   docId?: string;
   message: string;
 }
@@ -122,7 +122,7 @@ export class GradeStorageService {
         { studentId },
       );
       return false;
-    } catch (_error) {
+    } catch {
       // Allow if validation fails — don't block save
       return true;
     }
@@ -170,7 +170,7 @@ export class GradeStorageService {
         const cacheRealm = await RealmService.getCacheRealm();
         const cached = cacheRealm.objectForPrimaryKey("QuizCache", examId);
         return !!cached;
-      } catch (_cacheError) {
+      } catch {
         LogService.error(
           "EXAM_ID_INVALID",
           "Failed to validate exam ID anywhere",
@@ -183,30 +183,44 @@ export class GradeStorageService {
       }
     }
   }
-  static async isDuplicate(
+  static async checkDuplicateStatus(
     studentId: string,
     examId: string,
     uid: string,
-  ): Promise<boolean> {
+    newResult: GradingResult,
+    includeStaging: boolean = true,
+  ): Promise<{ exists: boolean; isRetake: boolean }> {
     try {
+      const newAnswersStr = JSON.stringify(newResult.answers?.map(a => a.studentAnswer) ?? []);
+      const newScore = newResult.score;
+
       // 1. Check local storage (Staging and Cache)
       try {
         const { RealmService } = await import("./realmService");
-        const stagingRealm = await RealmService.getStagingRealm();
-        const pending = stagingRealm.objects("OfflineGrade").filtered(
-          "studentId == $0 AND examId == $1",
-          studentId,
-          examId,
-        );
-        if (pending.length > 0) return true;
+        if (includeStaging) {
+          const stagingRealm = await RealmService.getStagingRealm();
+          const pending = stagingRealm.objects<any>("OfflineGrade").filtered(
+            "studentId == $0 AND examId == $1",
+            studentId,
+            examId,
+          );
+          if (pending.length > 0) {
+            const oldAnswersStr = pending[0].answers;
+            const isRetake = oldAnswersStr ? oldAnswersStr !== newAnswersStr : pending[0].score !== newScore;
+            return { exists: true, isRetake };
+          }
+        }
 
         const cacheRealm = await RealmService.getCacheRealm();
-        const cached = cacheRealm.objects("GradeCache").filtered(
+        const cached = cacheRealm.objects<any>("GradeCache").filtered(
           "studentId == $0 AND examId == $1",
           studentId,
           examId,
         );
-        if (cached.length > 0) return true;
+        if (cached.length > 0) {
+          const isRetake = cached[0].score !== newScore; // GradeCache doesn't store answers, fallback to score
+          return { exists: true, isRetake };
+        }
       } catch (e) {
         console.warn("[GradeStorageService] Local duplicate check failed:", e);
       }
@@ -222,17 +236,22 @@ export class GradeStorageService {
           where("studentId", "==", studentId),
         );
         const snap = await getDocs(q);
-        return !snap.empty;
+        if (!snap.empty) {
+          const oldData = snap.docs[0].data();
+          const oldAnswersStr = JSON.stringify(oldData.answers ?? []);
+          const isRetake = oldData.answers ? oldAnswersStr !== newAnswersStr : oldData.score !== newScore;
+          return { exists: true, isRetake };
+        }
       }
 
-      return false;
+      return { exists: false, isRetake: false };
     } catch (error) {
       LogService.error("SAVE_FAILED", "Duplicate check query failed", {
         studentId,
         examId,
         error,
       });
-      return false;
+      return { exists: false, isRetake: false };
     }
   }
   static async saveGradingResult(
@@ -256,15 +275,49 @@ export class GradeStorageService {
       `[GradeStorageService] Starting save for student ${result.studentId}, exam ${resolvedExamId}`,
     );
 
-    // ── Check Connectivity First ──
+    // ── 3. Duplicate check BEFORE Offline/Online Routing ──
+    try {
+      const duplicateInfo = await withTimeout(
+        // Don't check staging — a pending offline record is not a "true" duplicate yet
+        GradeStorageService.checkDuplicateStatus(result.studentId, resolvedExamId, uid, result, false),
+        2000,
+      );
+      if (duplicateInfo && duplicateInfo.exists) {
+        if (duplicateInfo.isRetake) {
+          result.metadata = { ...result.metadata, isRetake: true } as any;
+          console.log(`[GradeStorageService] Retake detected for Student ${result.studentId}.`);
+        } else {
+          await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
+            studentId: result.studentId,
+            examId: resolvedExamId,
+          });
+          return {
+            success: false,
+            status: "duplicate",
+            message: `Duplicate scan for Student ${result.studentId}.`,
+          };
+        }
+      }
+    } catch {
+      console.warn(
+        "[GradeStorageService] Duplicate check timed out. Proceeding.",
+      );
+    }
+
+    // ── Check Connectivity and Latency First ──
     const netState = await NetInfo.fetch();
     const isOnline = !!(netState.isConnected && netState.isInternetReachable);
+    
+    // Use an adaptive QoS check: if online but latency is >= 200ms, fall back to offline mode
+    const { NetworkService } = await import("./networkService");
+    const isResponsive = isOnline ? await NetworkService.isFirestoreResponsive() : false;
 
-    if (!isOnline) {
+    if (!isOnline || !isResponsive) {
       console.log(
-        "[GradeStorageService] Offline detected. Bypassing validation and queueing to RealmDB.",
+        `[GradeStorageService] OFFLINE MODE: Connection degraded (Online: ${isOnline}, Fast: ${isResponsive}).`,
       );
-      const record: GradeStorageRecord = {
+      console.log(`[GradeStorageService] OFFLINE MODE: Bypassing online validation for student ${result.studentId} and building offline record.`);
+      const record: GradeStorageRecord & { isRetake?: boolean } = {
         studentId: result.studentId,
         examId: resolvedExamId,
         score: result.score,
@@ -279,8 +332,14 @@ export class GradeStorageService {
         createdAt: new Date(),
         answers: result.answers?.map((a) => a.studentAnswer) ?? [],
         isNullId: result.metadata?.isValidId === false,
+        isRetake: (result.metadata as any)?.isRetake,
       };
-      return GradeStorageService.queueOffline(record);
+      const offlineResult = await GradeStorageService.queueOffline(record);
+      // Preserve retake status if it was a retake
+      if ((result.metadata as any)?.isRetake) {
+        offlineResult.status = "retake";
+      }
+      return offlineResult;
     }
 
     await LogService.info(
@@ -301,13 +360,9 @@ export class GradeStorageService {
         2000,
       );
       if (!studentValid) {
-        return {
-          success: false,
-          status: "error",
-          message: `Student ID "${result.studentId}" was not found in the database.`,
-        };
+        console.warn(`[GradeStorageService] Student ${result.studentId} not in local cache during online save. Proceeding anyway.`);
       }
-    } catch (_err) {
+    } catch {
       console.warn(
         "[GradeStorageService] Student validation timed out/failed. Proceeding with offline-first trust.",
       );
@@ -320,47 +375,22 @@ export class GradeStorageService {
         2000,
       );
       if (!examValid) {
-        return {
-          success: false,
-          status: "error",
-          message: `Exam ID "${resolvedExamId}" is not active or does not exist.`,
-        };
+        console.warn(`[GradeStorageService] Exam ${resolvedExamId} not in local cache during online save. Proceeding anyway.`);
       }
-    } catch (_err) {
+    } catch {
       console.warn(
         "[GradeStorageService] Exam validation timed out/failed. Proceeding with offline-first trust.",
       );
     }
 
-    // ── 3. Duplicate check (with 2s SLA) ──
-    try {
-      const duplicate = await withTimeout(
-        GradeStorageService.isDuplicate(result.studentId, resolvedExamId, uid),
-        2000,
-      );
-      if (duplicate) {
-        await LogService.warn("SAVE_DUPLICATE", "Duplicate entry blocked", {
-          studentId: result.studentId,
-          examId: resolvedExamId,
-        });
-        return {
-          success: false,
-          status: "duplicate",
-          message: `A grade for Student ${result.studentId} in this exam already exists.`,
-        };
-      }
-    } catch (_err) {
-      console.warn(
-        "[GradeStorageService] Duplicate check timed out. Proceeding.",
-      );
-    }
+    // (Duplicate check was moved to before offline check)
 
     console.log(
-      `[GradeStorageService] Validation & duplicate check passed for ${result.studentId}`,
+      `[GradeStorageService] Validation passed for ${result.studentId}`,
     );
 
     // Build Firestore record
-    const record: GradeStorageRecord = {
+    const record: GradeStorageRecord & { isRetake?: boolean } = {
       studentId: result.studentId,
       examId: resolvedExamId,
       score: result.score,
@@ -375,9 +405,15 @@ export class GradeStorageService {
       createdAt: new Date(),
       answers: result.answers?.map((a) => a.studentAnswer) ?? [],
       isNullId: result.metadata?.isValidId === false,
+      isRetake: (result.metadata as any)?.isRetake,
     };
 
-    return GradeStorageService.writeToFirestore(record);
+    const writeResult = await GradeStorageService.writeToFirestore(record);
+    // If it's a retake and successfully written online, let the UI know it was a retake
+    if (writeResult.success && record.isRetake) {
+      writeResult.status = "retake";
+    }
+    return writeResult;
   }
   private static async writeToFirestore(
     record: GradeStorageRecord,
@@ -396,9 +432,8 @@ export class GradeStorageService {
     );
 
     try {
-      // Enforce 8-second SLA for the Firestore commit (generous to avoid
-      // routing to offline queue on slow but connected networks)
-      await withTimeout(batch.commit(), 8000);
+      // Enforce 5-second SLA for the Firestore commit
+      await withTimeout(batch.commit(), 5000);
 
       await LogService.info("SAVE_SUCCESS", "Grade result saved to Firestore", {
         docId: gradeRef.id,
@@ -487,11 +522,12 @@ export class GradeStorageService {
   ): Promise<SaveResult> {
     try {
       console.log(
-        `[GradeStorageService] Opening RealmDB to queue record for student ${record.studentId}...`,
+        `[GradeStorageService] OFFLINE MODE: Opening RealmDB to queue offline record for student ${record.studentId}...`,
       );
       const realm = await RealmService.getStagingRealm();
 
       realm.write(() => {
+        console.log(`[GradeStorageService] OFFLINE MODE: Executing Realm write transaction...`);
         realm.create("OfflineGrade", {
           studentId: record.studentId,
           examId: record.examId,
@@ -512,7 +548,7 @@ export class GradeStorageService {
 
       const queueLength = realm.objects("OfflineGrade").length;
       console.log(
-        `[GradeStorageService] Record successfully queued in RealmDB. Total offline items: ${queueLength}`,
+        `[GradeStorageService] OFFLINE MODE: Record successfully committed in RealmDB. Total offline queue size is now: ${queueLength}`,
       );
 
       await LogService.info(
@@ -534,11 +570,13 @@ export class GradeStorageService {
 
       // Attempt immediate sync in background — if online, this pushes the
       // queued grade to Firestore right away without waiting for app resume.
+      console.log(`[GradeStorageService] OFFLINE MODE: Checking if immediate background sync is possible...`);
       NetInfo.fetch().then((state) => {
         if (state.isConnected && state.isInternetReachable) {
+          console.log(`[GradeStorageService] OFFLINE MODE: Network restored immediately. Triggering background sync...`);
           GradeStorageService.syncOfflineQueue().catch((err) =>
             console.warn(
-              "[GradeStorageService] Immediate sync after queue failed:",
+              "[GradeStorageService] OFFLINE MODE: Immediate background sync failed:",
               err,
             ),
           );
@@ -579,8 +617,14 @@ export class GradeStorageService {
     }
   }
 
-  static async syncOfflineQueue(): Promise<void> {
+  static async syncOfflineQueue(force: boolean = false): Promise<void> {
     try {
+      const netState = await NetInfo.fetch();
+      if ((!netState.isConnected || !netState.isInternetReachable) && !force) {
+        console.log(`[GradeStorageService] SYNC ABORTED: Device is offline (Connected: ${netState.isConnected}, Reachable: ${netState.isInternetReachable}).`);
+        return;
+      }
+
       const { auth } = await import("../config/firebase");
 
       // Only wait if auth is not already initialized
@@ -607,11 +651,15 @@ export class GradeStorageService {
       }
 
       const realm = await RealmService.getStagingRealm();
-      const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade");
+      const currentUid = auth.currentUser.uid;
+      
+      // Only sync records that belong to the current authenticated user
+      const offlineGrades = realm.objects<OfflineGrade>("OfflineGrade")
+        .filtered("scannedBy == $0", currentUid);
 
       if (offlineGrades.length === 0) {
         console.log(
-          "[GradeStorageService] No offline grades found in RealmDB. Skipping sync.",
+          `[GradeStorageService] No offline grades found for user ${currentUid}. Skipping sync.`,
         );
         return;
       }
@@ -627,123 +675,175 @@ export class GradeStorageService {
 
       const batch = writeBatch(db);
 
-      // Limit to max 400 for safety, as Firestore batch limit is 500 operations
+      // Limit to max 100 per batch for better stability on mobile connections
       const recordsToSync = Array.from(
         offlineGrades as unknown as OfflineGrade[],
-      ).slice(0, 400);
-      let validRecordsToSyncCount = 0;
+      ).slice(0, 100);
+      
+      console.log(`[GradeStorageService] Preparing to build Firestore batch with ${recordsToSync.length} records...`);
+
+      const recordsActuallySynced: OfflineGrade[] = [];
 
       for (const record of recordsToSync) {
-        // ── Re-validate everything before syncing ──
+        // Drop records with missing examId — Firestore will always reject these
+        if (!record.examId || record.examId.trim() === "") {
+          console.warn(
+            `[GradeStorageService] Dropping record for student ${record.studentId}: empty examId.`,
+          );
+          realm.write(() => {
+            if (record && record.isValid && record.isValid()) realm.delete(record);
+          });
+          continue;
+        }
+
+        // ── Re-validation (Local Only) ──
+        // We skip network-based duplicate checks here to avoid
+        // sequential request bottlenecks that cause timeouts.
         try {
-          // 1. Check if student still exists
-          const studentValid = await GradeStorageService.validateStudentId(
-            record.studentId,
-          );
-          if (!studentValid) {
-            console.warn(
-              `[GradeStorageService] Skipping sync for invalid student: ${record.studentId}`,
-            );
-            continue;
-          }
+          const gradeRef = doc(collection(db, GRADE_RESULTS_COLLECTION));
 
-          // 2. Check if exam is still active
-          const examValid = await GradeStorageService.validateExamId(
-            record.examId,
-          );
-          if (!examValid) {
-            console.warn(
-              `[GradeStorageService] Skipping sync for invalid/inactive exam: ${record.examId}`,
-            );
-            continue;
-          }
+          batch.set(gradeRef, {
+            studentId: record.studentId,
+            examId: record.examId,
+            score: record.score,
+            totalPoints: record.totalPoints,
+            percentage: record.percentage,
+            gradeEquivalent: record.gradeEquivalent,
+            correctAnswers: record.correctAnswers,
+            totalQuestions: record.totalQuestions,
+            dateScanned: record.dateScanned,
+            answers: record.answers ? JSON.parse(record.answers) : [],
+            isNullId: record.isNullId ?? false,
+            status: "saved",
+            scannedBy: record.scannedBy,
+            createdAt: Timestamp.now(), 
+            scannedAt: serverTimestamp(),
+          });
 
-          // 3. Re-check duplicate before syncing
-          const duplicate = await GradeStorageService.isDuplicate(
-            record.studentId,
-            record.examId,
-            record.scannedBy || GradeStorageService.requireAuth(),
-          );
-
-          if (duplicate) {
-            await LogService.warn(
-              "SAVE_DUPLICATE",
-              "Skipped duplicate during offline sync",
-              {
-                studentId: record.studentId,
-                examId: record.examId,
-              },
-            );
-            // Duplicate won't be synced but will be deleted from local Realm
-            continue;
-          }
+          console.log(`[GradeStorageService] Added student ${record.studentId} to batch (Exam: ${record.examId}).`);
+          recordsActuallySynced.push(record);
         } catch (err) {
-          // If a check fails due to network, we can't sync this record in this batch
           console.error(
-            `[GradeStorageService] Re-validation failed for ${record.studentId}. Skipping in this batch.`,
+            `[GradeStorageService] Failed to prepare record for ${record.studentId}.`,
             err,
           );
           continue;
         }
-
-        const gradeRef = doc(collection(db, GRADE_RESULTS_COLLECTION));
-
-        batch.set(gradeRef, {
-          studentId: record.studentId,
-          examId: record.examId,
-          score: record.score,
-          totalPoints: record.totalPoints,
-          percentage: record.percentage,
-          gradeEquivalent: record.gradeEquivalent,
-          correctAnswers: record.correctAnswers,
-          totalQuestions: record.totalQuestions,
-          dateScanned: record.dateScanned,
-          answers: record.answers ? JSON.parse(record.answers) : [],
-          isNullId: record.isNullId ?? false,
-          status: "saved",
-          scannedBy: record.scannedBy,
-          createdAt: Timestamp.now(), // Source of truth sync time
-          scannedAt: serverTimestamp(),
-        });
-
-        validRecordsToSyncCount++;
       }
 
       // ── Transactionally commit all or nothing ──
-      if (validRecordsToSyncCount > 0) {
+      if (recordsActuallySynced.length > 0) {
         console.log(
-          `[GradeStorageService] Committing atomic batch of ${validRecordsToSyncCount} records to Firestore...`,
+          `[GradeStorageService] Committing atomic batch of ${recordsActuallySynced.length} records to Firestore...`,
         );
-        await withTimeout(batch.commit(), 5000); // 5 sec SLA for batch
-        console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
-      }
+        
+        try {
+          await withTimeout(batch.commit(), 15000); 
+          console.log("[GradeStorageService] Batch commit SUCCESSFUL.");
+          
+          // Successful batch — clear from Realm
+          console.log(`[GradeStorageService] Removing ${recordsActuallySynced.length} successfully synced records from local staging...`);
+          realm.write(() => {
+            for (const record of recordsActuallySynced) {
+              if (record && record.isValid && record.isValid()) {
+                realm.delete(record);
+              }
+            }
+          });
+          console.log("[GradeStorageService] Local staging cleaned up successfully.");
+        } catch (batchError: any) {
+          console.warn(
+            "[GradeStorageService] Atomic batch failed, falling back to individual syncs to isolate error:",
+            batchError?.message || batchError,
+          );
+          
+          // FALLBACK: Try individual syncs to identify the problematic record
+          for (const record of recordsActuallySynced) {
+            // Snapshot all needed field values BEFORE any possible realm.delete() call
+            // to avoid "Accessing object which has been invalidated or deleted" errors.
+            const snap = {
+              studentId: record.studentId,
+              examId: record.examId,
+              score: record.score,
+              totalPoints: record.totalPoints,
+              percentage: record.percentage,
+              gradeEquivalent: record.gradeEquivalent,
+              correctAnswers: record.correctAnswers,
+              totalQuestions: record.totalQuestions,
+              dateScanned: record.dateScanned,
+              answers: record.answers,
+              isNullId: record.isNullId,
+              scannedBy: record.scannedBy,
+            };
 
-      // If we reach here, batch successfully committed (or there were only duplicates)
-      // Now it's safe to clear ONLY the synchronized records from Realm
-      console.log(
-        `[GradeStorageService] Cleaning up ${recordsToSync.length} records from RealmDB...`,
-      );
-      realm.write(() => {
-        realm.delete(recordsToSync);
-      });
-      console.log("[GradeStorageService] RealmDB cleanup complete.");
+            try {
+              const individualBatch = writeBatch(db);
+              const gradeRef = doc(collection(db, GRADE_RESULTS_COLLECTION));
+
+              individualBatch.set(gradeRef, {
+                ...snap,
+                answers: snap.answers ? JSON.parse(snap.answers) : [],
+                isNullId: snap.isNullId ?? false,
+                status: "saved",
+                createdAt: Timestamp.now(),
+                scannedAt: serverTimestamp(),
+              });
+
+              await withTimeout(individualBatch.commit(), 5000);
+
+              // Individual success — clear this specific record
+              realm.write(() => {
+                if (record && record.isValid && record.isValid()) {
+                  realm.delete(record);
+                }
+              });
+              console.log(`[GradeStorageService] Individual sync SUCCESS for student ${snap.studentId}. Record removed from staging.`);
+            } catch (indError: any) {
+              const isPermissionError =
+                indError?.message?.includes("permissions") ||
+                indError?.code === "permission-denied";
+
+              if (isPermissionError) {
+                console.error(
+                  `[GradeStorageService] PERMANENT REJECTION for student ${snap.studentId} (Exam ${snap.examId}): Permission Denied.`,
+                );
+                // Drop it from Realm so it stops blocking the queue
+                realm.write(() => {
+                  if (record && record.isValid && record.isValid()) {
+                    realm.delete(record);
+                  }
+                });
+                // Use snapshotted values — record may already be invalidated here
+                await LogService.error("SYNC_PERMISSION_DENIED", "Record dropped due to missing permissions", {
+                  studentId: snap.studentId,
+                  examId: snap.examId,
+                  scannedBy: snap.scannedBy,
+                });
+              } else {
+                console.warn(
+                  `[GradeStorageService] Individual sync FAILED for ${snap.studentId}:`,
+                  indError?.message,
+                );
+                // For other errors (timeout, etc), keep it in Realm for next retry
+              }
+            }
+          }
+        }
+      }
+      
+      console.log("[GradeStorageService] Sync cycle complete.");
 
       await LogService.info(
-        "OFFLINE_SYNC_SUCCESS",
-        "Offline sync batch complete",
-        {
-          synced: validRecordsToSyncCount,
-          clearedFromRealm: recordsToSync.length,
-        },
+        "OFFLINE_SYNC_CYCLE_COMPLETE",
+        "Offline sync processing attempt finished"
       );
     } catch (error) {
-      // Intentionally DO NOT clear Realm on error
       await LogService.error(
-        "OFFLINE_SYNC_FAILED",
-        "Offline sync batch failed. Realm DB kept intact for future re-try.",
+        "OFFLINE_SYNC_CRITICAL_FAILURE",
+        "Critical error during sync cycle",
         {
           error: error instanceof Error ? error.message : String(error),
-        },
+        }
       );
     }
   }

@@ -206,25 +206,6 @@ export default function HomeScreen() {
     });
   }, [syncBannerOffset, syncBannerOpacity]);
 
-  const handleSyncPress = useCallback(async () => {
-    if (isSyncing || !isOnline) {
-      animateSyncBannerOut();
-      return;
-    }
-    
-    setIsSyncing(true);
-    try {
-      await SyncService.syncPendingUpdates();
-      setTimeout(() => animateSyncBannerOut(), 2000);
-    } catch (error) {
-      console.error("Manual sync failed", error);
-      animateSyncBannerOut();
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [isSyncing, isOnline, animateSyncBannerOut]);
-
-
   const showSyncBannerTemporarily = useCallback(() => {
     setShowSyncBanner(true);
     syncBannerOpacity.setValue(0);
@@ -243,6 +224,32 @@ export default function HomeScreen() {
       }),
     ]).start();
   }, [syncBannerOffset, syncBannerOpacity]);
+
+  const handleSyncPress = useCallback(async () => {
+    if (isSyncing) {
+      console.log("[HomeScreen] Manual sync ignored: Sync is already in progress.");
+      return;
+    }
+    
+    console.log("[HomeScreen] Manual sync triggered by user.");
+    setIsSyncing(true);
+    showSyncBannerTemporarily();
+
+    try {
+      // Pass true to force the sync attempt, ignoring both latency and isOnline checks
+      console.log("[HomeScreen] Calling SyncService.syncPendingUpdates with force=true");
+      const result = await SyncService.syncPendingUpdates(true);
+      console.log(`[HomeScreen] Manual sync completed. Success: ${result.success}, Synced: ${result.syncedCount}, Failed: ${result.failedCount}`);
+      
+      setTimeout(() => animateSyncBannerOut(), 2000);
+    } catch (error) {
+      console.error("[HomeScreen] Manual sync failed unexpectedly:", error);
+      animateSyncBannerOut();
+    } finally {
+      setIsSyncing(false);
+      console.log("[HomeScreen] Manual sync process finished.");
+    }
+  }, [isSyncing, animateSyncBannerOut, showSyncBannerTemporarily]);
 
   useEffect(() => {
     let mounted = true;
@@ -345,9 +352,13 @@ export default function HomeScreen() {
           ResultsService.getUnifiedResults(),
         ]);
 
-        const scanRows = unifiedResults.rows.filter(
-          (item) => item.source === "scan",
-        );
+        const scanRows = unifiedResults.rows
+          .filter((item) => item.source === "scan")
+          .sort((a, b) => {
+            const dateA = new Date(a.dateValue).getTime();
+            const dateB = new Date(b.dateValue).getTime();
+            return dateB - dateA;
+          });
 
         const averageScore =
           scanRows.length > 0
@@ -370,6 +381,8 @@ export default function HomeScreen() {
           };
         });
 
+        const activeClassesCount = classDocs.filter((c) => !c.isArchived).length;
+
         if (!active) {
           return;
         }
@@ -377,7 +390,7 @@ export default function HomeScreen() {
         setStats({
           scans: scanRows.length,
           averageScore,
-          classes: classDocs.length,
+          classes: activeClassesCount,
         });
 
         setRecentScans(
@@ -411,11 +424,22 @@ export default function HomeScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    loadHome();
-    setRefreshing(false);
-  }, [loadHome]);
+    try {
+      if (isOnline) {
+        // Trigger sync but don't let it hang the UI too long
+        // syncPendingUpdates already has internal isSyncing check
+        await SyncService.syncPendingUpdates();
+      }
+      // Re-load all data to reflect synced state
+      await loadHome();
+    } catch (err) {
+      console.error("Refresh error:", err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [isOnline, loadHome]);
 
   useFocusEffect(loadHome);
 
@@ -565,7 +589,7 @@ export default function HomeScreen() {
             <View style={styles.topActions}>
               <TouchableOpacity
                 style={styles.settingsButton}
-                onPress={() => {}}
+                onPress={handleSyncPress}
                 activeOpacity={0.85}
               >
                 <Ionicons name="sync-outline" size={20} color="#111827" />
