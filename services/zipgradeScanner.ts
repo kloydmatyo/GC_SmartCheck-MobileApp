@@ -770,7 +770,7 @@ export class ZipgradeScanner {
       const imgWidth: number = threshJs.cols;
       const imgHeight: number = threshJs.rows;
       const imgArea = imgWidth * imgHeight;
-      const processedImageUri = `data:image/jpeg;base64,${threshJs.base64}`;
+      let processedImageUri = `data:image/jpeg;base64,${threshJs.base64}`;
 
       // ── 4. Find contours ───────────────────────────────────────────────────
       const contoursVec = OpenCV.createObject(ObjectType.MatVector);
@@ -1368,6 +1368,19 @@ export class ZipgradeScanner {
           }
         | undefined = undefined;
 
+      // Bubble overlay from brightness scanner (100q only)
+      let brightnessOverlay100: Array<{
+        px: number;
+        py: number;
+        filled: boolean;
+      }> = [];
+      // Bubble overlay from brightness scanner (150q)
+      let brightnessOverlay150: Array<{
+        px: number;
+        py: number;
+        filled: boolean;
+      }> = [];
+
       // Helper: extract corner markers from regMarks for brightness scanning
       const extractCornerMarkers = () => {
         if (qCount === 200 && strict200Corners) {
@@ -1628,6 +1641,7 @@ export class ZipgradeScanner {
           if (result && result.answers) {
             allAnswers = result.answers;
             studentId = result.studentId || "000000000";
+            brightnessOverlay150 = result.bubbleOverlay || [];
             console.log(
               `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/150 answers, ID: ${studentId}`,
             );
@@ -1689,6 +1703,7 @@ export class ZipgradeScanner {
 
         allAnswers = result.answers;
         studentId = result.studentId;
+        brightnessOverlay100 = result.bubbleOverlay || [];
 
         console.log(
           `[OMR] Brightness scanner detected ${allAnswers.filter((a) => a.selectedAnswer).length}/100 answers, ID: ${studentId}`,
@@ -1756,12 +1771,231 @@ export class ZipgradeScanner {
         );
       }
 
+      // =====================================================================
+      // 🎨 VISUALIZATION LAYER: DRAW BUBBLES AND CORNER MARKERS
+      // All wrapped in try/catch — any failure is silent and non-breaking.
+      // =====================================================================
+      let idRegionImageUri: string | undefined;
+
+      try {
+        const { ObjectType, DataTypes } = OpenCVTypes;
+
+        // 2. Draw Bubbles on the working image
+        const regions = getLayoutRegions(detectedQ);
+
+        // For 100q/150q: use brightness scanner overlay (accurate sampled positions)
+        // For 20q/50q: use OpenCV contour bubbles
+        if (detectedQ === 100 && brightnessOverlay100.length > 0) {
+          const corners = detectedCorners as
+            | {
+                topLeft: { x: number; y: number };
+                topRight: { x: number; y: number };
+                bottomLeft: { x: number; y: number };
+                bottomRight: { x: number; y: number };
+              }
+            | undefined;
+          const frameW = corners
+            ? corners.topRight.x - corners.topLeft.x
+            : paperW;
+          const bubbleRadius = Math.round(
+            Math.max((frameW * (3.5 / 198)) / 2, 6),
+          );
+          for (const b of brightnessOverlay100) {
+            const cx = Math.round(b.px);
+            const cy = Math.round(b.py);
+            const center = OpenCV.createObject(ObjectType.Point, cx, cy);
+            // Green = filled, Blue = empty
+            const color = b.filled
+              ? OpenCV.createObject(ObjectType.Scalar, 0, 255, 0, 255)
+              : OpenCV.createObject(ObjectType.Scalar, 255, 0, 0, 255);
+            OpenCV.invoke(
+              "circle",
+              workingMat,
+              center,
+              bubbleRadius,
+              color,
+              b.filled ? 3 : 2,
+              8,
+            );
+          }
+        } else if (detectedQ === 150 && brightnessOverlay150.length > 0) {
+          const corners = detectedCorners as
+            | {
+                topLeft: { x: number; y: number };
+                topRight: { x: number; y: number };
+                bottomLeft: { x: number; y: number };
+                bottomRight: { x: number; y: number };
+              }
+            | undefined;
+          const frameW = corners
+            ? corners.topRight.x - corners.topLeft.x
+            : paperW;
+          const bubbleRadius = Math.round(
+            Math.max((frameW * (3.5 / 198)) / 2, 6),
+          );
+          for (const b of brightnessOverlay150) {
+            const cx = Math.round(b.px);
+            const cy = Math.round(b.py);
+            const center = OpenCV.createObject(ObjectType.Point, cx, cy);
+            // Green = filled, Blue = empty
+            const color = b.filled
+              ? OpenCV.createObject(ObjectType.Scalar, 0, 255, 0, 255)
+              : OpenCV.createObject(ObjectType.Scalar, 255, 0, 0, 255);
+            OpenCV.invoke(
+              "circle",
+              workingMat,
+              center,
+              bubbleRadius,
+              color,
+              b.filled ? 3 : 2,
+              8,
+            );
+          }
+        } else {
+          for (const b of bubbles) {
+            const px = b.x / paperW;
+            const py = b.y / paperH;
+            let isValid = false;
+
+            for (const r of regions) {
+              if (
+                px >= r.xMin - 0.02 &&
+                px <= r.xMax + 0.02 &&
+                py >= r.yMin - 0.02 &&
+                py <= r.yMax + 0.02
+              ) {
+                isValid = true;
+                break;
+              }
+            }
+
+            if (!isValid) continue;
+
+            // Convert paper-space coords back to image coords for drawing
+            const cx = Math.round(b.x + paperLeft);
+            const cy = Math.round(b.y + paperTop);
+            const radius = Math.round(Math.max(b.w, b.h) / 3) + 3;
+            const isFilled = b.fill >= 0.45;
+
+            const center = OpenCV.createObject(ObjectType.Point, cx, cy);
+            // Green = filled, Blue = empty
+            const color = isFilled
+              ? OpenCV.createObject(ObjectType.Scalar, 0, 255, 0, 255)
+              : OpenCV.createObject(ObjectType.Scalar, 255, 0, 0, 255);
+
+            OpenCV.invoke(
+              "circle",
+              workingMat,
+              center,
+              radius,
+              color,
+              isFilled ? 3 : 2,
+              8,
+            );
+          }
+        }
+
+        // 3. Draw Corner Boxes at paper boundaries
+        const cornerColor = OpenCV.createObject(
+          ObjectType.Scalar,
+          0,
+          255,
+          0,
+          255,
+        );
+        const boxSize = Math.max(
+          20,
+          Math.round(Math.min(imgWidth, imgHeight) * 0.05),
+        );
+        const lineThickness = 5;
+
+        OpenCV.invoke(
+          "rectangle",
+          workingMat,
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperLeft),
+            Math.round(paperTop),
+          ),
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperLeft) + boxSize,
+            Math.round(paperTop) + boxSize,
+          ),
+          cornerColor,
+          lineThickness,
+          8,
+        );
+        OpenCV.invoke(
+          "rectangle",
+          workingMat,
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperRight) - boxSize,
+            Math.round(paperTop),
+          ),
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperRight),
+            Math.round(paperTop) + boxSize,
+          ),
+          cornerColor,
+          lineThickness,
+          8,
+        );
+        OpenCV.invoke(
+          "rectangle",
+          workingMat,
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperLeft),
+            Math.round(paperBottom) - boxSize,
+          ),
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperLeft) + boxSize,
+            Math.round(paperBottom),
+          ),
+          cornerColor,
+          lineThickness,
+          8,
+        );
+        OpenCV.invoke(
+          "rectangle",
+          workingMat,
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperRight) - boxSize,
+            Math.round(paperBottom) - boxSize,
+          ),
+          OpenCV.createObject(
+            ObjectType.Point,
+            Math.round(paperRight),
+            Math.round(paperBottom),
+          ),
+          cornerColor,
+          lineThickness,
+          8,
+        );
+
+        // 5. Re-encode processed image with overlays
+        const finalJs = OpenCV.toJSValue(workingMat, "jpeg") as any;
+        processedImageUri = `data:image/jpeg;base64,${finalJs.base64}`;
+      } catch (vizErr) {
+        console.warn(
+          "[OMR] Visualization overlay failed, continuing with normal output:",
+          vizErr,
+        );
+      }
+      // =====================================================================
+
       return {
         studentId: numericId,
         answers: finalAnswers,
         confidence: 0.95,
         processedImageUri,
         detectedCorners,
+        idRegionImageUri,
       };
     } catch (error) {
       console.error("[OMR] Fatal error:", error);

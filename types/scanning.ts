@@ -20,6 +20,7 @@ export interface ScanResult {
     bottomLeft: { x: number; y: number };
     bottomRight: { x: number; y: number };
   };
+  idRegionImageUri?: string; // Cropped ID region for visual verification
 }
 
 export interface GradingResult {
