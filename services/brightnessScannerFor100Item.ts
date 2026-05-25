@@ -222,8 +222,16 @@ function get100ItemTemplateLayout(physicalChoices: 4 | 5 = 5): TemplateLayout {
   };
 }
 
+// ─── BUBBLE OVERLAY TYPE ───
+export interface BubbleOverlayPoint {
+  px: number;
+  py: number;
+  filled: boolean;
+}
+
 // ─── ANSWER DETECTION ───
 // Detects answers using brightness sampling
+// Also returns bubble overlay points for visualization
 function detectAnswersFromImage(
   pixels: Uint8Array,
   width: number,
@@ -233,8 +241,9 @@ function detectAnswersFromImage(
   numQuestions: number,
   choicesPerQuestion: number,
   enableBlockAutoAlign: boolean,
-): StudentAnswer[] {
+): { answers: StudentAnswer[]; bubbleOverlay: BubbleOverlayPoint[] } {
   const answers: StudentAnswer[] = [];
+  const bubbleOverlay: BubbleOverlayPoint[] = [];
   const choiceLabels = "ABCDE".slice(0, choicesPerQuestion).split("");
 
   const frameW = markers.topRight.x - markers.topLeft.x;
@@ -312,7 +321,12 @@ function detectAnswersFromImage(
 
     for (let q = block.startQ; q <= block.endQ && q <= numQuestions; q++) {
       const rowInBlock = q - block.startQ;
-      const fills: { choice: string; brightness: number }[] = [];
+      const fills: {
+        choice: string;
+        brightness: number;
+        px: number;
+        py: number;
+      }[] = [];
 
       // Sample all choices for this question
       for (let c = 0; c < choicesPerQuestion; c++) {
@@ -328,7 +342,12 @@ function detectAnswersFromImage(
           bubbleRX,
           bubbleRY,
         );
-        fills.push({ choice: choiceLabels[c], brightness });
+        fills.push({
+          choice: choiceLabels[c],
+          brightness,
+          px: px + blockDx,
+          py: py + blockDy,
+        });
       }
 
       // Debug: Log all brightness values for first question in each block
@@ -389,13 +408,19 @@ function detectAnswersFromImage(
         questionNumber: q,
         selectedAnswer: selectedChoice,
       });
+
+      // Collect bubble overlay points for visualization
+      for (const f of fills) {
+        const isFilled = selectedChoice !== "" && f.choice === selectedChoice;
+        bubbleOverlay.push({ px: f.px, py: f.py, filled: isFilled });
+      }
     }
   }
 
   // Sort by question number
   answers.sort((a, b) => a.questionNumber - b.questionNumber);
 
-  return answers;
+  return { answers, bubbleOverlay };
 }
 
 // ─── STUDENT ID DETECTION ───
@@ -516,7 +541,11 @@ export async function scan100ItemWithBrightness(
   markers: Markers,
   choicesPerQuestion: 4 | 5 = 5,
   enableBlockAutoAlign = false,
-): Promise<{ studentId: string; answers: StudentAnswer[] }> {
+): Promise<{
+  studentId: string;
+  answers: StudentAnswer[];
+  bubbleOverlay: BubbleOverlayPoint[];
+}> {
   console.log("[100Q-BRIGHTNESS] Starting brightness-based scanning with Skia");
 
   try {
@@ -570,7 +599,9 @@ export async function scan100ItemWithBrightness(
       enableBlockAutoAlign,
     );
 
-    const detectedCount = answers.filter((a) => a.selectedAnswer).length;
+    const detectedCount = answers.answers.filter(
+      (a) => a.selectedAnswer,
+    ).length;
     console.log(`[100Q-BRIGHTNESS] Detected ${detectedCount}/100 answers`);
 
     // Detect student ID
@@ -582,7 +613,11 @@ export async function scan100ItemWithBrightness(
       studentId = "000000000";
     }
 
-    return { studentId, answers };
+    return {
+      studentId,
+      answers: answers.answers,
+      bubbleOverlay: answers.bubbleOverlay,
+    };
   } catch (error) {
     console.error("[100Q-BRIGHTNESS] Error:", error);
 
@@ -593,6 +628,7 @@ export async function scan100ItemWithBrightness(
         questionNumber: i + 1,
         selectedAnswer: "",
       })),
+      bubbleOverlay: [],
     };
   }
 }
