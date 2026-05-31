@@ -3,12 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import React, { useRef, useState } from "react";
 import {
-    Alert,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import { ScanResult } from "../../types/scanning";
 
@@ -28,7 +28,6 @@ export default function CameraScanner({
   onCancel,
 }: CameraScannerProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const [torch, setTorch] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraRef = useRef<CameraView>(null);
@@ -270,36 +269,7 @@ export default function CameraScanner({
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        enableTorch={torch}
-        flash={torch ? "on" : "off"}
       >
-        {/* Precise Mask (Dims everything outside the border tightly) */}
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          {/* Top Mask - flex: 1 for perfect vertical centering */}
-          <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
-
-          <View
-            style={{ flexDirection: "row", height: frameDimensions.height }}
-          >
-            {/* Left Side Mask */}
-            <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
-
-            {/* Transparent Center Area (Width matches frame) */}
-            <View
-              style={{
-                width: frameDimensions.width,
-                backgroundColor: "transparent",
-              }}
-            />
-
-            {/* Right Side Mask */}
-            <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
-          </View>
-
-          {/* Bottom Mask - flex: 1 for perfect vertical centering */}
-          <View style={{ flex: 1, backgroundColor: "rgba(0, 0, 0, 0.75)" }} />
-        </View>
-
         {/* UI Overlay Layer (Frame and Controls) */}
         <View style={StyleSheet.absoluteFill}>
           {/* Centered Frame Area (Matches Mask Flex above) */}
@@ -382,18 +352,6 @@ export default function CameraScanner({
 
           {/* Controls Panel (Absolute bottom) */}
           <View style={styles.controlsRow}>
-            {/* Flashlight Toggle Button */}
-            <TouchableOpacity
-              style={styles.flashlightButton}
-              onPress={() => setTorch(!torch)}
-            >
-              <Ionicons
-                name={torch ? "flash" : "flash-off"}
-                size={28}
-                color={torch ? "#00FF7F" : "#fff"}
-              />
-            </TouchableOpacity>
-
             {/* Shutter Button */}
             <TouchableOpacity
               style={[
@@ -405,9 +363,6 @@ export default function CameraScanner({
             >
               <View style={styles.shutterInner} />
             </TouchableOpacity>
-
-            {/* Spacer to balance layout */}
-            <View style={styles.flashlightButton} />
           </View>
 
           <Text style={styles.footerText}>
@@ -434,7 +389,7 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
     paddingHorizontal: 40,
   },
   flashlightButton: {
