@@ -33,8 +33,8 @@ import { authService } from "@/services/authService";
 
 export default function SignInScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("user1@gordoncollege.edu.ph");
-  const [password, setPassword] = useState("ccs123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [useFirebase, setUseFirebase] = useState(true);
@@ -137,10 +137,14 @@ export default function SignInScreen() {
       // Preload offline data in the background so it doesn't block login
       const netState = await NetInfo.fetch();
       if (netState.isConnected && netState.isInternetReachable) {
-        import("@/services/syncService").then(({ SyncService }) => {
-          console.log("[GoogleSignIn] Background preloading data...");
-          SyncService.syncPendingUpdates().catch(err => console.warn("[GoogleSignIn] Sync failed:", err));
-        }).catch(err => console.warn("Failed to load SyncService", err));
+        import("@/services/syncService")
+          .then(({ SyncService }) => {
+            console.log("[GoogleSignIn] Background preloading data...");
+            SyncService.syncPendingUpdates().catch((err) =>
+              console.warn("[GoogleSignIn] Sync failed:", err),
+            );
+          })
+          .catch((err) => console.warn("Failed to load SyncService", err));
       }
 
       router.replace("/(tabs)");
@@ -217,10 +221,16 @@ export default function SignInScreen() {
         // 3. Trigger data preload to Realm in the background
         const netState = await NetInfo.fetch();
         if (netState.isConnected && netState.isInternetReachable) {
-          import("@/services/syncService").then(({ SyncService }) => {
-            console.log("[SignIn] Background preloading data for offline use...");
-            SyncService.syncPendingUpdates().catch(err => console.warn("[SignIn] Initial sync failed:", err));
-          }).catch(err => console.warn("Failed to load SyncService", err));
+          import("@/services/syncService")
+            .then(({ SyncService }) => {
+              console.log(
+                "[SignIn] Background preloading data for offline use...",
+              );
+              SyncService.syncPendingUpdates().catch((err) =>
+                console.warn("[SignIn] Initial sync failed:", err),
+              );
+            })
+            .catch((err) => console.warn("Failed to load SyncService", err));
         }
 
         // 3. Navigate to Dashboard

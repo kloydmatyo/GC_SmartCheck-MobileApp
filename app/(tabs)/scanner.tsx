@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from "react";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import ScannerScreen from "../../components/scanner/ScannerScreen";
 
 export default function ScannerTab() {
   const router = useRouter();
-  const { quick, classId, examId } = useLocalSearchParams<{ 
-    quick?: string; 
-    classId?: string; 
-    examId?: string; 
+  const { quick, classId, examId } = useLocalSearchParams<{
+    quick?: string;
+    classId?: string;
+    examId?: string;
   }>();
   const [scannerKey, setScannerKey] = useState(() => Date.now());
 
@@ -21,15 +21,11 @@ export default function ScannerTab() {
     <ScannerScreen
       key={scannerKey}
       onClose={() => {
-        if (router.canGoBack()) {
-          router.back();
-          return;
-        }
         if (classId) {
           router.replace(`/(tabs)/class-details?classId=${classId}&tab=scan`);
           return;
         }
-        router.replace("/(tabs)/index");
+        router.replace("/(tabs)");
       }}
       resetFlag={quick}
       initialClassId={classId}
@@ -37,4 +33,3 @@ export default function ScannerTab() {
     />
   );
 }
-

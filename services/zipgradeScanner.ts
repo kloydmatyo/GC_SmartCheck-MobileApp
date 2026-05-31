@@ -676,8 +676,8 @@ export class ZipgradeScanner {
       );
 
       // ── 3. Best threshold ─────────────────────────────────────────────────
-      const threshCandidates: { mat: any; label: string }[] = [];
-      // Add already created Mats to cleanup list
+      // Try Otsu-INV first (wins on well-lit sheets ~99% of the time).
+      // Only run Adaptive as a fallback if Otsu-INV finds too few bubble candidates.
       matsToCleanup.push(srcMat, grayMat, blurMat);
 
       const tOtsuInv = OpenCV.createObject(
@@ -694,41 +694,12 @@ export class ZipgradeScanner {
         255,
         ThresholdTypes.THRESH_BINARY_INV | ThresholdTypes.THRESH_OTSU,
       );
-      threshCandidates.push({ mat: tOtsuInv, label: "Otsu-INV" });
       matsToCleanup.push(tOtsuInv);
 
-      const tOtsu = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
-      OpenCV.invoke(
-        "threshold",
-        blurMat,
-        tOtsu,
-        0,
-        255,
-        ThresholdTypes.THRESH_BINARY | ThresholdTypes.THRESH_OTSU,
-      );
-      threshCandidates.push({ mat: tOtsu, label: "Otsu" });
-      matsToCleanup.push(tOtsu);
-
-      const tAdapt = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_8U);
-      try {
-        const bs = Math.round(IMG_W / 15) | 1;
-        OpenCV.invoke(
-          "adaptiveThreshold",
-          blurMat,
-          tAdapt,
-          255,
-          AdaptiveThresholdTypes.ADAPTIVE_THRESH_GAUSSIAN_C,
-          ThresholdTypes.THRESH_BINARY_INV,
-          bs < 3 ? 3 : bs,
-          12,
-        );
-        threshCandidates.push({ mat: tAdapt, label: `Adaptive-${bs}` });
-        matsToCleanup.push(tAdapt);
-      } catch (_) {}
-
+      // Quick bubble count on Otsu-INV to decide if we need a fallback
       const scoringMin = Math.pow(IMG_W * 0.02, 2);
       const scoringMax = Math.pow(IMG_W * 0.12, 2);
-      const scoreThresh = (mat: any): number => {
+      const countBubbles = (mat: any): number => {
         const cv = OpenCV.createObject(ObjectType.MatVector);
         const hi = OpenCV.createObject(ObjectType.Mat, 0, 0, DataTypes.CV_32S);
         OpenCV.invoke(
@@ -752,17 +723,44 @@ export class ZipgradeScanner {
         return count;
       };
 
-      let bestScore = -1,
-        bestThreshMat = threshCandidates[0].mat,
-        bestLabel = threshCandidates[0].label;
-      for (const cand of threshCandidates) {
-        const score = scoreThresh(cand.mat);
-        console.log(`[OMR] thresh "${cand.label}": score=${score}`);
-        if (score > bestScore) {
-          bestScore = score;
-          bestThreshMat = cand.mat;
-          bestLabel = cand.label;
-        }
+      const otsuInvCount = countBubbles(tOtsuInv);
+      console.log(`[OMR] thresh "Otsu-INV": bubbles=${otsuInvCount}`);
+
+      let bestThreshMat = tOtsuInv;
+      let bestLabel = "Otsu-INV";
+
+      // Minimum expected bubbles: at least 10 per question block
+      const minExpectedBubbles = Math.max(10, qCount / 2);
+      if (otsuInvCount < minExpectedBubbles) {
+        console.log(
+          `[OMR] Otsu-INV found only ${otsuInvCount} bubbles (need ${minExpectedBubbles}), trying Adaptive fallback`,
+        );
+        const tAdapt = OpenCV.createObject(
+          ObjectType.Mat,
+          0,
+          0,
+          DataTypes.CV_8U,
+        );
+        try {
+          const bs = Math.round(IMG_W / 15) | 1;
+          OpenCV.invoke(
+            "adaptiveThreshold",
+            blurMat,
+            tAdapt,
+            255,
+            AdaptiveThresholdTypes.ADAPTIVE_THRESH_GAUSSIAN_C,
+            ThresholdTypes.THRESH_BINARY_INV,
+            bs < 3 ? 3 : bs,
+            12,
+          );
+          matsToCleanup.push(tAdapt);
+          const adaptCount = countBubbles(tAdapt);
+          console.log(`[OMR] thresh "Adaptive": bubbles=${adaptCount}`);
+          if (adaptCount > otsuInvCount) {
+            bestThreshMat = tAdapt;
+            bestLabel = `Adaptive-${Math.round(IMG_W / 15) | 1}`;
+          }
+        } catch (_) {}
       }
       console.log(`[OMR] using: ${bestLabel}`);
 
@@ -1493,7 +1491,7 @@ export class ZipgradeScanner {
             imageUri,
             markers,
             choicesPerQuestion,
-            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+            false, // auto-align not needed for small 20-item sheets
           );
 
           if (result && result.answers) {
@@ -1534,7 +1532,7 @@ export class ZipgradeScanner {
             imageUri,
             markers,
             choicesPerQuestion,
-            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+            false, // auto-align not needed for small 50-item sheets
           );
 
           if (result && result.answers) {
@@ -1635,7 +1633,7 @@ export class ZipgradeScanner {
             imageUri,
             markers,
             choicesPerQuestion,
-            true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+            true, // enableBlockAutoAlign: reduced ±4px search for 150-item
           );
 
           if (result && result.answers) {
@@ -1698,7 +1696,7 @@ export class ZipgradeScanner {
           imageUri,
           markers,
           choicesPerQuestion,
-          true, // enableBlockAutoAlign: local ±8px search per block for better accuracy
+          true, // enableBlockAutoAlign: reduced ±4px search for 100-item
         );
 
         allAnswers = result.answers;

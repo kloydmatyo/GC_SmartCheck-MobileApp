@@ -274,8 +274,8 @@ function detectAnswersFromImage(
       const probeRows = Math.min(3, block.endQ - block.startQ + 1);
       let bestScore = Number.NEGATIVE_INFINITY;
 
-      for (let dy = -8; dy <= 8; dy += 2) {
-        for (let dx = -8; dx <= 8; dx += 2) {
+      for (let dy = -4; dy <= 4; dy += 2) {
+        for (let dx = -4; dx <= 4; dx += 2) {
           let score = 0;
           for (let row = 0; row < probeRows; row++) {
             const rowFills: number[] = [];
