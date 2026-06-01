@@ -45,45 +45,6 @@ type RecentScan = {
   textColor: string;
 };
 
-const MOCK_RECENT_SCANS: RecentScan[] = [
-  {
-    id: "mock-scan-1",
-    studentName: "Jess Taylor",
-    examLabel: "BSIT 3B - Chapter Test",
-    timeLabel: "12m ago",
-    score: 95,
-    color: "#D8F3E7",
-    textColor: "#20A86B",
-  },
-  {
-    id: "mock-scan-2",
-    studentName: "Sarah Davis",
-    examLabel: "BSIT 3B - Chapter Test",
-    timeLabel: "27m ago",
-    score: 55,
-    color: "#F9D7D9",
-    textColor: "#E24E5C",
-  },
-  {
-    id: "mock-scan-3",
-    studentName: "Marco Reyes",
-    examLabel: "BSCS 2A - Midterm Exam",
-    timeLabel: "1h ago",
-    score: 84,
-    color: "#F5E8B8",
-    textColor: "#D68B11",
-  },
-  {
-    id: "mock-scan-4",
-    studentName: "Nina Flores",
-    examLabel: "BSCS 2A - Midterm Exam",
-    timeLabel: "2h ago",
-    score: 91,
-    color: "#D8F3E7",
-    textColor: "#20A86B",
-  },
-];
-
 const emptyStats: SummaryStats = {
   scans: 0,
   averageScore: 0,
@@ -183,9 +144,7 @@ export default function HomeScreen() {
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
   const [showSyncBanner, setShowSyncBanner] = useState(false);
   const lastShownSyncAtRef = React.useRef<number | null>(null);
-  const displayRecentScans = recentScans.length
-    ? recentScans
-    : MOCK_RECENT_SCANS;
+  const displayRecentScans = recentScans;
 
   const animateSyncBannerOut = useCallback(() => {
     Animated.parallel([
@@ -227,20 +186,26 @@ export default function HomeScreen() {
 
   const handleSyncPress = useCallback(async () => {
     if (isSyncing) {
-      console.log("[HomeScreen] Manual sync ignored: Sync is already in progress.");
+      console.log(
+        "[HomeScreen] Manual sync ignored: Sync is already in progress.",
+      );
       return;
     }
-    
+
     console.log("[HomeScreen] Manual sync triggered by user.");
     setIsSyncing(true);
     showSyncBannerTemporarily();
 
     try {
       // Pass true to force the sync attempt, ignoring both latency and isOnline checks
-      console.log("[HomeScreen] Calling SyncService.syncPendingUpdates with force=true");
+      console.log(
+        "[HomeScreen] Calling SyncService.syncPendingUpdates with force=true",
+      );
       const result = await SyncService.syncPendingUpdates(true);
-      console.log(`[HomeScreen] Manual sync completed. Success: ${result.success}, Synced: ${result.syncedCount}, Failed: ${result.failedCount}`);
-      
+      console.log(
+        `[HomeScreen] Manual sync completed. Success: ${result.success}, Synced: ${result.syncedCount}, Failed: ${result.failedCount}`,
+      );
+
       setTimeout(() => animateSyncBannerOut(), 2000);
     } catch (error) {
       console.error("[HomeScreen] Manual sync failed unexpectedly:", error);
@@ -381,7 +346,9 @@ export default function HomeScreen() {
           };
         });
 
-        const activeClassesCount = classDocs.filter((c) => !c.isArchived).length;
+        const activeClassesCount = classDocs.filter(
+          (c) => !c.isArchived,
+        ).length;
 
         if (!active) {
           return;

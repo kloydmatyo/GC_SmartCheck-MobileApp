@@ -143,30 +143,30 @@ export default function CameraScanner({
       const width = 105;
       const height = 148.5;
       return [
-        { x: 6 / width, y: 6 / height, label: "TL" },
-        { x: (width - 6) / width, y: 6 / height, label: "TR" },
-        { x: 6 / width, y: (height - 6) / height, label: "BL" },
-        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+        { x: 5 / width, y: 5 / height, label: "TL" },
+        { x: (width - 9) / width, y: 5 / height, label: "TR" },
+        { x: 5 / width, y: (height - 9) / height, label: "BL" },
+        { x: (width - 9) / width, y: (height - 9) / height, label: "BR" },
       ];
     } else if (questionCount <= 50) {
       // 50-item: half-page landscape — 210mm × 148.5mm
       const width = 210;
       const height = 148.5;
       return [
-        { x: 6 / width, y: 6 / height, label: "TL" },
-        { x: (width - 6) / width, y: 6 / height, label: "TR" },
-        { x: 6 / width, y: (height - 6) / height, label: "BL" },
-        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+        { x: 10 / width, y: 9 / height, label: "TL" },
+        { x: (width - 12) / width, y: 9 / height, label: "TR" },
+        { x: 10 / width, y: (height - 10) / height, label: "BL" },
+        { x: (width - 12) / width, y: (height - 10) / height, label: "BR" },
       ];
     } else {
       // 100-item / 200-item: full A4 portrait — 210mm × 297mm
       const width = 210;
       const height = 297;
       return [
-        { x: 6 / width, y: 6 / height, label: "TL" },
-        { x: (width - 6) / width, y: 6 / height, label: "TR" },
-        { x: 6 / width, y: (height - 6) / height, label: "BL" },
-        { x: (width - 6) / width, y: (height - 6) / height, label: "BR" },
+        { x: 10 / width, y: 9 / height, label: "TL" },
+        { x: (width - 12) / width, y: 9 / height, label: "TR" },
+        { x: 10 / width, y: (height - 15) / height, label: "BL" },
+        { x: (width - 12) / width, y: (height - 15) / height, label: "BR" },
       ];
     }
   };
@@ -295,23 +295,28 @@ export default function CameraScanner({
               </View>
 
               {/* Expected Corner Marker Positions (Green Squares) */}
-              {expectedCorners.map((corner, i) => (
-                <View
-                  key={`corner-${i}`}
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    left: corner.x * frameDimensions.width - 8,
-                    top: corner.y * frameDimensions.height - 8,
-                    width: 16,
-                    height: 16,
-                    backgroundColor: "rgba(0, 255, 0, 0.7)",
-                    borderWidth: 2,
-                    borderColor: "#FFFFFF",
-                    borderRadius: 2,
-                  }}
-                />
-              ))}
+              {(() => {
+                const markerSize =
+                  questionCount <= 20 ? 16 : questionCount <= 50 ? 14 : 14;
+                const offset = markerSize / 2;
+                return expectedCorners.map((corner, i) => (
+                  <View
+                    key={`corner-${i}`}
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      left: corner.x * frameDimensions.width - offset,
+                      top: corner.y * frameDimensions.height - offset,
+                      width: markerSize,
+                      height: markerSize,
+                      backgroundColor: "rgba(0, 255, 0, 0.3)",
+                      borderWidth: 2,
+                      borderColor: "#FFFFFF",
+                      borderRadius: 2,
+                    }}
+                  />
+                ));
+              })()}
 
               {/* Corner Markers */}
               <View style={[styles.corner, styles.topLeft]} />
