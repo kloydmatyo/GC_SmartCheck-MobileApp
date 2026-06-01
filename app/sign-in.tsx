@@ -402,11 +402,6 @@ export default function SignInScreen() {
                 </View>
               </View>
 
-              {/* Forgot Password */}
-              <TouchableOpacity style={styles.forgotPassword}>
-                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-              </TouchableOpacity>
-
               {/* Sign In Button */}
               <TouchableOpacity
                 style={[
@@ -441,21 +436,6 @@ export default function SignInScreen() {
                 <Text style={styles.googleButtonText}>
                   Continue with Google
                 </Text>
-              </TouchableOpacity>
-
-              {/* Test Accounts Button */}
-              <TouchableOpacity
-                style={styles.testAccountsButton}
-                onPress={showDummyAccounts}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name="key"
-                  size={18}
-                  color="#fff"
-                  style={{ marginRight: 8 }}
-                />
-                <Text style={styles.testAccountsText}>View Test Accounts</Text>
               </TouchableOpacity>
 
               {/* Sign Up Link */}

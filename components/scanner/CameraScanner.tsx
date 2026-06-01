@@ -143,10 +143,10 @@ export default function CameraScanner({
       const width = 105;
       const height = 148.5;
       return [
-        { x: 5 / width, y: 5 / height, label: "TL" },
-        { x: (width - 9) / width, y: 5 / height, label: "TR" },
-        { x: 5 / width, y: (height - 9) / height, label: "BL" },
-        { x: (width - 9) / width, y: (height - 9) / height, label: "BR" },
+        { x: 7 / width, y: 6 / height, label: "TL" },
+        { x: (width - 9) / width, y: 6 / height, label: "TR" },
+        { x: 7 / width, y: (height - 7) / height, label: "BL" },
+        { x: (width - 9) / width, y: (height - 7) / height, label: "BR" },
       ];
     } else if (questionCount <= 50) {
       // 50-item: half-page landscape — 210mm × 148.5mm
@@ -305,7 +305,7 @@ export default function CameraScanner({
               {/* Expected Corner Marker Positions (Green Squares) */}
               {(() => {
                 const markerSize =
-                  questionCount <= 20 ? 16 : questionCount <= 50 ? 14 : 14;
+                  questionCount <= 20 ? 25 : questionCount <= 50 ? 14 : 14;
                 const offset = markerSize / 2;
                 return expectedCorners.map((corner, i) => (
                   <View
