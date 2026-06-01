@@ -2,9 +2,9 @@ import ConfirmationModal from "@/components/common/ConfirmationModal";
 import StatusModal from "@/components/common/StatusModal";
 import { auth, db } from "@/config/firebase";
 import { DARK_MODE_STORAGE_KEY } from "@/constants/preferences";
+import { ExamService } from "@/services/examService";
 import { NetworkService } from "@/services/networkService";
 import { OfflineStorageService } from "@/services/offlineStorageService";
-import { ExamService } from "@/services/examService";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
@@ -22,7 +22,13 @@ import {
   serverTimestamp,
   where,
 } from "firebase/firestore";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -96,9 +102,9 @@ const QuestionRow = React.memo(
                   ? "#14925F"
                   : isUnanswered
                     ? "#DC2626"
-                  : darkModeEnabled
-                    ? "#e7f1eb"
-                    : "#98A1B2",
+                    : darkModeEnabled
+                      ? "#e7f1eb"
+                      : "#98A1B2",
               },
             ]}
           >
@@ -171,8 +177,8 @@ export default function EditAnswerKeyScreen() {
   const goBack = () =>
     classId
       ? router.replace(
-        `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
-      )
+          `/(tabs)/class-details?classId=${classId}&tab=${returnTab}`,
+        )
       : router.replace("/");
 
   const [loading, setLoading] = useState(true);
@@ -197,8 +203,12 @@ export default function EditAnswerKeyScreen() {
   const [exitIncompleteConfirmVisible, setExitIncompleteConfirmVisible] =
     useState(false);
   const [exitIncompleteCount, setExitIncompleteCount] = useState(0);
-  const [highlightedQuestionNumber, setHighlightedQuestionNumber] = useState<number | null>(null);
-  const [pendingJumpQuestionNumber, setPendingJumpQuestionNumber] = useState<number | null>(null);
+  const [highlightedQuestionNumber, setHighlightedQuestionNumber] = useState<
+    number | null
+  >(null);
+  const [pendingJumpQuestionNumber, setPendingJumpQuestionNumber] = useState<
+    number | null
+  >(null);
   const saveLockRef = useRef(false);
   const questionListRef = useRef<FlatList<QuestionAnswer> | null>(null);
   const unsubscribeRef = useRef<(() => void) | null>(null);
@@ -291,7 +301,7 @@ export default function EditAnswerKeyScreen() {
           await loadAnswerKey();
         }
       })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [examId]),
   );
 
@@ -302,26 +312,26 @@ export default function EditAnswerKeyScreen() {
     });
 
     // Check initial state
-    NetworkService.isOnline().then(online => setIsOffline(!online));
+    NetworkService.isOnline().then((online) => setIsOffline(!online));
 
     return unsubscribe;
   }, []);
 
   const colors = darkModeEnabled
     ? {
-      bg: "#111815",
-      headerBg: "#1a2520",
-      cardBg: "#1f2b26",
-      border: "#34483f",
-      title: "#e7f1eb",
-    }
+        bg: "#111815",
+        headerBg: "#1a2520",
+        cardBg: "#1f2b26",
+        border: "#34483f",
+        title: "#e7f1eb",
+      }
     : {
-      bg: "#f5f5f5",
-      headerBg: "#ffffff",
-      cardBg: "#ffffff",
-      border: "#e0e0e0",
-      title: "#333333",
-    };
+        bg: "#f5f5f5",
+        headerBg: "#ffffff",
+        cardBg: "#ffffff",
+        border: "#e0e0e0",
+        title: "#333333",
+      };
 
   useEffect(() => {
     if (!answerKeyId || isOffline) return;
@@ -370,9 +380,9 @@ export default function EditAnswerKeyScreen() {
   ): QuestionAnswer[] => {
     const settingsAnswers = Array.isArray(data.questionSettings)
       ? data.questionSettings
-        .slice()
-        .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
-        .map((q: any) => String(q.correctAnswer ?? ""))
+          .slice()
+          .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
+          .map((q: any) => String(q.correctAnswer ?? ""))
       : [];
 
     const numericAnswers = Object.keys(data)
@@ -480,13 +490,18 @@ export default function EditAnswerKeyScreen() {
           if (examSnap.exists()) {
             const raw = examSnap.data() as Record<string, any>;
             const fromExamDoc = Number(
-              raw.choices_per_item ?? raw.choicesPerItem ?? resolvedChoicesPerItem,
+              raw.choices_per_item ??
+                raw.choicesPerItem ??
+                resolvedChoicesPerItem,
             );
             resolvedChoicesPerItem = fromExamDoc === 5 ? 5 : 4;
             const fromExamQuestionCount = Number(
               raw.num_items ?? raw.numItems ?? raw.questionCount ?? numItems,
             );
-            if (Number.isFinite(fromExamQuestionCount) && fromExamQuestionCount > 0) {
+            if (
+              Number.isFinite(fromExamQuestionCount) &&
+              fromExamQuestionCount > 0
+            ) {
               numItems = fromExamQuestionCount;
             }
           }
@@ -516,7 +531,8 @@ export default function EditAnswerKeyScreen() {
             // Pick the highest-version doc
             let best = akSnap.docs[0];
             akSnap.docs.slice(1).forEach((d) => {
-              if ((d.data().version ?? 0) > (best.data().version ?? 0)) best = d;
+              if ((d.data().version ?? 0) > (best.data().version ?? 0))
+                best = d;
             });
             const akData = best.data();
             freshAkId = best.id;
@@ -524,7 +540,10 @@ export default function EditAnswerKeyScreen() {
 
             if (Array.isArray(akData.answers) && akData.answers.length > 0) {
               freshAnswers = akData.answers as string[];
-            } else if (Array.isArray(akData.questionSettings) && akData.questionSettings.length > 0) {
+            } else if (
+              Array.isArray(akData.questionSettings) &&
+              akData.questionSettings.length > 0
+            ) {
               freshAnswers = (akData.questionSettings as any[])
                 .slice()
                 .sort((a: any, b: any) => a.questionNumber - b.questionNumber)
@@ -532,7 +551,10 @@ export default function EditAnswerKeyScreen() {
             }
           }
         } catch (akErr) {
-          console.warn("[EditAnswerKey] Direct Firestore answer key fetch failed, using cached:", akErr);
+          console.warn(
+            "[EditAnswerKey] Direct Firestore answer key fetch failed, using cached:",
+            akErr,
+          );
           // Fall back to whatever ExamService already loaded
           freshAnswers = examData.answerKey?.answers ?? [];
         }
@@ -543,7 +565,9 @@ export default function EditAnswerKeyScreen() {
 
       if (
         resolvedChoicesPerItem === 4 &&
-        freshAnswers.some((answer) => String(answer).trim().toUpperCase() === "E")
+        freshAnswers.some(
+          (answer) => String(answer).trim().toUpperCase() === "E",
+        )
       ) {
         resolvedChoicesPerItem = 5;
       }
@@ -561,7 +585,6 @@ export default function EditAnswerKeyScreen() {
       setRemoteVersion(freshVersion);
       setConflictDetected(false);
       setHasLocalChanges(false);
-
     } catch (error) {
       console.error("[EditAnswerKey] Load error:", error);
       setStatusModal({
@@ -586,19 +609,20 @@ export default function EditAnswerKeyScreen() {
     }
   }, [loadAnswerKey, refreshing, saving]);
 
-  const handleAnswerSelect = useCallback((questionNumber: number, answer: string) => {
-    setHasLocalChanges(true);
-    setAnswers((prev) =>
-      prev.map((item) =>
-        item.questionNumber === questionNumber ? { ...item, answer } : item,
-      ),
-    );
-  }, []);
+  const handleAnswerSelect = useCallback(
+    (questionNumber: number, answer: string) => {
+      setHasLocalChanges(true);
+      setAnswers((prev) =>
+        prev.map((item) =>
+          item.questionNumber === questionNumber ? { ...item, answer } : item,
+        ),
+      );
+    },
+    [],
+  );
 
   const getUnansweredQuestions = () =>
-    answers
-      .filter((item) => !item.answer)
-      .map((item) => item.questionNumber);
+    answers.filter((item) => !item.answer).map((item) => item.questionNumber);
 
   const handleAttemptExit = () => {
     if (saving || saveLockRef.current) return;
@@ -638,13 +662,17 @@ export default function EditAnswerKeyScreen() {
 
       // Handle Staging IDs directly
       if (examId?.startsWith("staging_")) {
-        await ExamService.updateAnswerKey(examId as string, answers.map(a => a.answer));
+        await ExamService.updateAnswerKey(
+          examId as string,
+          answers.map((a) => a.answer),
+        );
         setHasLocalChanges(false);
         setStatusModal({
           visible: true,
           type: "success",
           title: "Saved Offline",
-          message: "Answer key saved to local staging. It will sync when you are online.",
+          message:
+            "Answer key saved to local staging. It will sync when you are online.",
           onClose: goBack,
         });
         return;
@@ -749,9 +777,9 @@ export default function EditAnswerKeyScreen() {
           // answers array — required by the web app's AnswerKeyService
           answers: answers.map((item) => item.answer),
           questionSettings: answers.map((item) => {
-            const existingSetting = (answerKeySnap.data()?.questionSettings || []).find(
-              (q: any) => q.questionNumber === item.questionNumber
-            );
+            const existingSetting = (
+              answerKeySnap.data()?.questionSettings || []
+            ).find((q: any) => q.questionNumber === item.questionNumber);
             return {
               questionNumber: item.questionNumber,
               correctAnswer: item.answer,
@@ -1367,7 +1395,9 @@ export default function EditAnswerKeyScreen() {
                       onPress={() => handleJumpToQuestion(questionNumber)}
                       activeOpacity={0.85}
                     >
-                      <Text style={styles.unansweredChipText}>{questionNumber}</Text>
+                      <Text style={styles.unansweredChipText}>
+                        {questionNumber}
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -1539,11 +1569,7 @@ const styles = StyleSheet.create({
   questionNumberWrapHighlighted: {
     backgroundColor: "#EAF7F0",
   },
-  questionNumberWrapUnanswered: {
-    backgroundColor: "#FEE2E2",
-    borderWidth: 1,
-    borderColor: "#FCA5A5",
-  },
+  questionNumberWrapUnanswered: {},
   questionNumber: {
     fontSize: 24,
     lineHeight: 28,
