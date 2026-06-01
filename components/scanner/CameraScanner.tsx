@@ -193,17 +193,25 @@ export default function CameraScanner({
         return;
       }
 
-      // Enforce portrait-only captures for 200-item sheets.
-      // The 2-page 200-item template mapping expects portrait orientation.
+      // Enforce portrait-only captures for all sheet types.
       if (
-        questionCount === 200 &&
         typeof photo.width === "number" &&
         typeof photo.height === "number" &&
         photo.width > photo.height
       ) {
+        const label =
+          questionCount <= 20
+            ? "20-item"
+            : questionCount <= 50
+              ? "50-item"
+              : questionCount <= 100
+                ? "100-item"
+                : questionCount <= 150
+                  ? "150-item"
+                  : "200-item";
         Alert.alert(
           "Portrait Mode Required",
-          "Please hold your phone in portrait orientation when scanning 200-item exams, then retake the photo.",
+          `Please hold your phone in portrait orientation when scanning ${label} exams, then retake the photo.`,
         );
         return;
       }
