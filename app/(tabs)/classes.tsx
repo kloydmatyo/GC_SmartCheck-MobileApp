@@ -572,7 +572,6 @@ export default function ClassesScreen() {
         text2: `${classItem.class_name} moved to Archived`,
       });
       await loadClasses();
-      router.push("/(tabs)/batch-history");
     } catch (error) {
       console.warn(
         "Archive class failed:",

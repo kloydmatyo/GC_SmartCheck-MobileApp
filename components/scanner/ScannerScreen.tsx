@@ -3,25 +3,25 @@ import NetInfo from "@react-native-community/netinfo";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { useState } from "react";
 import {
-    Alert,
-    Image,
-    Modal,
-    Platform,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    ActivityIndicator,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Toast from "react-native-toast-message";
 import { db } from "../../config/firebase";
 import { ClassService } from "../../services/classService";
 import {
-    DuplicateScoreDetectionService,
-    DuplicateScoreMatch,
+  DuplicateScoreDetectionService,
+  DuplicateScoreMatch,
 } from "../../services/duplicateScoreDetectionService";
 import { GradeStorageService } from "../../services/gradeStorageService";
 import { GradingService } from "../../services/gradingService";
@@ -207,7 +207,7 @@ export default function ScannerScreen({
     const fetchClasses = async () => {
       try {
         const cls = await ClassService.getClassesByUser();
-        setClassesList(cls);
+        setClassesList(cls.filter((c: any) => !c.isArchived));
 
         // Handle pre-selection if initialClassId is provided
         if (initialClassId) {
@@ -235,9 +235,11 @@ export default function ScannerScreen({
       try {
         const { ExamService } = await import("../../services/examService");
         const list = await ExamService.getExamsByUser();
-        
-        // Filter by classId
-        const filtered = list.filter((ex: any) => ex.classId === selectedClass.id);
+
+        // Filter by classId, exclude archived exams
+        const filtered = list.filter(
+          (ex: any) => ex.classId === selectedClass.id && !ex.isArchived,
+        );
         setExamsList(filtered);
 
         // Handle pre-selection of exam if initialExamId is provided
@@ -552,8 +554,11 @@ export default function ScannerScreen({
 
       // Await Firestore/Realm save to show loading
       try {
-        const saveResult = await GradeStorageService.saveGradingResult(result, activeExamId);
-        
+        const saveResult = await GradeStorageService.saveGradingResult(
+          result,
+          activeExamId,
+        );
+
         if (saveResult.status === "saved") {
           Toast.show({
             type: "success",
@@ -719,9 +724,17 @@ export default function ScannerScreen({
     if (saveResult.status === "saved") {
       Toast.show({ type: "success", text1: "Saved Successfully" });
     } else if (saveResult.status === "retake") {
-      Toast.show({ type: "info", text1: "Retake Exam Marked", text2: "Saved Successfully" });
+      Toast.show({
+        type: "info",
+        text1: "Retake Exam Marked",
+        text2: "Saved Successfully",
+      });
     } else if (saveResult.status === "duplicate") {
-      Toast.show({ type: "error", text1: "Duplicate Scan", text2: "This exact paper was already scanned." });
+      Toast.show({
+        type: "error",
+        text1: "Duplicate Scan",
+        text2: "This exact paper was already scanned.",
+      });
     } else if (saveResult.status === "pending") {
       Toast.show({ type: "info", text1: "Saved Locally (Realm)" });
     } else {
@@ -730,7 +743,6 @@ export default function ScannerScreen({
         text1: "Still Failing",
         text2: saveResult.message,
       });
-
     }
   };
 
@@ -995,22 +1007,22 @@ export default function ScannerScreen({
             {manualIdModal.pendingScan?.idRegionImageUri && (
               <View
                 style={{
-                  backgroundColor: '#000',
+                  backgroundColor: "#000",
                   borderRadius: 12,
-                  overflow: 'hidden',
+                  overflow: "hidden",
                   marginBottom: 16,
                 }}
               >
                 <Image
                   source={{ uri: manualIdModal.pendingScan.idRegionImageUri }}
-                  style={{ width: '100%', height: 120 }}
+                  style={{ width: "100%", height: 120 }}
                   resizeMode="contain"
                 />
                 <Text
                   style={{
-                    color: '#aaa',
+                    color: "#aaa",
                     fontSize: 11,
-                    textAlign: 'center',
+                    textAlign: "center",
                     padding: 6,
                   }}
                 >
